@@ -7,6 +7,8 @@
     flake-utils.url = "github:numtide/flake-utils";
   };
 
+  # change to trigger ci
+
   outputs =
     { self, nixpkgs, ... }@inputs:
     inputs.flake-utils.lib.eachDefaultSystem (
