@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 description = "Circuit Breaker Labs command-line interface"
 repository = "https://github.com/circuitbreakerlabs/cli"
+documentation = "https://api.circuitbreakerlabs.ai/v1/docs"
 
 [[bin]]
 name = "cbl"
