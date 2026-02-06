@@ -34,7 +34,7 @@ jobs:
   detect_changes_rust:
     runs-on: ubuntu-latest
     outputs:
-      cargo_files: ${{ steps.filter.outputs.cargo_files }}
+      rust_files: ${{ steps.filter.outputs.rust_files }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -45,14 +45,14 @@ jobs:
         uses: dorny/paths-filter@v3
         with:
           filters: |
-            cargo_files:
+            rust_files:
               - '**/*.rs'
               - 'Cargo.lock'
               - 'Cargo.toml'
 
   nix:
     needs: [detect_changes_nix, detect_changes_rust]
-    if: needs.detect_changes_nix.outputs.nix_files == 'true' || needs.detect_changes_rust.outputs.cargo_files == 'true'
+    if: needs.detect_changes_nix.outputs.nix_files == 'true' || needs.detect_changes_rust.outputs.rust_files == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -79,7 +79,7 @@ jobs:
 
   rust:
     needs: detect_changes_rust
-    if: needs.detect_changes_rust.outputs.cargo_files == 'true'
+    if: needs.detect_changes_rust.outputs.rust_files == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
