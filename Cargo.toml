@@ -1,0 +1,12 @@
+[package]
+name = "circuit-breaker-labs"
+version = "0.1.0"
+edition = "2024"
+description = "Circuit Breaker Labs command-line interface"
+repository = "https://github.com/circuitbreakerlabs/cli"
+
+[[bin]]
+name = "cbl"
+path = "./src/main.rs"
+
+[dependencies]
