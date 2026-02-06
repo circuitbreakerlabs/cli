@@ -1,0 +1,106 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: write
+
+jobs:
+  detect_changes_nix:
+    runs-on: ubuntu-latest
+    outputs:
+      nix_files: ${{ steps.filter.outputs.nix_files }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Detect Nix file changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            nix_files:
+              - '**/*.nix'
+              - 'flake.nix'
+              - 'flake.lock'
+
+  detect_changes_rust:
+    runs-on: ubuntu-latest
+    outputs:
+      rust_files: ${{ steps.filter.outputs.rust_files }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Detect Cargo file changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            rust_files:
+              - '**/*.rs'
+              - 'Cargo.lock'
+              - 'Cargo.toml'
+
+  nix:
+    needs: [detect_changes_nix, detect_changes_rust]
+    if: needs.detect_changes_nix.outputs.nix_files == 'true' || needs.detect_changes_rust.outputs.rust_files == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: nixbuild/nix-quick-install-action@v34
+
+      - name: Cache Nix store
+        uses: nix-community/cache-nix-action@v6
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 2G
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-created: 0
+          purge-primary-key: never
+
+      - name: Build with Nix
+        run: nix build
+
+  rust:
+    needs: detect_changes_rust
+    if: needs.detect_changes_rust.outputs.rust_files == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/registry
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-registry-${{ runner.os }}-
+
+      - name: Cache build artifacts
+        uses: actions/cache@v5
+        with:
+          path: target
+          key: cargo-build-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-build-${{ runner.os }}-
+
+      - name: Build with Cargo
+        run: cargo build --release
