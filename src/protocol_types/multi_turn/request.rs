@@ -1,5 +1,13 @@
 use super::super::common::TestCaseGroup;
 use serde::{Deserialize, Serialize};
+use strum::EnumString;
+
+#[derive(Debug, Clone, Serialize, Deserialize, EnumString)]
+#[serde(rename_all = "snake_case")]
+pub enum MultiTurnTestType {
+    UserPersona,
+    SemanticChunks,
+}
 
 /// Payload for `MultiTurnRequest` messages (Client -> Server).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -11,7 +19,7 @@ pub struct MultiTurnRequestObject {
     /// Test case categories to evaluate
     pub test_case_groups: Vec<TestCaseGroup>,
     /// Types of multi-turn tests to run
-    pub test_types: Vec<String>,
+    pub test_types: Vec<MultiTurnTestType>,
 }
 
 /// Client initiates a multi-turn conversational evaluation session.
