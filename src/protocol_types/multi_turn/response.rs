@@ -1,4 +1,4 @@
-use super::super::common::{Message, TestCaseGroup};
+use super::super::common::Message;
 use serde::{Deserialize, Serialize};
 
 /// Details of a failed multi-turn conversation.

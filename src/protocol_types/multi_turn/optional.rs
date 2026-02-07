@@ -1,4 +1,3 @@
-use super::super::common::{Message, TestCaseGroup};
 use serde::{Deserialize, Serialize};
 
 /// Payload for conversation_complete messages (Server -> Client).

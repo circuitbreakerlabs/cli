@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use super::super::common::TestCaseGroup;
-
 /// Payload for iteration_start messages (Server -> Client).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IterationStartObject {
