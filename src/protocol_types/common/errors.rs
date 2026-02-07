@@ -12,10 +12,10 @@ pub enum CompletionErrorCode {
     Unknown,
 }
 
-/// Payload for completion_error messages (Client -> Server).
+/// Payload for `CompletionError` messages (Client -> Server).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompletionErrorObject {
-    /// Must match the ID from the corresponding CompletionRequest
+    /// Must match the ID from the corresponding `CompletionRequest`
     pub request_id: String,
     /// Machine-readable error code
     pub error_code: CompletionErrorCode,

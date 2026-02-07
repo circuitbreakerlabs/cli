@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::super::common::TestCaseGroup;
 
-/// Payload for single_turn_request messages (Client -> Server).
+/// Payload for `SingleTurnRequest` messages (Client -> Server).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SingleTurnRequestObject {
     /// Safety threshold parameter

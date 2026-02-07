@@ -1,7 +1,7 @@
 use super::super::common::TestCaseGroup;
 use serde::{Deserialize, Serialize};
 
-/// Payload for multi_turn_request messages (Client -> Server).
+/// Payload for `MultiTurnRequest` messages (Client -> Server).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MultiTurnRequestObject {
     /// Safety threshold parameter

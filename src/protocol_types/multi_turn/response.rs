@@ -12,7 +12,7 @@ pub struct FailedMultiTurnResult {
     pub conversation: Vec<Message>,
 }
 
-/// Payload for multi_turn_response messages (Server -> Client).
+/// Payload for `MultiTurnResponse` messages (Server -> Client).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MultiTurnResponseObject {
     /// Number of conversations that passed

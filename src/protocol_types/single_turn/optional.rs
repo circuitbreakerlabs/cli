@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// Payload for iteration_start messages (Server -> Client).
+/// Payload for `IterationStart` messages (Server -> Client).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IterationStartObject {
     /// Current iteration index
@@ -19,7 +19,7 @@ pub struct IterationStart {
     pub object: IterationStartObject,
 }
 
-/// Payload for iteration_complete messages (Server -> Client).
+/// Payload for `IterationComplete` messages (Server -> Client).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IterationCompleteObject {
     /// Completed iteration index

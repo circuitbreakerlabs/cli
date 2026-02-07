@@ -19,7 +19,7 @@ pub struct Message {
     pub content: String,
 }
 
-/// Payload for completion_request messages (Server -> Client).
+/// Payload for `CompletionRequest` messages (Server -> Client).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompletionRequestObject {
     /// Unique identifier for this completion request (UUID recommended)
@@ -40,10 +40,10 @@ pub struct CompletionRequest {
     pub object: CompletionRequestObject,
 }
 
-/// Payload for completion_response messages (Client -> Server).
+/// Payload for `CompletionResponse` messages (Client -> Server).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompletionResponseObject {
-    /// Must match the ID from the corresponding CompletionRequest
+    /// Must match the ID from the corresponding `CompletionRequest`
     pub request_id: String,
     /// The model's generated response
     pub model_response: String,

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// Payload for unsafe_message messages (Server -> Client).
+/// Payload for `UnsafeMessage` messages (Server -> Client).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnsafeMessageObject {
     /// Identifier for the completion request that failed safety checks

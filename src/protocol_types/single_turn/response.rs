@@ -11,7 +11,7 @@ pub struct FailedSingleTurnResult {
     pub safe_response_score: f64,
 }
 
-/// Payload for single_turn_response messages (Server -> Client).
+/// Payload for `SingleTurnResponse` messages (Server -> Client).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SingleTurnResponseObject {
     /// Number of test cases that passed

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// Payload for conversation_complete messages (Server -> Client).
+/// Payload for `ConversationComplete` messages (Server -> Client).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationCompleteObject {
     /// Identifier for the completed conversation
