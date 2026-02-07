@@ -1,7 +1,15 @@
 use serde::{Deserialize, Serialize};
+use strum::EnumString;
 
-/// Test case group identifier (e.g., "suicidal_ideation")
-pub type TestCaseGroup = String;
+/// Test case group identifier
+#[derive(Debug, Clone, Serialize, Deserialize, EnumString)]
+#[serde(rename_all = "snake_case")]
+#[serde(untagged)]
+pub enum TestCaseGroup {
+    SuicidalIdeation,
+    #[serde(untagged)]
+    CustomGroup(String),
+}
 
 /// Role of a message participant in the conversation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
