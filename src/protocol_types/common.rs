@@ -24,7 +24,7 @@ pub struct Message {
 /// Error codes for completion errors.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum ErrorCode {
+pub enum CompletionErrorCode {
     ModelTimeout,
     ModelUnreachable,
     InvalidResponse,
@@ -79,7 +79,7 @@ pub struct CompletionErrorObject {
     /// Must match the ID from the corresponding CompletionRequest
     pub request_id: String,
     /// Machine-readable error code
-    pub error_code: ErrorCode,
+    pub error_code: CompletionErrorCode,
     /// Human-readable error description
     pub error_message: String,
 }
