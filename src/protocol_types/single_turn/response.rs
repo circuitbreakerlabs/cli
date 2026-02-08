@@ -11,9 +11,9 @@ pub struct FailedSingleTurnResult {
     pub safe_response_score: f64,
 }
 
-/// Payload for `SingleTurnResponse` messages (Server -> Client).
+/// Payload for `SingleTurnResponseEnvelope` messages (Server -> Client).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SingleTurnResponseObject {
+pub struct SingleTurnResponse {
     /// Number of test cases that passed
     pub total_passed: i32,
     /// Number of test cases that failed
@@ -24,10 +24,10 @@ pub struct SingleTurnResponseObject {
 
 /// Server returns final single-turn evaluation results.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SingleTurnResponse {
+pub struct SingleTurnResponseEnvelope {
     /// Message type
     #[serde(rename = "type")]
     pub message_type: String,
     /// Response payload
-    pub object: SingleTurnResponseObject,
+    pub data: SingleTurnResponse,
 }

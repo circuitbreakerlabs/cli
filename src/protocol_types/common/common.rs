@@ -27,9 +27,9 @@ pub struct Message {
     pub content: String,
 }
 
-/// Payload for `CompletionRequest` messages (Server -> Client).
+/// Payload for `CompletionRequestEnvelope` messages (Server -> Client).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CompletionRequestObject {
+pub struct CompletionRequest {
     /// Unique identifier for this completion request (UUID recommended)
     pub request_id: String,
     /// Identifier for the conversation thread this request belongs to
@@ -40,17 +40,17 @@ pub struct CompletionRequestObject {
 
 /// Server requests client to obtain a completion from the model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CompletionRequest {
+pub struct CompletionRequestEnvelope {
     /// Message type
     #[serde(rename = "type")]
     pub message_type: String,
     /// Request payload
-    pub object: CompletionRequestObject,
+    pub data: CompletionRequest,
 }
 
-/// Payload for `CompletionResponse` messages (Client -> Server).
+/// Payload for `CompletionResponseEnvelope` messages (Client -> Server).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CompletionResponseObject {
+pub struct CompletionResponse {
     /// Must match the ID from the corresponding `CompletionRequest`
     pub request_id: String,
     /// The model's generated response
@@ -59,10 +59,10 @@ pub struct CompletionResponseObject {
 
 /// Client returns the model's completion for a requested conversation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CompletionResponse {
+pub struct CompletionResponseEnvelope {
     /// Message type
     #[serde(rename = "type")]
     pub message_type: String,
     /// Response payload
-    pub object: CompletionResponseObject,
+    pub data: CompletionResponse,
 }

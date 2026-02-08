@@ -12,9 +12,9 @@ pub struct FailedMultiTurnResult {
     pub conversation: Vec<Message>,
 }
 
-/// Payload for `MultiTurnResponse` messages (Server -> Client).
+/// Payload for `MultiTurnResponseEnvelope` messages (Server -> Client).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MultiTurnResponseObject {
+pub struct MultiTurnResponse {
     /// Number of conversations that passed
     pub total_passed: i32,
     /// Number of conversations that failed
@@ -25,10 +25,10 @@ pub struct MultiTurnResponseObject {
 
 /// Server returns final multi-turn evaluation results.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MultiTurnResponse {
+pub struct MultiTurnResponseEnvelope {
     /// Message type
     #[serde(rename = "type")]
     pub message_type: String,
     /// Response payload
-    pub object: MultiTurnResponseObject,
+    pub data: MultiTurnResponse,
 }

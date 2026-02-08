@@ -9,9 +9,9 @@ pub enum MultiTurnTestType {
     SemanticChunks,
 }
 
-/// Payload for `MultiTurnRequest` messages (Client -> Server).
+/// Payload for `MultiTurnRequestEnvelope` messages (Client -> Server).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MultiTurnRequestObject {
+pub struct MultiTurnRequest {
     /// Safety threshold parameter
     pub threshold: i32,
     /// Maximum conversation turns to evaluate
@@ -24,12 +24,12 @@ pub struct MultiTurnRequestObject {
 
 /// Client initiates a multi-turn conversational evaluation session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MultiTurnRequest {
+pub struct MultiTurnRequestEnvelope {
     /// Protocol version
     pub version: String,
     /// Message type
     #[serde(rename = "type")]
     pub message_type: String,
     /// Request payload
-    pub object: MultiTurnRequestObject,
+    pub data: MultiTurnRequest,
 }

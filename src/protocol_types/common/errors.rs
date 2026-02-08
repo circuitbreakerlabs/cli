@@ -12,9 +12,9 @@ pub enum CompletionErrorCode {
     Unknown,
 }
 
-/// Payload for `CompletionError` messages (Client -> Server).
+/// Payload for `CompletionErrorEnvelope` messages (Client -> Server).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CompletionErrorObject {
+pub struct CompletionError {
     /// Must match the ID from the corresponding `CompletionRequest`
     pub request_id: String,
     /// Machine-readable error code
@@ -25,12 +25,12 @@ pub struct CompletionErrorObject {
 
 /// Client indicates inability to obtain a completion from the model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CompletionError {
+pub struct CompletionErrorEnvelope {
     /// Message type
     #[serde(rename = "type")]
     pub message_type: String,
     /// Error payload
-    pub object: CompletionErrorObject,
+    pub data: CompletionError,
 }
 
 /// Error codes for server errors.
@@ -43,7 +43,7 @@ pub enum ServerErrorCode {
 
 /// Payload for error messages (Server -> Client).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ErrorObject {
+pub struct ServerError {
     /// Machine-readable error code
     pub error_code: ServerErrorCode,
     /// Human-readable error description
@@ -52,10 +52,10 @@ pub struct ErrorObject {
 
 /// Server indicates an error occurred during evaluation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerError {
+pub struct ServerErrorEnvelope {
     /// Message type
     #[serde(rename = "type")]
     pub message_type: String,
     /// Error payload
-    pub object: ErrorObject,
+    pub data: ServerError,
 }

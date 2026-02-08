@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-/// Payload for `IterationStart` messages (Server -> Client).
+/// Payload for `IterationStartEnvelope` messages (Server -> Client).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IterationStartObject {
+pub struct IterationStart {
     /// Current iteration index
     pub iteration_number: i32,
     /// Number of test cases in this iteration
@@ -11,17 +11,17 @@ pub struct IterationStartObject {
 
 /// Server indicates the start of a new evaluation iteration/layer.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IterationStart {
+pub struct IterationStartEnvelope {
     /// Message type
     #[serde(rename = "type")]
     pub message_type: String,
     /// Start payload
-    pub object: IterationStartObject,
+    pub data: IterationStart,
 }
 
-/// Payload for `IterationComplete` messages (Server -> Client).
+/// Payload for `IterationCompleteEnvelope` messages (Server -> Client).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IterationCompleteObject {
+pub struct IterationComplete {
     /// Completed iteration index
     pub iteration_number: i32,
     /// Test cases passed in this iteration
@@ -32,10 +32,10 @@ pub struct IterationCompleteObject {
 
 /// Server indicates completion of an evaluation iteration/layer.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IterationComplete {
+pub struct IterationCompleteEnvelope {
     /// Message type
     #[serde(rename = "type")]
     pub message_type: String,
     /// Complete payload
-    pub object: IterationCompleteObject,
+    pub data: IterationComplete,
 }

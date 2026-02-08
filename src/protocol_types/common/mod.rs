@@ -3,6 +3,12 @@ mod common;
 mod errors;
 mod optional;
 
-pub use common::{Message, TestCaseGroup};
-pub use errors::{CompletionError, CompletionErrorCode, ServerError, ServerErrorCode};
-pub use optional::UnsafeMessage;
+pub use common::{
+    CompletionRequest, CompletionRequestEnvelope, CompletionResponse, CompletionResponseEnvelope,
+    Message, TestCaseGroup,
+};
+pub use errors::{
+    CompletionError, CompletionErrorCode, CompletionErrorEnvelope, ServerError, ServerErrorCode,
+    ServerErrorEnvelope,
+};
+pub use optional::{UnsafeMessage, UnsafeMessageEnvelope};
