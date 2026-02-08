@@ -1,61 +1,18 @@
 use serde::{Deserialize, Serialize};
 
-/// Error codes for completion errors.
+/// Error codes for completion errors (4500-4599).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum CompletionErrorCode {
-    ModelTimeout,
-    ModelUnreachable,
-    InvalidResponse,
-    RateLimited,
-    AuthenticationFailed,
-    Unknown,
+    UNKNOWN = 4500,
+    MODEL_TIMEOUT = 4501,
+    MODEL_UNREACHABLE = 4502,
+    INVALID_RESPONSE = 4503,
+    RATE_LIMITED = 4504,
+    AUTHENTICATION_FAILED = 4505,
 }
 
-/// Payload for `CompletionErrorEnvelope` messages (Client -> Server).
+/// Error codes for server errors (4000-4499).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CompletionError {
-    /// Must match the ID from the corresponding `CompletionRequest`
-    pub request_id: String,
-    /// Machine-readable error code
-    pub error_code: CompletionErrorCode,
-    /// Human-readable error description
-    pub error_message: String,
-}
-
-/// Client indicates inability to obtain a completion from the model.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CompletionErrorEnvelope {
-    /// Message type
-    #[serde(rename = "type")]
-    pub message_type: String,
-    /// Error payload
-    pub data: CompletionError,
-}
-
-/// Error codes for server errors.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ServerErrorCode {
-    Parse,
-    Unknown,
-}
-
-/// Payload for error messages (Server -> Client).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerError {
-    /// Machine-readable error code
-    pub error_code: ServerErrorCode,
-    /// Human-readable error description
-    pub error_message: String,
-}
-
-/// Server indicates an error occurred during evaluation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerErrorEnvelope {
-    /// Message type
-    #[serde(rename = "type")]
-    pub message_type: String,
-    /// Error payload
-    pub data: ServerError,
+    Unknown = 4000,
 }
