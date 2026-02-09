@@ -29,16 +29,20 @@ impl TryFrom<&[u8]> for SingleTurnReceivableMessage {
             .get("type")
             .and_then(|v| v.as_str())
             .ok_or_else(|| serde_json::Error::custom("Missing 'type' field"))?;
+        let data = base_message
+            .get("data")
+            .ok_or_else(|| serde_json::Error::custom("Missing 'data' field"))?
+            .to_owned();
 
         match message_type {
             "completion_request" => Ok(SingleTurnReceivableMessage::CompletionRequest(
-                serde_json::from_str(json_str)?,
+                serde_json::from_value(data)?,
             )),
             "iteration_start" => Ok(SingleTurnReceivableMessage::IterationStart(
-                serde_json::from_str(json_str)?,
+                serde_json::from_value(data)?,
             )),
             "iteration_complete" => Ok(SingleTurnReceivableMessage::IterationComplete(
-                serde_json::from_str(json_str)?,
+                serde_json::from_value(data)?,
             )),
             _ => Err(serde_json::Error::custom(format!(
                 "Unknown message type: {message_type}",
