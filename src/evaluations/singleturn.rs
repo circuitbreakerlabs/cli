@@ -10,12 +10,16 @@ use crate::protocol_types::{self};
 use crate::websockets::WebSocketConnection;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 
-pub async fn handle_completion_request(
+enum WriterMessage {
+    CompletionResponse(protocol_types::CompletionResponse),
+    Close(CloseFrame),
+    ServerClosed,
+}
+
+async fn handle_completion_request(
     request: protocol_types::CompletionRequest,
     completion_url: String,
-    completion_tx: tokio::sync::mpsc::Sender<
-        Result<protocol_types::CompletionResponse, CloseFrame>,
-    >,
+    writer_tx: tokio::sync::mpsc::Sender<WriterMessage>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mock_completion = protocol_types::CompletionResponse {
         request_id: request.request_id.clone(),
@@ -25,7 +29,9 @@ pub async fn handle_completion_request(
         "Received completion request with id '{}', sending back mock response",
         request.request_id
     );
-    completion_tx.send(Ok(mock_completion)).await?;
+    writer_tx
+        .send(WriterMessage::CompletionResponse(mock_completion))
+        .await?;
     Ok(())
 }
 
@@ -59,9 +65,7 @@ async fn handle_optional_message(
 async fn reader_task(
     mut read: SplitStream<WebSocketConnection>,
     completion_url: String,
-    completion_tx: tokio::sync::mpsc::Sender<
-        Result<protocol_types::CompletionResponse, CloseFrame>,
-    >,
+    writer_tx: tokio::sync::mpsc::Sender<WriterMessage>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     while let Some(msg) = read.next().await {
         match msg {
@@ -74,7 +78,7 @@ async fn reader_task(
                         tokio::spawn(handle_completion_request(
                             req,
                             completion_url.clone(),
-                            completion_tx.clone(),
+                            writer_tx.clone(),
                         ));
                     }
                     Ok(CategorizedSingleTurnMessage::OptionalSingleTurnMessage(optional_msg)) => {
@@ -82,8 +86,8 @@ async fn reader_task(
                     }
                     Err(e) => {
                         tracing::error!("Failed to parse incoming message '{e}'");
-                        completion_tx
-                            .send(Err(CloseFrame {
+                        writer_tx
+                            .send(WriterMessage::Close(CloseFrame {
                                 code: tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Protocol,
                                 reason: format!("Failed to parse incoming message: {e}").into(),
                             }))
@@ -92,7 +96,8 @@ async fn reader_task(
                 }
             }
             Ok(Message::Close(_)) => {
-                tracing::info!("Server closed connection");
+                writer_tx.send(WriterMessage::ServerClosed).await?;
+                tracing::info!("Reader task received close message, terminating");
                 break;
             }
             Ok(msg) => {
@@ -101,8 +106,8 @@ async fn reader_task(
             Err(err) => {
                 let err = format!("Couldn't receive message '{err}'");
                 tracing::error!("{}", &err);
-                completion_tx
-                    .send(Err(CloseFrame {
+                writer_tx
+                    .send(WriterMessage::Close(CloseFrame {
                         code: tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Error,
                         reason: err.clone().into(),
                     }))
@@ -117,19 +122,21 @@ async fn reader_task(
 /// Listens for completion responses and errors from the reader task and forwards them to the server. If an error is received, it sends a close frame and terminates.
 async fn writer_task(
     mut write: SplitSink<WebSocketConnection, Message>,
-    mut completion_rx: tokio::sync::mpsc::Receiver<
-        Result<protocol_types::CompletionResponse, CloseFrame>,
-    >,
+    mut writer_rx: tokio::sync::mpsc::Receiver<WriterMessage>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    while let Some(msg) = completion_rx.recv().await {
+    while let Some(msg) = writer_rx.recv().await {
         match msg {
-            Ok(completion_response) => {
+            WriterMessage::CompletionResponse(completion_response) => {
                 let msg = serde_json::to_string(&completion_response)?;
                 write.send(Message::Text(msg.into())).await?;
             }
-            Err(close_frame) => {
+            WriterMessage::Close(close_frame) => {
                 let msg = Message::Close(Some(close_frame));
                 write.send(msg).await?;
+                break;
+            }
+            WriterMessage::ServerClosed => {
+                tracing::info!("Server closed connection, writer task terminating");
                 break;
             }
         }
@@ -143,8 +150,7 @@ pub async fn run_evaluation(
     completion_url: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (mut write, read) = websocket_connection.split();
-    let (completion_tx, completion_rx) =
-        tokio::sync::mpsc::channel::<Result<protocol_types::CompletionResponse, CloseFrame>>(100);
+    let (writer_tx, writer_rx) = tokio::sync::mpsc::channel::<WriterMessage>(100);
 
     write
         .send(Message::Text(
@@ -155,14 +161,11 @@ pub async fn run_evaluation(
     let reader_handle = tokio::spawn(reader_task(
         read,
         completion_url.to_string(),
-        completion_tx.clone(),
+        writer_tx.clone(),
     ));
-    let write_handle = tokio::spawn(writer_task(write, completion_rx));
-
-    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+    let write_handle = tokio::spawn(writer_task(write, writer_rx));
 
     reader_handle.await??;
-    drop(completion_tx);
     write_handle.await??;
 
     Ok(())
