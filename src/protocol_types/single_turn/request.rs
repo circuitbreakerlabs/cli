@@ -24,3 +24,13 @@ pub struct SingleTurnRequestEnvelope {
     /// Request payload
     pub data: SingleTurnRequest,
 }
+
+impl From<SingleTurnRequest> for SingleTurnRequestEnvelope {
+    fn from(data: SingleTurnRequest) -> Self {
+        SingleTurnRequestEnvelope {
+            version: crate::consts::version::PROTOCOL_VERSION.to_string(),
+            message_type: "single_turn_request".to_string(),
+            data,
+        }
+    }
+}
