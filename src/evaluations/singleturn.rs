@@ -83,7 +83,7 @@ async fn reader_task(
                         ));
                     }
                     Ok(CategorizedSingleTurnMessage::SingleTurnResponse(resp)) => {
-                        tracing::info!(
+                        tracing::debug!(
                             "Received SingleTurnResponse, sending to writer task and terminating reader"
                         );
                         writer_tx.send(WriterMessage::ServerClosed).await?;
@@ -105,7 +105,7 @@ async fn reader_task(
             }
             Ok(Message::Close(_)) => {
                 writer_tx.send(WriterMessage::ServerClosed).await?;
-                tracing::info!("Reader task received close message, terminating");
+                tracing::debug!("Reader task received close message, terminating");
                 break;
             }
             Ok(msg) => {
@@ -145,7 +145,7 @@ async fn writer_task(
                 break;
             }
             WriterMessage::ServerClosed => {
-                tracing::info!("Server closed connection, writer task terminating");
+                tracing::debug!("Server closed connection, writer task terminating");
                 break;
             }
         }
