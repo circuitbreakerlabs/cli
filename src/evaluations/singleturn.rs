@@ -28,6 +28,7 @@ async fn handle_completion_request(
     Ok(())
 }
 
+/// Listens for incoming messages from the server, processes them, and sends completion responses or errors back to the writer task.
 async fn reader_task(
     mut read: SplitStream<WebSocketConnection>,
     completion_url: String,
