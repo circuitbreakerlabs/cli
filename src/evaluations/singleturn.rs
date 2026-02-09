@@ -20,7 +20,7 @@ async fn handle_completion_request(
 }
 
 async fn reader_task(
-    mut read: impl StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+    mut read: SplitStream<WebSocketConnection>,
     completion_tx: tokio::sync::mpsc::Sender<
         Result<protocol_types::CompletionResponse, WebSocketClose>,
     >,
