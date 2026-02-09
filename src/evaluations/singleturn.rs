@@ -52,6 +52,12 @@ async fn reader_task(
                     }
                     Err(e) => {
                         tracing::error!("Failed to parse incoming message '{e}'");
+                        completion_tx
+                            .send(Err(CloseFrame {
+                                code: tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Protocol,
+                                reason: format!("Failed to parse incoming message: {e}").into(),
+                            }))
+                            .await?;
                     }
                 }
             }
@@ -63,7 +69,14 @@ async fn reader_task(
                 tracing::warn!("Received unexpected message type with value '{msg}'");
             }
             Err(err) => {
-                tracing::error!("Couldn't receive message '{err}'");
+                let err = format!("Couldn't receive message '{err}'");
+                tracing::error!("{}", &err);
+                completion_tx
+                    .send(Err(CloseFrame {
+                        code: tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Error,
+                        reason: err.clone().into(),
+                    }))
+                    .await?;
                 return Err(err.into());
             }
         }
