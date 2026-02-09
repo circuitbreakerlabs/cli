@@ -1,6 +1,7 @@
 use crate::protocol_types::{self};
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 
+/// Handles incoming completion requests, sends responses to `completion_tx`.
 pub async fn get(
     request: protocol_types::CompletionRequest,
     completion_url: String,
