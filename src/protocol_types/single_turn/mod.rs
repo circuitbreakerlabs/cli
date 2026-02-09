@@ -15,6 +15,7 @@ pub use response::{FailedSingleTurnResult, SingleTurnResponse, SingleTurnRespons
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SingleTurnReceivableMessage {
     CompletionRequest(super::common::CompletionRequest),
+    SingleTurnResponse(SingleTurnResponse),
     IterationStart(IterationStart),
     IterationComplete(IterationComplete),
 }
@@ -22,6 +23,7 @@ pub enum SingleTurnReceivableMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CategorizedSingleTurnMessage {
     CompletionRequest(super::common::CompletionRequest),
+    SingleTurnResponse(SingleTurnResponse),
     OptionalSingleTurnMessage(OptionalSingleTurnMessage),
 }
 
@@ -48,6 +50,9 @@ impl TryFrom<&[u8]> for SingleTurnReceivableMessage {
             "iteration_start" => Ok(SingleTurnReceivableMessage::IterationStart(
                 serde_json::from_value(data)?,
             )),
+            "single_turn_response" => Ok(SingleTurnReceivableMessage::SingleTurnResponse(
+                serde_json::from_value(data)?,
+            )),
             "iteration_complete" => Ok(SingleTurnReceivableMessage::IterationComplete(
                 serde_json::from_value(data)?,
             )),
@@ -63,6 +68,9 @@ impl From<SingleTurnReceivableMessage> for CategorizedSingleTurnMessage {
         match message {
             SingleTurnReceivableMessage::CompletionRequest(req) => {
                 CategorizedSingleTurnMessage::CompletionRequest(req)
+            }
+            SingleTurnReceivableMessage::SingleTurnResponse(resp) => {
+                CategorizedSingleTurnMessage::SingleTurnResponse(resp)
             }
             SingleTurnReceivableMessage::IterationStart(start) => {
                 CategorizedSingleTurnMessage::OptionalSingleTurnMessage(

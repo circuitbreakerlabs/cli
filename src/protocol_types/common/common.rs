@@ -66,3 +66,12 @@ pub struct CompletionResponseEnvelope {
     /// Response payload
     pub data: CompletionResponse,
 }
+
+impl From<CompletionResponse> for CompletionResponseEnvelope {
+    fn from(response: CompletionResponse) -> Self {
+        CompletionResponseEnvelope {
+            message_type: "completion_response".to_string(),
+            data: response,
+        }
+    }
+}
