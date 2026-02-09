@@ -137,7 +137,7 @@ async fn writer_task(
     Ok(())
 }
 
-pub async fn run_single_turn_evaluation(
+pub async fn run_evaluation(
     websocket_connection: WebSocketConnection,
     request: SingleTurnRequest,
     completion_url: &str,
