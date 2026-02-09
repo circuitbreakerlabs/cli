@@ -6,12 +6,13 @@ use crate::protocol_types::single_turn::{
     SingleTurnReceivableMessage, SingleTurnRequest, SingleTurnRequestEnvelope,
 };
 use crate::protocol_types::{self};
-use crate::websockets::{WebSocketClose, WebSocketConnection};
+use crate::websockets::WebSocketConnection;
+use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 
 async fn handle_completion_request(
     request: protocol_types::CompletionRequest,
     completion_tx: tokio::sync::mpsc::Sender<
-        Result<protocol_types::CompletionResponse, WebSocketClose>,
+        Result<protocol_types::CompletionResponse, CloseFrame>,
     >,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     todo!(
@@ -22,7 +23,7 @@ async fn handle_completion_request(
 async fn reader_task(
     mut read: SplitStream<WebSocketConnection>,
     completion_tx: tokio::sync::mpsc::Sender<
-        Result<protocol_types::CompletionResponse, WebSocketClose>,
+        Result<protocol_types::CompletionResponse, CloseFrame>,
     >,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     while let Some(msg) = read.next().await {
@@ -73,7 +74,7 @@ async fn reader_task(
 async fn writer_task(
     mut write: SplitSink<WebSocketConnection, Message>,
     mut response_rx: tokio::sync::mpsc::Receiver<
-        Result<protocol_types::CompletionResponse, WebSocketClose>,
+        Result<protocol_types::CompletionResponse, CloseFrame>,
     >,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     todo!(
@@ -86,9 +87,8 @@ pub async fn run_single_turn_evaluation(
     request: SingleTurnRequest,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (mut write, mut read) = websocket_connection.split();
-    let (mut completion_tx, mut completion_rx) = tokio::sync::mpsc::channel::<
-        Result<protocol_types::CompletionResponse, WebSocketClose>,
-    >(100);
+    let (mut completion_tx, mut completion_rx) =
+        tokio::sync::mpsc::channel::<Result<protocol_types::CompletionResponse, CloseFrame>>(100);
 
     write
         .send(Message::Text(
