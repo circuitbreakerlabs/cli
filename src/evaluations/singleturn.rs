@@ -2,7 +2,6 @@ use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::completions;
 use crate::protocol_types::single_turn::{
     CategorizedSingleTurnMessage, SingleTurnReceivableMessage, SingleTurnRequest,
     SingleTurnRequestEnvelope,
@@ -10,6 +9,25 @@ use crate::protocol_types::single_turn::{
 use crate::protocol_types::{self};
 use crate::websockets::WebSocketConnection;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+
+pub async fn handle_completion_request(
+    request: protocol_types::CompletionRequest,
+    completion_url: String,
+    completion_tx: tokio::sync::mpsc::Sender<
+        Result<protocol_types::CompletionResponse, CloseFrame>,
+    >,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mock_completion = protocol_types::CompletionResponse {
+        request_id: request.request_id.clone(),
+        model_response: "This is a mock completion response".to_string(),
+    };
+    tracing::warn!(
+        "Received completion request with id '{}', sending back mock response",
+        request.request_id
+    );
+    completion_tx.send(Ok(mock_completion)).await?;
+    Ok(())
+}
 
 async fn handle_optional_message(
     message: protocol_types::single_turn::OptionalSingleTurnMessage,
@@ -53,7 +71,7 @@ async fn reader_task(
                     .map(CategorizedSingleTurnMessage::from);
                 match msg {
                     Ok(CategorizedSingleTurnMessage::CompletionRequest(req)) => {
-                        tokio::spawn(completions::get(
+                        tokio::spawn(handle_completion_request(
                             req,
                             completion_url.clone(),
                             completion_tx.clone(),
