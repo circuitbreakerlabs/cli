@@ -2,9 +2,10 @@ use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite::Message;
 
+use crate::protocol_types::common::CompletionResponseEnvelope;
 use crate::protocol_types::single_turn::{
     CategorizedSingleTurnMessage, SingleTurnReceivableMessage, SingleTurnRequest,
-    SingleTurnRequestEnvelope,
+    SingleTurnRequestEnvelope, SingleTurnResponse,
 };
 use crate::protocol_types::{self};
 use crate::websockets::WebSocketConnection;
@@ -66,7 +67,7 @@ async fn reader_task(
     mut read: SplitStream<WebSocketConnection>,
     completion_url: String,
     writer_tx: tokio::sync::mpsc::Sender<WriterMessage>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<SingleTurnResponse, Box<dyn std::error::Error + Send + Sync>> {
     while let Some(msg) = read.next().await {
         match msg {
             Ok(Message::Text(text)) => {
@@ -80,6 +81,13 @@ async fn reader_task(
                             completion_url.clone(),
                             writer_tx.clone(),
                         ));
+                    }
+                    Ok(CategorizedSingleTurnMessage::SingleTurnResponse(resp)) => {
+                        tracing::info!(
+                            "Received SingleTurnResponse, sending to writer task and terminating reader"
+                        );
+                        writer_tx.send(WriterMessage::ServerClosed).await?;
+                        return Ok(resp);
                     }
                     Ok(CategorizedSingleTurnMessage::OptionalSingleTurnMessage(optional_msg)) => {
                         tokio::spawn(handle_optional_message(optional_msg));
@@ -116,7 +124,7 @@ async fn reader_task(
             }
         }
     }
-    Ok(())
+    Err("WebSocket stream ended without receiving a SingleTurnResponse".into())
 }
 
 /// Listens for completion responses and errors from the reader task and forwards them to the server. If an error is received, it sends a close frame and terminates.
@@ -127,7 +135,8 @@ async fn writer_task(
     while let Some(msg) = writer_rx.recv().await {
         match msg {
             WriterMessage::CompletionResponse(completion_response) => {
-                let msg = serde_json::to_string(&completion_response)?;
+                let msg =
+                    serde_json::to_string(&CompletionResponseEnvelope::from(completion_response))?;
                 write.send(Message::Text(msg.into())).await?;
             }
             WriterMessage::Close(close_frame) => {
@@ -148,7 +157,7 @@ pub async fn run_evaluation(
     websocket_connection: WebSocketConnection,
     request: SingleTurnRequest,
     completion_url: &str,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<SingleTurnResponse, Box<dyn std::error::Error + Send + Sync>> {
     let (mut write, read) = websocket_connection.split();
     let (writer_tx, writer_rx) = tokio::sync::mpsc::channel::<WriterMessage>(100);
 
@@ -165,8 +174,8 @@ pub async fn run_evaluation(
     ));
     let write_handle = tokio::spawn(writer_task(write, writer_rx));
 
-    reader_handle.await??;
+    let single_turn_response = reader_handle.await??;
     write_handle.await??;
 
-    Ok(())
+    Ok(single_turn_response)
 }
