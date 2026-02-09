@@ -7,8 +7,5 @@ pub use common::{
     CompletionRequest, CompletionRequestEnvelope, CompletionResponse, CompletionResponseEnvelope,
     Message, TestCaseGroup,
 };
-pub use errors::{
-    CompletionError, CompletionErrorCode, CompletionErrorEnvelope, ServerError, ServerErrorCode,
-    ServerErrorEnvelope,
-};
+pub use errors::{CompletionErrorCode, ServerErrorCode};
 pub use optional::{UnsafeMessage, UnsafeMessageEnvelope};
