@@ -6,6 +6,7 @@ mod response;
 
 pub use optional::{
     IterationComplete, IterationCompleteEnvelope, IterationStart, IterationStartEnvelope,
+    OptionalSingleTurnMessage,
 };
 pub use request::{SingleTurnRequest, SingleTurnRequestEnvelope};
 pub use response::{FailedSingleTurnResult, SingleTurnResponse, SingleTurnResponseEnvelope};
@@ -16,6 +17,12 @@ pub enum SingleTurnReceivableMessage {
     CompletionRequest(super::common::CompletionRequest),
     IterationStart(IterationStart),
     IterationComplete(IterationComplete),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum CategorizedSingleTurnMessage {
+    CompletionRequest(super::common::CompletionRequest),
+    OptionalSingleTurnMessage(OptionalSingleTurnMessage),
 }
 
 impl TryFrom<&[u8]> for SingleTurnReceivableMessage {
@@ -47,6 +54,26 @@ impl TryFrom<&[u8]> for SingleTurnReceivableMessage {
             _ => Err(serde_json::Error::custom(format!(
                 "Unknown message type: {message_type}",
             ))),
+        }
+    }
+}
+
+impl From<SingleTurnReceivableMessage> for CategorizedSingleTurnMessage {
+    fn from(message: SingleTurnReceivableMessage) -> Self {
+        match message {
+            SingleTurnReceivableMessage::CompletionRequest(req) => {
+                CategorizedSingleTurnMessage::CompletionRequest(req)
+            }
+            SingleTurnReceivableMessage::IterationStart(start) => {
+                CategorizedSingleTurnMessage::OptionalSingleTurnMessage(
+                    OptionalSingleTurnMessage::IterationStart(start),
+                )
+            }
+            SingleTurnReceivableMessage::IterationComplete(complete) => {
+                CategorizedSingleTurnMessage::OptionalSingleTurnMessage(
+                    OptionalSingleTurnMessage::IterationComplete(complete),
+                )
+            }
         }
     }
 }

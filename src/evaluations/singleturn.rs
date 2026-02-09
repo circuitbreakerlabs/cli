@@ -4,11 +4,38 @@ use tokio_tungstenite::tungstenite::Message;
 
 use crate::completions;
 use crate::protocol_types::single_turn::{
-    SingleTurnReceivableMessage, SingleTurnRequest, SingleTurnRequestEnvelope,
+    CategorizedSingleTurnMessage, SingleTurnReceivableMessage, SingleTurnRequest,
+    SingleTurnRequestEnvelope,
 };
 use crate::protocol_types::{self};
 use crate::websockets::WebSocketConnection;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+
+async fn handle_optional_message(
+    message: protocol_types::single_turn::OptionalSingleTurnMessage,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    match message {
+        protocol_types::single_turn::OptionalSingleTurnMessage::IterationStart(iteration_start) => {
+            tracing::info!(
+                "Received IterationStart message: iteration_number={}, total_test_cases={}",
+                iteration_start.iteration_number,
+                iteration_start.total_test_cases
+            );
+        }
+        protocol_types::single_turn::OptionalSingleTurnMessage::IterationComplete(
+            iteration_complete,
+        ) => {
+            tracing::info!(
+                "Received IterationComplete message: iteration_number={}, total_passed={}, total_failed={}",
+                iteration_complete.iteration_number,
+                iteration_complete.total_passed,
+                iteration_complete.total_failed
+            );
+        }
+    }
+
+    Ok(())
+}
 
 /// Listens for incoming messages from the server, processes them, and sends completion responses or errors back to the writer task.
 async fn reader_task(
@@ -22,29 +49,18 @@ async fn reader_task(
         match msg {
             Ok(Message::Text(text)) => {
                 tracing::debug!("Received message: {}", text);
-                let msg = SingleTurnReceivableMessage::try_from(text.as_bytes());
+                let msg = SingleTurnReceivableMessage::try_from(text.as_bytes())
+                    .map(CategorizedSingleTurnMessage::from);
                 match msg {
-                    Ok(SingleTurnReceivableMessage::CompletionRequest(req)) => {
+                    Ok(CategorizedSingleTurnMessage::CompletionRequest(req)) => {
                         tokio::spawn(completions::get(
                             req,
                             completion_url.clone(),
                             completion_tx.clone(),
                         ));
                     }
-                    Ok(SingleTurnReceivableMessage::IterationStart(msg)) => {
-                        tracing::info!(
-                            "Starting iteration {} with {} test cases",
-                            msg.iteration_number,
-                            msg.total_test_cases
-                        );
-                    }
-                    Ok(SingleTurnReceivableMessage::IterationComplete(msg)) => {
-                        tracing::info!(
-                            "Completed iteration {}: {} passed, {} failed",
-                            msg.iteration_number,
-                            msg.total_passed,
-                            msg.total_failed
-                        );
+                    Ok(CategorizedSingleTurnMessage::OptionalSingleTurnMessage(optional_msg)) => {
+                        tokio::spawn(handle_optional_message(optional_msg));
                     }
                     Err(e) => {
                         tracing::error!("Failed to parse incoming message '{e}'");
