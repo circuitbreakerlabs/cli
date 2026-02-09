@@ -11,6 +11,7 @@ use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 
 async fn handle_completion_request(
     request: protocol_types::CompletionRequest,
+    completion_url: String,
     completion_tx: tokio::sync::mpsc::Sender<
         Result<protocol_types::CompletionResponse, CloseFrame>,
     >,
@@ -22,6 +23,7 @@ async fn handle_completion_request(
 
 async fn reader_task(
     mut read: SplitStream<WebSocketConnection>,
+    completion_url: String,
     completion_tx: tokio::sync::mpsc::Sender<
         Result<protocol_types::CompletionResponse, CloseFrame>,
     >,
@@ -29,11 +31,15 @@ async fn reader_task(
     while let Some(msg) = read.next().await {
         match msg {
             Ok(Message::Text(text)) => {
-                tracing::debug!("Received: {}", text);
+                tracing::debug!("Received message: {}", text);
                 let msg = SingleTurnReceivableMessage::try_from(text.as_bytes());
                 match msg {
                     Ok(SingleTurnReceivableMessage::CompletionRequest(req)) => {
-                        tokio::spawn(handle_completion_request(req, completion_tx.clone()));
+                        tokio::spawn(handle_completion_request(
+                            req,
+                            completion_url.clone(),
+                            completion_tx.clone(),
+                        ));
                     }
                     Ok(SingleTurnReceivableMessage::IterationStart(msg)) => {
                         tracing::info!(
@@ -98,6 +104,7 @@ async fn writer_task(
 pub async fn run_single_turn_evaluation(
     websocket_connection: WebSocketConnection,
     request: SingleTurnRequest,
+    completion_url: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (mut write, read) = websocket_connection.split();
     let (completion_tx, completion_rx) =
@@ -109,7 +116,11 @@ pub async fn run_single_turn_evaluation(
         ))
         .await?;
 
-    let reader_handle = tokio::spawn(reader_task(read, completion_tx.clone()));
+    let reader_handle = tokio::spawn(reader_task(
+        read,
+        completion_url.to_string(),
+        completion_tx.clone(),
+    ));
     let write_handle = tokio::spawn(writer_task(write, completion_rx));
 
     tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
