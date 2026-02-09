@@ -97,15 +97,27 @@ async fn reader_task(
     Ok(())
 }
 
+/// Listens for completion responses and errors from the reader task and forwards them to the server. If an error is received, it sends a close frame and terminates.
 async fn writer_task(
     mut write: SplitSink<WebSocketConnection, Message>,
-    mut response_rx: tokio::sync::mpsc::Receiver<
+    mut completion_rx: tokio::sync::mpsc::Receiver<
         Result<protocol_types::CompletionResponse, CloseFrame>,
     >,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    todo!(
-        "Implement logic to listen for completion responses from the reader task and send them back to the server over the WebSocket connection"
-    )
+    while let Some(msg) = completion_rx.recv().await {
+        match msg {
+            Ok(completion_response) => {
+                let msg = serde_json::to_string(&completion_response)?;
+                write.send(Message::Text(msg.into())).await?;
+            }
+            Err(close_frame) => {
+                let msg = Message::Close(Some(close_frame));
+                write.send(msg).await?;
+                break;
+            }
+        }
+    }
+    Ok(())
 }
 
 pub async fn run_single_turn_evaluation(
