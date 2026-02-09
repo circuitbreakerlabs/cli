@@ -99,8 +99,8 @@ pub async fn run_single_turn_evaluation(
     websocket_connection: WebSocketConnection,
     request: SingleTurnRequest,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let (mut write, mut read) = websocket_connection.split();
-    let (mut completion_tx, mut completion_rx) =
+    let (mut write, read) = websocket_connection.split();
+    let (completion_tx, completion_rx) =
         tokio::sync::mpsc::channel::<Result<protocol_types::CompletionResponse, CloseFrame>>(100);
 
     write
