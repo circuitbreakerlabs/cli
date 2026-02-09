@@ -16,9 +16,16 @@ async fn handle_completion_request(
         Result<protocol_types::CompletionResponse, CloseFrame>,
     >,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    todo!(
-        "Implement logic to handle completion requests from the server, including generating responses and sending them back over the WebSocket connection"
-    )
+    let mock_completion = protocol_types::CompletionResponse {
+        request_id: request.request_id.clone(),
+        model_response: "This is a mock completion response".to_string(),
+    };
+    tracing::warn!(
+        "Received completion request with id '{}', sending back mock response",
+        request.request_id
+    );
+    completion_tx.send(Ok(mock_completion)).await?;
+    Ok(())
 }
 
 async fn reader_task(
