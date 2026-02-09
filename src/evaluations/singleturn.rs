@@ -1,18 +1,12 @@
-use futures_util::stream::SplitSink;
+use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
-use tokio_tungstenite::tungstenite::{Message, Utf8Bytes};
+use tokio_tungstenite::tungstenite::Message;
 
-use crate::protocol_types;
 use crate::protocol_types::single_turn::{
     SingleTurnReceivableMessage, SingleTurnRequest, SingleTurnRequestEnvelope,
 };
+use crate::protocol_types::{self};
 use crate::websockets::{WebSocketClose, WebSocketConnection};
-
-fn try_parse(msg: &Utf8Bytes) -> Option<SingleTurnReceivableMessage> {
-    todo!(
-        "Implement parsing logic to convert incoming WebSocket messages into SingleTurnReceivableMessage variants"
-    )
-}
 
 async fn handle_completion_request(
     request: protocol_types::CompletionRequest,
@@ -35,18 +29,19 @@ async fn reader_task(
         match msg {
             Ok(Message::Text(text)) => {
                 tracing::debug!("Received: {}", text);
-                match try_parse(&text) {
-                    Some(SingleTurnReceivableMessage::CompletionRequest(req)) => {
+                let msg = SingleTurnReceivableMessage::try_from(text.as_bytes());
+                match msg {
+                    Ok(SingleTurnReceivableMessage::CompletionRequest(req)) => {
                         tokio::spawn(handle_completion_request(req, completion_tx.clone()));
                     }
-                    Some(SingleTurnReceivableMessage::IterationStart(msg)) => {
+                    Ok(SingleTurnReceivableMessage::IterationStart(msg)) => {
                         tracing::info!(
                             "Starting iteration {} with {} test cases",
                             msg.iteration_number,
                             msg.total_test_cases
                         );
                     }
-                    Some(SingleTurnReceivableMessage::IterationComplete(msg)) => {
+                    Ok(SingleTurnReceivableMessage::IterationComplete(msg)) => {
                         tracing::info!(
                             "Completed iteration {}: {} passed, {} failed",
                             msg.iteration_number,
@@ -54,8 +49,8 @@ async fn reader_task(
                             msg.total_failed
                         );
                     }
-                    None => {
-                        tracing::warn!("Failed to parse incoming message: {}", text);
+                    Err(e) => {
+                        tracing::error!("Failed to parse incoming message '{e}'");
                     }
                 }
             }
