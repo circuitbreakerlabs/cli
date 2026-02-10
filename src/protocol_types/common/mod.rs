@@ -5,7 +5,7 @@ mod optional;
 
 pub use common::{
     CompletionRequest, CompletionRequestEnvelope, CompletionResponse, CompletionResponseEnvelope,
-    Message, TestCaseGroup,
+    Message, Role, TestCaseGroup,
 };
 pub use errors::{CompletionErrorCode, ServerErrorCode};
 pub use optional::{UnsafeMessage, UnsafeMessageEnvelope};
