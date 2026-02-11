@@ -18,8 +18,8 @@ pub struct SingleTurnResponse {
     pub total_passed: i32,
     /// Number of test cases that failed
     pub total_failed: i32,
-    /// Details of each failed test case
-    pub failed_results: Vec<FailedSingleTurnResult>,
+    /// Details of each failed test case per iteration layer
+    pub failed_results: Vec<Vec<FailedSingleTurnResult>>,
 }
 
 /// Server returns final single-turn evaluation results.

@@ -1,5 +1,11 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum OptionalSingleTurnMessage {
+    IterationStart(IterationStart),
+    IterationComplete(IterationComplete),
+}
+
 /// Payload for `IterationStartEnvelope` messages (Server -> Client).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IterationStart {

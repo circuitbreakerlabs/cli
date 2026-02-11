@@ -6,7 +6,9 @@ use super::super::common::TestCaseGroup;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SingleTurnRequest {
     /// Safety threshold parameter
-    pub threshold: i32,
+    pub threshold: f32,
+    /// Number of variations per unsafe case
+    pub variations: i32,
     /// Maximum number of evaluation iterations
     pub maximum_iteration_layers: i32,
     /// Test case categories to evaluate
@@ -23,4 +25,14 @@ pub struct SingleTurnRequestEnvelope {
     pub message_type: String,
     /// Request payload
     pub data: SingleTurnRequest,
+}
+
+impl From<SingleTurnRequest> for SingleTurnRequestEnvelope {
+    fn from(data: SingleTurnRequest) -> Self {
+        SingleTurnRequestEnvelope {
+            version: crate::consts::version::PROTOCOL_VERSION.to_string(),
+            message_type: "single_turn_request".to_string(),
+            data,
+        }
+    }
 }
