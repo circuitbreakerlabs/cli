@@ -1,5 +1,11 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum OptionalMultiTurnMessage {
+    ConversationComplete(ConversationComplete),
+    MultiTurnEvaluationStart(MultiTurnEvaluationStart),
+}
+
 /// Payload for `ConversationCompleteEnvelope` messages (Server -> Client).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationComplete {
@@ -15,4 +21,21 @@ pub struct ConversationCompleteEnvelope {
     pub message_type: String,
     /// Complete payload
     pub data: ConversationComplete,
+}
+
+/// Payload for `MultiTurnEvaluationStartEnvelope` messages (Server -> Client).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiTurnEvaluationStart {
+    /// Number of conversations that will be evaluated
+    pub conversation_count: i32,
+}
+
+/// Server indicates that it is starting a multi-turn evaluation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiTurnEvaluationStartEnvelope {
+    /// Message type
+    #[serde(rename = "type")]
+    pub message_type: String,
+    /// Start payload
+    pub data: MultiTurnEvaluationStart,
 }
