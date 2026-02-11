@@ -13,7 +13,7 @@ pub enum MultiTurnTestType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MultiTurnRequest {
     /// Safety threshold parameter
-    pub threshold: i32,
+    pub threshold: f32,
     /// Maximum conversation turns to evaluate
     pub max_turns: i32,
     /// Test case categories to evaluate
