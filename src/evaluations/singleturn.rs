@@ -106,9 +106,17 @@ async fn reader_task(
                     }
                 }
             }
-            Ok(Message::Close(_)) => {
+            Ok(Message::Close(frame)) => {
+                if let Some(frame) = &frame {
+                    tracing::debug!(
+                        "Received close message from server with code {} and reason '{}'",
+                        frame.code,
+                        frame.reason
+                    );
+                } else {
+                    tracing::debug!("Received close message from server without close frame");
+                }
                 writer_tx.send(WriterMessage::ServerClosed).await?;
-                tracing::debug!("Reader task received close message, terminating");
                 break;
             }
             Ok(msg) => {
