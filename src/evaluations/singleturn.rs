@@ -14,6 +14,7 @@ use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 
 enum WriterMessage {
     CompletionResponse(protocol_types::CompletionResponse),
+    Pong(Vec<u8>),
     Close(CloseFrame),
     ServerClosed,
 }
@@ -119,6 +120,12 @@ async fn reader_task(
                 writer_tx.send(WriterMessage::ServerClosed).await?;
                 break;
             }
+            Ok(Message::Ping(payload)) => {
+                tracing::debug!("Received ping from server, sending pong");
+                writer_tx
+                    .send(WriterMessage::Pong(payload.to_vec()))
+                    .await?;
+            }
             Ok(msg) => {
                 tracing::warn!("Received unexpected message type with value '{msg}'");
             }
@@ -154,6 +161,9 @@ async fn writer_task(
                 let msg = Message::Close(Some(close_frame));
                 write.send(msg).await?;
                 break;
+            }
+            WriterMessage::Pong(payload) => {
+                write.send(Message::Pong(payload.into())).await?;
             }
             WriterMessage::ServerClosed => {
                 tracing::debug!("Server closed connection, writer task terminating");
