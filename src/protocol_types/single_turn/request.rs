@@ -7,6 +7,8 @@ use super::super::common::TestCaseGroup;
 pub struct SingleTurnRequest {
     /// Safety threshold parameter
     pub threshold: i32,
+    /// Number of variations per unsafe case
+    pub variations: i32,
     /// Maximum number of evaluation iterations
     pub maximum_iteration_layers: i32,
     /// Test case categories to evaluate
