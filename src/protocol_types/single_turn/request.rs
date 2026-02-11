@@ -6,7 +6,7 @@ use super::super::common::TestCaseGroup;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SingleTurnRequest {
     /// Safety threshold parameter
-    pub threshold: i32,
+    pub threshold: f32,
     /// Number of variations per unsafe case
     pub variations: i32,
     /// Maximum number of evaluation iterations
