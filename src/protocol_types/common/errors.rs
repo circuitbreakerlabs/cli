@@ -15,4 +15,7 @@ pub enum CompletionErrorCode {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ServerErrorCode {
     Unknown = 4000,
+    Unauthorized = 4001,
+    QuotaExceeded = 4002,
+    NotFound = 4003,
 }
