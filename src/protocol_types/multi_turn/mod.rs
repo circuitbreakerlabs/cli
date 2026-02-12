@@ -6,7 +6,7 @@ pub use optional::{
     ConversationComplete, ConversationCompleteEnvelope, MultiTurnEvaluationStart,
     OptionalMultiTurnMessage,
 };
-pub use request::{MultiTurnRequest, MultiTurnRequestEnvelope};
+pub use request::{MultiTurnRequest, MultiTurnRequestEnvelope, MultiTurnTestType};
 pub use response::{FailedMultiTurnResult, MultiTurnResponse, MultiTurnResponseEnvelope};
 use serde::{Deserialize, Serialize, de::Error};
 
