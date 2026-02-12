@@ -1,8 +1,8 @@
 use crate::completions::CompletionGenerator;
 use crate::protocol_types::common::CompletionResponseEnvelope;
-use crate::protocol_types::single_turn::{
-    CategorizedSingleTurnMessage, SingleTurnReceivableMessage, SingleTurnRequest,
-    SingleTurnRequestEnvelope, SingleTurnResponse,
+use crate::protocol_types::multi_turn::{
+    CategorizedMultiTurnMessage, MultiTurnReceivableMessage, MultiTurnRequest,
+    MultiTurnRequestEnvelope, MultiTurnResponse,
 };
 use crate::protocol_types::{self};
 use crate::websockets::WebSocketConnection;
@@ -41,24 +41,23 @@ async fn handle_completion_request(
 }
 
 async fn handle_optional_message(
-    message: protocol_types::single_turn::OptionalSingleTurnMessage,
+    message: protocol_types::multi_turn::OptionalMultiTurnMessage,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match message {
-        protocol_types::single_turn::OptionalSingleTurnMessage::IterationStart(iteration_start) => {
-            tracing::info!(
-                "Received IterationStart message: iteration_number={}, total_test_cases={}",
-                iteration_start.iteration_number,
-                iteration_start.total_test_cases
-            );
-        }
-        protocol_types::single_turn::OptionalSingleTurnMessage::IterationComplete(
-            iteration_complete,
+        protocol_types::multi_turn::OptionalMultiTurnMessage::MultiTurnEvaluationStart(
+            evaluation_start,
         ) => {
             tracing::info!(
-                "Received IterationComplete message: iteration_number={}, total_passed={}, total_failed={}",
-                iteration_complete.iteration_number,
-                iteration_complete.total_passed,
-                iteration_complete.total_failed
+                "Received MultiTurnEvaluationStart message: conversation_count={}",
+                evaluation_start.conversation_count
+            );
+        }
+        protocol_types::multi_turn::OptionalMultiTurnMessage::ConversationComplete(
+            conversation_complete,
+        ) => {
+            tracing::info!(
+                "Received ConversationComplete message: conversation_id={}",
+                conversation_complete.conversation_id,
             );
         }
     }
@@ -71,29 +70,29 @@ async fn reader_task(
     mut read: SplitStream<WebSocketConnection>,
     completion_generator: CompletionGenerator,
     writer_tx: tokio::sync::mpsc::Sender<WriterMessage>,
-) -> Result<SingleTurnResponse, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<MultiTurnResponse, Box<dyn std::error::Error + Send + Sync>> {
     while let Some(msg) = read.next().await {
         match msg {
             Ok(Message::Text(text)) => {
                 tracing::debug!("Received message: {}", text);
-                let msg = SingleTurnReceivableMessage::try_from(text.as_bytes())
-                    .map(CategorizedSingleTurnMessage::from);
+                let msg = MultiTurnReceivableMessage::try_from(text.as_bytes())
+                    .map(CategorizedMultiTurnMessage::from);
                 match msg {
-                    Ok(CategorizedSingleTurnMessage::CompletionRequest(req)) => {
+                    Ok(CategorizedMultiTurnMessage::CompletionRequest(req)) => {
                         tokio::spawn(handle_completion_request(
                             req,
                             completion_generator.clone(),
                             writer_tx.clone(),
                         ));
                     }
-                    Ok(CategorizedSingleTurnMessage::SingleTurnResponse(resp)) => {
+                    Ok(CategorizedMultiTurnMessage::MultiTurnResponse(resp)) => {
                         tracing::debug!(
-                            "Received SingleTurnResponse, sending to writer task and terminating reader"
+                            "Received MultiTurnResponse, sending to writer task and terminating reader"
                         );
                         writer_tx.send(WriterMessage::ServerClosed).await?;
                         return Ok(resp);
                     }
-                    Ok(CategorizedSingleTurnMessage::OptionalSingleTurnMessage(optional_msg)) => {
+                    Ok(CategorizedMultiTurnMessage::OptionalMultiTurnMessage(optional_msg)) => {
                         tokio::spawn(handle_optional_message(optional_msg));
                     }
                     Err(e) => {
@@ -142,7 +141,7 @@ async fn reader_task(
             }
         }
     }
-    Err("WebSocket stream ended without receiving a SingleTurnResponse".into())
+    Err("WebSocket stream ended without receiving a MultiTurnResponse".into())
 }
 
 /// Listens for completion responses and errors from the reader task and forwards them to the server. If an error is received, it sends a close frame and terminates.
@@ -177,22 +176,22 @@ async fn writer_task(
 pub async fn run_evaluation(
     websocket_connection: WebSocketConnection,
     completion_generator: CompletionGenerator,
-    request: SingleTurnRequest,
-) -> Result<SingleTurnResponse, Box<dyn std::error::Error + Send + Sync>> {
+    request: MultiTurnRequest,
+) -> Result<MultiTurnResponse, Box<dyn std::error::Error + Send + Sync>> {
     let (mut write, read) = websocket_connection.split();
     let (writer_tx, writer_rx) = tokio::sync::mpsc::channel::<WriterMessage>(100);
 
     write
         .send(Message::Text(
-            serde_json::to_string(&SingleTurnRequestEnvelope::from(request))?.into(),
+            serde_json::to_string(&MultiTurnRequestEnvelope::from(request))?.into(),
         ))
         .await?;
 
     let reader_handle = tokio::spawn(reader_task(read, completion_generator, writer_tx.clone()));
     let write_handle = tokio::spawn(writer_task(write, writer_rx));
 
-    let single_turn_response = reader_handle.await??;
+    let multi_turn_response = reader_handle.await??;
     write_handle.await??;
 
-    Ok(single_turn_response)
+    Ok(multi_turn_response)
 }
