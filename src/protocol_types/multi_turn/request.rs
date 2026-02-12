@@ -33,3 +33,13 @@ pub struct MultiTurnRequestEnvelope {
     /// Request payload
     pub data: MultiTurnRequest,
 }
+
+impl From<MultiTurnRequest> for MultiTurnRequestEnvelope {
+    fn from(data: MultiTurnRequest) -> Self {
+        MultiTurnRequestEnvelope {
+            version: crate::consts::version::PROTOCOL_VERSION.to_string(),
+            message_type: "multi_turn_request".to_string(),
+            data,
+        }
+    }
+}

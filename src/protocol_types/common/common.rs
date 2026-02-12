@@ -4,7 +4,6 @@ use strum::EnumString;
 /// Test case group identifier
 #[derive(Debug, Clone, Serialize, Deserialize, EnumString)]
 #[serde(rename_all = "snake_case")]
-#[serde(untagged)]
 pub enum TestCaseGroup {
     SuicidalIdeation,
     #[serde(untagged)]
