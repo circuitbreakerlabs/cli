@@ -2,7 +2,7 @@ mod optional;
 mod request;
 mod response;
 
-use crate::protocol_types::common::ConversationComplete;
+use crate::protocol_types::common::{CompletionRequest, ConversationComplete, ConversationError};
 pub use optional::{MultiTurnEvaluationStart, OptionalMultiTurnMessage};
 pub use request::{MultiTurnRequest, MultiTurnRequestEnvelope, MultiTurnTestType};
 pub use response::MultiTurnResponse;
@@ -15,13 +15,14 @@ pub enum MultiTurnReceivableMessage {
     MultiTurnResponse(MultiTurnResponse),
     ConversationComplete(ConversationComplete),
     MultiTurnEvaluationStart(MultiTurnEvaluationStart),
+    ConversationError(ConversationError),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CategorizedMultiTurnMessage {
-    CompletionRequest(super::common::CompletionRequest),
+    CompletionRequest(CompletionRequest),
     MultiTurnResponse(MultiTurnResponse),
-    OptionalMultiTurnMessage(optional::OptionalMultiTurnMessage),
+    OptionalMultiTurnMessage(OptionalMultiTurnMessage),
 }
 
 impl TryFrom<&[u8]> for MultiTurnReceivableMessage {
@@ -53,6 +54,9 @@ impl TryFrom<&[u8]> for MultiTurnReceivableMessage {
             "multi_turn_evaluation_start" => Ok(
                 MultiTurnReceivableMessage::MultiTurnEvaluationStart(serde_json::from_value(data)?),
             ),
+            "conversation_error" => Ok(MultiTurnReceivableMessage::ConversationError(
+                serde_json::from_value(data)?,
+            )),
             _ => Err(serde_json::Error::custom(format!(
                 "Unknown message type: {message_type}",
             ))),
@@ -77,6 +81,11 @@ impl From<MultiTurnReceivableMessage> for CategorizedMultiTurnMessage {
             MultiTurnReceivableMessage::MultiTurnEvaluationStart(start) => {
                 CategorizedMultiTurnMessage::OptionalMultiTurnMessage(
                     optional::OptionalMultiTurnMessage::MultiTurnEvaluationStart(start),
+                )
+            }
+            MultiTurnReceivableMessage::ConversationError(error) => {
+                CategorizedMultiTurnMessage::OptionalMultiTurnMessage(
+                    optional::OptionalMultiTurnMessage::ConversationError(error),
                 )
             }
         }
