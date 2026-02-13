@@ -26,8 +26,8 @@ pub struct ConversationCompleteEnvelope {
 /// Payload for `MultiTurnEvaluationStartEnvelope` messages (Server -> Client).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MultiTurnEvaluationStart {
-    /// Number of conversations that will be evaluated
-    pub conversation_count: i32,
+    /// Conversation identifiers that will be evaluated
+    pub conversation_ids: Vec<i32>,
 }
 
 /// Server indicates that it is starting a multi-turn evaluation

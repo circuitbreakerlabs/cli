@@ -48,8 +48,8 @@ async fn handle_optional_message(
             evaluation_start,
         ) => {
             tracing::info!(
-                "Received MultiTurnEvaluationStart message: conversation_count={}",
-                evaluation_start.conversation_count
+                "Received MultiTurnEvaluationStart message: conversation_ids={:?}",
+                evaluation_start.conversation_ids,
             );
         }
         protocol_types::multi_turn::OptionalMultiTurnMessage::ConversationComplete(
