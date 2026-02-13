@@ -9,6 +9,7 @@ use crate::websockets::WebSocketConnection;
 
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
+use protocol_types::single_turn::OptionalSingleTurnMessage;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 
@@ -44,21 +45,26 @@ async fn handle_optional_message(
     message: protocol_types::single_turn::OptionalSingleTurnMessage,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match message {
-        protocol_types::single_turn::OptionalSingleTurnMessage::IterationStart(iteration_start) => {
+        OptionalSingleTurnMessage::IterationStart(iteration_start) => {
             tracing::info!(
                 "Received IterationStart message: iteration_number={}, total_test_cases={}",
                 iteration_start.iteration_number,
                 iteration_start.total_test_cases
             );
         }
-        protocol_types::single_turn::OptionalSingleTurnMessage::IterationComplete(
-            iteration_complete,
-        ) => {
+        OptionalSingleTurnMessage::IterationComplete(iteration_complete) => {
             tracing::info!(
                 "Received IterationComplete message: iteration_number={}, total_passed={}, total_failed={}",
                 iteration_complete.iteration_number,
                 iteration_complete.total_passed,
                 iteration_complete.total_failed
+            );
+        }
+        OptionalSingleTurnMessage::ConversationError(conversation_error) => {
+            tracing::error!(
+                "Received ConversationError message: conversation_id={}, error_message={}",
+                conversation_error.conversation_id,
+                conversation_error.error_message
             );
         }
     }
