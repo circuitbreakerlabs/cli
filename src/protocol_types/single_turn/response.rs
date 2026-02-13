@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 pub struct FailedSingleTurnResult {
     /// The prompt that was tested
     pub user_input: String,
+    /// Unique identifier for this conversation across this request
+    pub conversation_id: i32,
     /// The model's response
     pub model_response: String,
     /// Safety score (lower indicates less safe)
