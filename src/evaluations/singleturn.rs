@@ -47,17 +47,17 @@ async fn handle_optional_message(
     match message {
         OptionalSingleTurnMessage::IterationStart(iteration_start) => {
             tracing::info!(
-                "Received IterationStart message: iteration_number={}, total_test_cases={}",
+                "Received IterationStart message: iteration_number={}, conversation_ids={:?}",
                 iteration_start.iteration_number,
-                iteration_start.total_test_cases
+                iteration_start.conversation_ids,
             );
         }
         OptionalSingleTurnMessage::IterationComplete(iteration_complete) => {
             tracing::info!(
-                "Received IterationComplete message: iteration_number={}, total_passed={}, total_failed={}",
+                "Received IterationComplete message: iteration_number={}, passed_conversation_ids={:?}, failed_conversation_ids={:?}",
                 iteration_complete.iteration_number,
-                iteration_complete.total_passed,
-                iteration_complete.total_failed
+                iteration_complete.passed_conversation_ids,
+                iteration_complete.failed_conversation_ids
             );
         }
         OptionalSingleTurnMessage::ConversationError(conversation_error) => {
