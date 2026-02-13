@@ -67,6 +67,13 @@ async fn handle_optional_message(
                 conversation_error.error_message
             );
         }
+        OptionalSingleTurnMessage::ConversationComplete(conversation_complete) => {
+            tracing::info!(
+                "Received ConversationComplete message: conversation_id={}, passed={}",
+                conversation_complete.conversation_id,
+                conversation_complete.passed
+            );
+        }
     }
 
     Ok(())

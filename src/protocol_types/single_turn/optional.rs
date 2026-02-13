@@ -1,10 +1,11 @@
-use crate::protocol_types::common::ConversationError;
+use crate::protocol_types::common::{ConversationComplete, ConversationError};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum OptionalSingleTurnMessage {
     IterationStart(IterationStart),
     IterationComplete(IterationComplete),
+    ConversationComplete(ConversationComplete),
     ConversationError(ConversationError),
 }
 
