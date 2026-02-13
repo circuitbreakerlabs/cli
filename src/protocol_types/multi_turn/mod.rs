@@ -2,12 +2,10 @@ mod optional;
 mod request;
 mod response;
 
-pub use optional::{
-    ConversationComplete, ConversationCompleteEnvelope, MultiTurnEvaluationStart,
-    OptionalMultiTurnMessage,
-};
+use crate::protocol_types::common::ConversationComplete;
+pub use optional::{MultiTurnEvaluationStart, OptionalMultiTurnMessage};
 pub use request::{MultiTurnRequest, MultiTurnRequestEnvelope, MultiTurnTestType};
-pub use response::{FailedMultiTurnResult, MultiTurnResponse, MultiTurnResponseEnvelope};
+pub use response::MultiTurnResponse;
 use serde::{Deserialize, Serialize, de::Error};
 
 /// Messages that the server may send to the client during multi-turn evaluation (Server -> Client).
