@@ -9,6 +9,7 @@ use crate::websockets::WebSocketConnection;
 
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
+use protocol_types::multi_turn::OptionalMultiTurnMessage;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 
@@ -44,22 +45,25 @@ async fn handle_optional_message(
     message: protocol_types::multi_turn::OptionalMultiTurnMessage,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match message {
-        protocol_types::multi_turn::OptionalMultiTurnMessage::MultiTurnEvaluationStart(
-            evaluation_start,
-        ) => {
+        OptionalMultiTurnMessage::MultiTurnEvaluationStart(evaluation_start) => {
             tracing::info!(
                 "Received MultiTurnEvaluationStart message: conversation_ids={:?}",
                 evaluation_start.conversation_ids,
             );
         }
-        protocol_types::multi_turn::OptionalMultiTurnMessage::ConversationComplete(
-            conversation_complete,
-        ) => {
+        OptionalMultiTurnMessage::ConversationComplete(conversation_complete) => {
             tracing::info!(
                 "Received ConversationComplete message: conversation_id={}, turns={}, passed={}",
                 conversation_complete.conversation_id,
                 conversation_complete.turns,
                 conversation_complete.passed,
+            );
+        }
+        OptionalMultiTurnMessage::ConversationError(conversation_error) => {
+            tracing::error!(
+                "Received ConversationError message: conversation_id={}, error_message={}",
+                conversation_error.conversation_id,
+                conversation_error.error_message,
             );
         }
     }

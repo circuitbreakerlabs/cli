@@ -1,10 +1,13 @@
-use crate::protocol_types::common::{ConversationComplete, ConversationCompleteEnvelope};
+use crate::protocol_types::common::{
+    ConversationComplete, ConversationCompleteEnvelope, ConversationError,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum OptionalMultiTurnMessage {
     ConversationComplete(ConversationComplete),
     MultiTurnEvaluationStart(MultiTurnEvaluationStart),
+    ConversationError(ConversationError),
 }
 
 /// Payload for `MultiTurnEvaluationStartEnvelope` messages (Server -> Client).
