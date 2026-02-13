@@ -11,6 +11,10 @@ pub enum OptionalMultiTurnMessage {
 pub struct ConversationComplete {
     /// Identifier for the completed conversation
     pub conversation_id: i32,
+    /// Number of turns in the conversation
+    pub turns: i32,
+    /// Whether the conversation passed the evaluation criteria
+    pub passed: bool,
 }
 
 /// Server indicates that a particular multi-turn conversation evaluation has finished.

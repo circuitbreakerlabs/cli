@@ -56,8 +56,10 @@ async fn handle_optional_message(
             conversation_complete,
         ) => {
             tracing::info!(
-                "Received ConversationComplete message: conversation_id={}",
+                "Received ConversationComplete message: conversation_id={}, turns={}, passed={}",
                 conversation_complete.conversation_id,
+                conversation_complete.turns,
+                conversation_complete.passed,
             );
         }
     }
