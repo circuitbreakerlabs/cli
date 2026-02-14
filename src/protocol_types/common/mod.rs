@@ -8,4 +8,8 @@ pub use common::{
     Message, Role, TestCaseGroup,
 };
 pub use errors::{CompletionErrorCode, ServerErrorCode};
-pub use optional::{UnsafeMessage, UnsafeMessageEnvelope};
+
+pub use optional::{
+    ConversationComplete, ConversationCompleteEnvelope, ConversationError,
+    ConversationErrorEnvelope,
+};

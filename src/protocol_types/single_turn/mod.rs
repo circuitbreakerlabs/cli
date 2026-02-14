@@ -4,6 +4,7 @@ mod optional;
 mod request;
 mod response;
 
+use super::common::{CompletionRequest, ConversationComplete, ConversationError};
 pub use optional::{
     IterationComplete, IterationCompleteEnvelope, IterationStart, IterationStartEnvelope,
     OptionalSingleTurnMessage,
@@ -14,10 +15,12 @@ pub use response::{FailedSingleTurnResult, SingleTurnResponse, SingleTurnRespons
 /// Messages that the server may send to the client during single-turn evaluation (Server -> Client).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SingleTurnReceivableMessage {
-    CompletionRequest(super::common::CompletionRequest),
+    CompletionRequest(CompletionRequest),
     SingleTurnResponse(SingleTurnResponse),
     IterationStart(IterationStart),
     IterationComplete(IterationComplete),
+    ConversationComplete(ConversationComplete),
+    ConversationError(ConversationError),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,6 +59,12 @@ impl TryFrom<&[u8]> for SingleTurnReceivableMessage {
             "iteration_complete" => Ok(SingleTurnReceivableMessage::IterationComplete(
                 serde_json::from_value(data)?,
             )),
+            "conversation_complete" => Ok(SingleTurnReceivableMessage::ConversationComplete(
+                serde_json::from_value(data)?,
+            )),
+            "conversation_error" => Ok(SingleTurnReceivableMessage::ConversationError(
+                serde_json::from_value(data)?,
+            )),
             _ => Err(serde_json::Error::custom(format!(
                 "Unknown message type: {message_type}",
             ))),
@@ -80,6 +89,16 @@ impl From<SingleTurnReceivableMessage> for CategorizedSingleTurnMessage {
             SingleTurnReceivableMessage::IterationComplete(complete) => {
                 CategorizedSingleTurnMessage::OptionalSingleTurnMessage(
                     OptionalSingleTurnMessage::IterationComplete(complete),
+                )
+            }
+            SingleTurnReceivableMessage::ConversationComplete(complete) => {
+                CategorizedSingleTurnMessage::OptionalSingleTurnMessage(
+                    OptionalSingleTurnMessage::ConversationComplete(complete),
+                )
+            }
+            SingleTurnReceivableMessage::ConversationError(error) => {
+                CategorizedSingleTurnMessage::OptionalSingleTurnMessage(
+                    OptionalSingleTurnMessage::ConversationError(error),
                 )
             }
         }

@@ -2,12 +2,10 @@ mod optional;
 mod request;
 mod response;
 
-pub use optional::{
-    ConversationComplete, ConversationCompleteEnvelope, MultiTurnEvaluationStart,
-    OptionalMultiTurnMessage,
-};
+use crate::protocol_types::common::{CompletionRequest, ConversationComplete, ConversationError};
+pub use optional::{MultiTurnEvaluationStart, OptionalMultiTurnMessage};
 pub use request::{MultiTurnRequest, MultiTurnRequestEnvelope, MultiTurnTestType};
-pub use response::{FailedMultiTurnResult, MultiTurnResponse, MultiTurnResponseEnvelope};
+pub use response::MultiTurnResponse;
 use serde::{Deserialize, Serialize, de::Error};
 
 /// Messages that the server may send to the client during multi-turn evaluation (Server -> Client).
@@ -17,13 +15,14 @@ pub enum MultiTurnReceivableMessage {
     MultiTurnResponse(MultiTurnResponse),
     ConversationComplete(ConversationComplete),
     MultiTurnEvaluationStart(MultiTurnEvaluationStart),
+    ConversationError(ConversationError),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CategorizedMultiTurnMessage {
-    CompletionRequest(super::common::CompletionRequest),
+    CompletionRequest(CompletionRequest),
     MultiTurnResponse(MultiTurnResponse),
-    OptionalMultiTurnMessage(optional::OptionalMultiTurnMessage),
+    OptionalMultiTurnMessage(OptionalMultiTurnMessage),
 }
 
 impl TryFrom<&[u8]> for MultiTurnReceivableMessage {
@@ -55,6 +54,9 @@ impl TryFrom<&[u8]> for MultiTurnReceivableMessage {
             "multi_turn_evaluation_start" => Ok(
                 MultiTurnReceivableMessage::MultiTurnEvaluationStart(serde_json::from_value(data)?),
             ),
+            "conversation_error" => Ok(MultiTurnReceivableMessage::ConversationError(
+                serde_json::from_value(data)?,
+            )),
             _ => Err(serde_json::Error::custom(format!(
                 "Unknown message type: {message_type}",
             ))),
@@ -79,6 +81,11 @@ impl From<MultiTurnReceivableMessage> for CategorizedMultiTurnMessage {
             MultiTurnReceivableMessage::MultiTurnEvaluationStart(start) => {
                 CategorizedMultiTurnMessage::OptionalMultiTurnMessage(
                     optional::OptionalMultiTurnMessage::MultiTurnEvaluationStart(start),
+                )
+            }
+            MultiTurnReceivableMessage::ConversationError(error) => {
+                CategorizedMultiTurnMessage::OptionalMultiTurnMessage(
+                    optional::OptionalMultiTurnMessage::ConversationError(error),
                 )
             }
         }

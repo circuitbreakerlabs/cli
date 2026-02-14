@@ -1,9 +1,12 @@
+use crate::protocol_types::common::{ConversationComplete, ConversationError};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum OptionalSingleTurnMessage {
     IterationStart(IterationStart),
     IterationComplete(IterationComplete),
+    ConversationComplete(ConversationComplete),
+    ConversationError(ConversationError),
 }
 
 /// Payload for `IterationStartEnvelope` messages (Server -> Client).
@@ -11,8 +14,8 @@ pub enum OptionalSingleTurnMessage {
 pub struct IterationStart {
     /// Current iteration index
     pub iteration_number: i32,
-    /// Number of test cases in this iteration
-    pub total_test_cases: i32,
+    /// Conversation identifiers that will be evaluated in this iteration
+    pub conversation_ids: Vec<i32>,
 }
 
 /// Server indicates the start of a new evaluation iteration/layer.
@@ -30,10 +33,10 @@ pub struct IterationStartEnvelope {
 pub struct IterationComplete {
     /// Completed iteration index
     pub iteration_number: i32,
-    /// Test cases passed in this iteration
-    pub total_passed: i32,
-    /// Test cases failed in this iteration
-    pub total_failed: i32,
+    /// Conversation identifiers that passed in this iteration
+    pub passed_conversation_ids: Vec<i32>,
+    /// Conversation identifiers that failed in this iteration
+    pub failed_conversation_ids: Vec<i32>,
 }
 
 /// Server indicates completion of an evaluation iteration/layer.
