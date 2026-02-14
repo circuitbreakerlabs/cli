@@ -46,6 +46,7 @@ impl From<LogLevel> for tracing::Level {
 }
 
 #[derive(Clone, ValueEnum, Debug)]
+#[value(rename_all = "lowercase")]
 pub enum ProtocolShape {
     Ollama,
     OpenAI,
