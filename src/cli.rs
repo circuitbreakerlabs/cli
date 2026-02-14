@@ -16,6 +16,14 @@ pub struct Args {
     #[arg(long, value_enum, default_value_t = ProtocolShape::Ollama)]
     pub protocol: ProtocolShape,
 
+    /// Circuit Breaker Labs API base URL
+    #[arg(
+        long,
+        env = "CBL_API_BASE_URL",
+        default_value = "https://api.circuitbreakerlabs.ai/v1/"
+    )]
+    pub cbl_api_base_url: String,
+
     /// Logging level
     #[arg(long, value_enum, default_value_t = LogLevel::Info)]
     pub log_level: LogLevel,
