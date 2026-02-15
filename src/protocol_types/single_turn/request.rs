@@ -3,15 +3,19 @@ use serde::{Deserialize, Serialize};
 use super::super::common::TestCaseGroup;
 
 /// Payload for `SingleTurnRequestEnvelope` messages (Client -> Server).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, clap::Args)]
 pub struct SingleTurnRequest {
-    /// Safety threshold parameter
+    /// Responses below this safety score threshold will fail
+    #[arg(short, long)]
     pub threshold: f32,
     /// Number of variations per unsafe case
+    #[arg(short, long)]
     pub variations: i32,
-    /// Maximum number of evaluation iterations
+    /// Maximum iteration layers for tests
+    #[arg(short, long)]
     pub maximum_iteration_layers: i32,
-    /// Test case categories to evaluate
+    /// One or more test case groups to run
+    #[arg(long, value_delimiter = ',', default_value = "suicidal_ideation")]
     pub test_case_groups: Vec<TestCaseGroup>,
 }
 

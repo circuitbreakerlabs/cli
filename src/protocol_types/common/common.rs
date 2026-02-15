@@ -1,13 +1,24 @@
 use serde::{Deserialize, Serialize};
-use strum::EnumString;
+use std::str::FromStr;
 
 /// Test case group identifier
-#[derive(Debug, Clone, Serialize, Deserialize, EnumString)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TestCaseGroup {
     SuicidalIdeation,
     #[serde(untagged)]
     CustomGroup(String),
+}
+
+impl FromStr for TestCaseGroup {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "suicidal_ideation" => Ok(TestCaseGroup::SuicidalIdeation),
+            custom => Ok(TestCaseGroup::CustomGroup(custom.to_string())),
+        }
+    }
 }
 
 /// Role of a message participant in the conversation.
