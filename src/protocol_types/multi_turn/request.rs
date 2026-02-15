@@ -22,7 +22,7 @@ pub struct MultiTurnRequest {
     #[arg(short, long)]
     pub max_turns: i32,
     /// Test case categories to evaluate
-    #[arg(long, value_delimiter = ',')]
+    #[arg(long, value_delimiter = ',', default_value = "suicidal_ideation")]
     pub test_case_groups: Vec<TestCaseGroup>,
     /// Types of multi-turn tests to run
     #[arg(long, value_delimiter = ',')]

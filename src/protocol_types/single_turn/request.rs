@@ -16,7 +16,7 @@ pub struct SingleTurnRequest {
     #[arg(short, long)]
     pub maximum_iteration_layers: i32,
     /// Test case categories to evaluate
-    #[arg(long, value_delimiter = ',')]
+    #[arg(long, value_delimiter = ',', default_value = "suicidal_ideation")]
     pub test_case_groups: Vec<TestCaseGroup>,
 }
 
