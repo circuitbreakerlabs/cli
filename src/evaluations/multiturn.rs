@@ -4,7 +4,7 @@ use crate::protocol_types::multi_turn::{
     MultiTurnRequestEnvelope, MultiTurnResponse,
 };
 use crate::protocol_types::{self};
-use crate::response_provider::CompletionGenerator;
+use crate::response_provider::ResponseProvider;
 use crate::websockets::WebSocketConnection;
 
 use futures_util::stream::{SplitSink, SplitStream};
@@ -22,11 +22,11 @@ enum WriterMessage {
 
 async fn handle_completion_request(
     request: protocol_types::CompletionRequest,
-    completion_generator: CompletionGenerator,
+    response_provider: impl ResponseProvider,
     writer_tx: tokio::sync::mpsc::Sender<WriterMessage>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let completion = completion_generator
-        .generate_completions(&request.messages)
+    let completion = response_provider
+        .generate_response(&request.messages)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -74,7 +74,7 @@ async fn handle_optional_message(
 /// Listens for incoming messages from the server, processes them, and sends completion responses or errors back to the writer task.
 async fn reader_task(
     mut read: SplitStream<WebSocketConnection>,
-    completion_generator: CompletionGenerator,
+    response_provider: impl ResponseProvider + 'static,
     writer_tx: tokio::sync::mpsc::Sender<WriterMessage>,
 ) -> Result<MultiTurnResponse, Box<dyn std::error::Error + Send + Sync>> {
     while let Some(msg) = read.next().await {
@@ -87,7 +87,7 @@ async fn reader_task(
                     Ok(CategorizedMultiTurnMessage::CompletionRequest(req)) => {
                         tokio::spawn(handle_completion_request(
                             req,
-                            completion_generator.clone(),
+                            response_provider.clone(),
                             writer_tx.clone(),
                         ));
                     }
@@ -181,7 +181,7 @@ async fn writer_task(
 
 pub async fn run_evaluation(
     websocket_connection: WebSocketConnection,
-    completion_generator: CompletionGenerator,
+    response_provider: impl ResponseProvider + 'static,
     request: MultiTurnRequest,
 ) -> Result<MultiTurnResponse, Box<dyn std::error::Error + Send + Sync>> {
     let (mut write, read) = websocket_connection.split();
@@ -193,7 +193,7 @@ pub async fn run_evaluation(
         ))
         .await?;
 
-    let reader_handle = tokio::spawn(reader_task(read, completion_generator, writer_tx.clone()));
+    let reader_handle = tokio::spawn(reader_task(read, response_provider, writer_tx.clone()));
     let write_handle = tokio::spawn(writer_task(write, writer_rx));
 
     let multi_turn_response = reader_handle.await??;
