@@ -2,13 +2,18 @@ use super::ResponseProvider;
 use super::types::CompletionResponse;
 use crate::protocol_types;
 use async_trait::async_trait;
+use ollama_rs;
 use reqwest::header;
 
 #[derive(Clone, Debug, clap::Args)]
 pub struct OllamaProviderConfig {
     /// Ollama Base URL
-    #[arg(long, env = "OLLAMA_BASE_URL")]
-    endpoint: String,
+    #[arg(
+        long,
+        env = "OLLAMA_BASE_URL",
+        default_value = "http://localhost:11434/v1"
+    )]
+    base_url: String,
 
     /// Ollama model name
     #[arg(long)]
@@ -18,15 +23,11 @@ pub struct OllamaProviderConfig {
 #[derive(Clone)]
 pub struct OllamaProvider {
     client: reqwest::Client,
-    completion_endpoint: String,
-    model: String,
+    config: OllamaProviderConfig,
 }
 
 impl OllamaProvider {
-    pub fn new(
-        completion_endpoint: impl Into<String>,
-        model: impl Into<String>,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(config: OllamaProviderConfig) -> Result<Self, Box<dyn std::error::Error>> {
         let headers = header::HeaderMap::from_iter([(
             header::CONTENT_TYPE,
             header::HeaderValue::from_static("application/json"),
@@ -36,11 +37,7 @@ impl OllamaProvider {
             .default_headers(headers)
             .build()?;
 
-        Ok(Self {
-            client,
-            completion_endpoint: completion_endpoint.into(),
-            model: model.into(),
-        })
+        Ok(Self { client, config })
     }
 }
 
@@ -51,13 +48,13 @@ impl ResponseProvider for OllamaProvider {
         conversation_history: &[protocol_types::Message],
     ) -> Result<protocol_types::Message, Box<dyn std::error::Error>> {
         let request_body = serde_json::json!({
-            "model": self.model,
+            "model": self.config.model,
             "messages": conversation_history,
         });
 
         let response = self
             .client
-            .post(&self.completion_endpoint)
+            .post(format!("{}/chat/completions", &self.config.base_url))
             .json(&request_body)
             .send()
             .await?
