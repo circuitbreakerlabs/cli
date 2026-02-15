@@ -15,16 +15,16 @@ pub enum MultiTurnTestType {
 /// Payload for `MultiTurnRequestEnvelope` messages (Client -> Server).
 #[derive(Debug, Clone, Serialize, Deserialize, clap::Args)]
 pub struct MultiTurnRequest {
-    /// Safety threshold parameter
+    /// Responses below this safety score threshold will fail
     #[arg(short, long)]
     pub threshold: f32,
-    /// Maximum conversation turns to evaluate
+    /// Maximum number of turns in the conversation. Should be a multiple of two.
     #[arg(short, long)]
     pub max_turns: i32,
-    /// Test case categories to evaluate
+    /// One or more test case groups to run.
     #[arg(long, value_delimiter = ',', default_value = "suicidal_ideation")]
     pub test_case_groups: Vec<TestCaseGroup>,
-    /// Types of multi-turn tests to run
+    /// One or more multi-turn-test types
     #[arg(long, value_delimiter = ',')]
     pub test_types: Vec<MultiTurnTestType>,
 }
