@@ -1,4 +1,3 @@
-use clap;
 use serde::{Deserialize, Serialize};
 
 use super::super::common::TestCaseGroup;
