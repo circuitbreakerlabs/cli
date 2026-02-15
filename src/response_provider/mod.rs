@@ -8,7 +8,7 @@ use async_trait::async_trait;
 pub use completion_generator::CompletionGenerator;
 
 #[async_trait]
-pub trait ResponseProvider: Send + Sync {
+pub trait ResponseProvider: Send + Sync + Clone {
     async fn generate_response(
         &self,
         conversation_history: &[protocol_types::Message],
