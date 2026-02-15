@@ -1,17 +1,19 @@
+use super::ResponseProvider;
 use super::types::CompletionResponse;
-use crate::protocol_types::Message;
+use crate::protocol_types;
+use async_trait::async_trait;
 use reqwest::header;
 
 #[derive(Clone)]
-pub struct CompletionGenerator {
+pub struct OllamaProvider {
     client: reqwest::Client,
-    base_url: String,
+    completion_endpoint: String,
     model: String,
 }
 
-impl CompletionGenerator {
+impl OllamaProvider {
     pub fn new(
-        base_url: impl Into<String>,
+        completion_endpoint: impl Into<String>,
         model: impl Into<String>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let headers = header::HeaderMap::from_iter([(
@@ -25,15 +27,18 @@ impl CompletionGenerator {
 
         Ok(Self {
             client,
-            base_url: base_url.into(),
+            completion_endpoint: completion_endpoint.into(),
             model: model.into(),
         })
     }
+}
 
-    pub async fn generate_completions(
+#[async_trait]
+impl ResponseProvider for OllamaProvider {
+    async fn generate_response(
         &self,
-        conversation_history: &[Message],
-    ) -> Result<Message, Box<dyn std::error::Error>> {
+        conversation_history: &[protocol_types::Message],
+    ) -> Result<protocol_types::Message, Box<dyn std::error::Error>> {
         let request_body = serde_json::json!({
             "model": self.model,
             "messages": conversation_history,
@@ -41,7 +46,7 @@ impl CompletionGenerator {
 
         let response = self
             .client
-            .post(format!("{}/v1/chat/completions", self.base_url))
+            .post(&self.completion_endpoint)
             .json(&request_body)
             .send()
             .await?

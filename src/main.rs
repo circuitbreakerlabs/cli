@@ -1,8 +1,8 @@
 mod cli;
-mod completions;
 mod consts;
 mod evaluations;
 mod protocol_types;
+mod response_provider;
 mod websockets;
 
 use clap::Parser;
