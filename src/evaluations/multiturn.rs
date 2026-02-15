@@ -1,10 +1,10 @@
-use crate::completions::CompletionGenerator;
 use crate::protocol_types::common::CompletionResponseEnvelope;
 use crate::protocol_types::multi_turn::{
     CategorizedMultiTurnMessage, MultiTurnReceivableMessage, MultiTurnRequest,
     MultiTurnRequestEnvelope, MultiTurnResponse,
 };
 use crate::protocol_types::{self};
+use crate::response_provider::CompletionGenerator;
 use crate::websockets::WebSocketConnection;
 
 use futures_util::stream::{SplitSink, SplitStream};
