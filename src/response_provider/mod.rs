@@ -1,11 +1,8 @@
-mod completion_generator;
 pub mod ollama;
 mod types;
 
 use crate::protocol_types;
 use async_trait::async_trait;
-
-pub use completion_generator::CompletionGenerator;
 
 #[async_trait]
 pub trait ResponseProvider: Send + Sync + Clone {
