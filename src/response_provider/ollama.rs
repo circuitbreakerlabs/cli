@@ -4,6 +4,17 @@ use crate::protocol_types;
 use async_trait::async_trait;
 use reqwest::header;
 
+#[derive(Clone, Debug, clap::Args)]
+pub struct OllamaProviderConfig {
+    /// Ollama Base URL
+    #[arg(long, env = "OLLAMA_BASE_URL")]
+    endpoint: String,
+
+    /// Ollama model name
+    #[arg(long)]
+    model: String,
+}
+
 #[derive(Clone)]
 pub struct OllamaProvider {
     client: reqwest::Client,

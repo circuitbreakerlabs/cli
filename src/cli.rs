@@ -1,4 +1,7 @@
 use crate::protocol_types::{MultiTurnRequest, SingleTurnRequest};
+use crate::response_provider::{
+    AnthropicProviderConfig, OllamaProviderConfig, OpenAIProviderConfig,
+};
 use clap::{Parser, Subcommand, ValueEnum};
 
 macro_rules! cyan_bold {
@@ -30,14 +33,6 @@ pub struct Args {
     #[arg(long, env = "CBL_API_KEY")]
     pub cbl_api_key: String,
 
-    /// Completion endpoint URL
-    #[arg(long, env = "COMPLETION_ENDPOINT")]
-    pub endpoint: String,
-
-    /// Input/output protocol shape for the completion endpoint
-    #[arg(long, value_enum, default_value_t = ProtocolShape::Ollama)]
-    pub protocol: ProtocolShape,
-
     /// Circuit Breaker Labs API base URL
     #[arg(
         long,
@@ -51,7 +46,37 @@ pub struct Args {
     pub log_level: LogLevel,
 
     #[command(subcommand)]
-    pub command: EvalCommand,
+    pub evaluation: EvaluationCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum EvaluationCommand {
+    /// Run single-turn evaluation
+    SingleTurn {
+        #[command(subcommand)]
+        provider: ProviderCommand,
+        #[command(flatten)]
+        request: SingleTurnRequest,
+    },
+
+    /// Run multi-turn evaluation
+    MultiTurn {
+        #[command(subcommand)]
+        provider: ProviderCommand,
+        #[command(flatten)]
+        request: MultiTurnRequest,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+#[command(rename_all = "lowercase")]
+pub enum ProviderCommand {
+    /// Use Ollama provider
+    Ollama(OllamaProviderConfig),
+    /// Use OpenAI provider
+    OpenAI(OpenAIProviderConfig),
+    /// Use Anthropic provider
+    Anthropic(AnthropicProviderConfig),
 }
 
 #[derive(Clone, ValueEnum, Debug)]
@@ -73,20 +98,4 @@ impl From<LogLevel> for tracing::Level {
             LogLevel::Trace => tracing::Level::TRACE,
         }
     }
-}
-
-#[derive(Clone, ValueEnum, Debug)]
-#[value(rename_all = "lowercase")]
-pub enum ProtocolShape {
-    Ollama,
-    OpenAI,
-    Anthropic,
-}
-
-#[derive(Subcommand, Debug)]
-pub enum EvalCommand {
-    /// Run single-turn evaluation
-    SingleTurn(SingleTurnRequest),
-    /// Run multi-turn evaluation
-    MultiTurn(MultiTurnRequest),
 }
