@@ -37,7 +37,7 @@ pub struct Args {
     #[arg(
         long,
         env = "CBL_API_BASE_URL",
-        default_value = "https://api.circuitbreakerlabs.ai/v1/"
+        default_value = crate::consts::endpoints::CBL_BASE_URL
     )]
     pub cbl_api_base_url: String,
 
