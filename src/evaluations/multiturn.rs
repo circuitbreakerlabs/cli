@@ -10,6 +10,7 @@ use crate::websockets::WebSocketConnection;
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use protocol_types::multi_turn::OptionalMultiTurnMessage;
+use std::sync::Arc;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 
@@ -22,7 +23,7 @@ enum WriterMessage {
 
 async fn handle_completion_request(
     request: protocol_types::CompletionRequest,
-    response_provider: impl ResponseProvider,
+    response_provider: Arc<dyn ResponseProvider>,
     writer_tx: tokio::sync::mpsc::Sender<WriterMessage>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let completion = response_provider
@@ -74,7 +75,7 @@ async fn handle_optional_message(
 /// Listens for incoming messages from the server, processes them, and sends completion responses or errors back to the writer task.
 async fn reader_task(
     mut read: SplitStream<WebSocketConnection>,
-    response_provider: impl ResponseProvider + 'static,
+    response_provider: Arc<dyn ResponseProvider>,
     writer_tx: tokio::sync::mpsc::Sender<WriterMessage>,
 ) -> Result<MultiTurnResponse, Box<dyn std::error::Error + Send + Sync>> {
     while let Some(msg) = read.next().await {
@@ -181,7 +182,7 @@ async fn writer_task(
 
 pub async fn run_evaluation(
     websocket_connection: WebSocketConnection,
-    response_provider: impl ResponseProvider + 'static,
+    response_provider: Arc<dyn ResponseProvider>,
     request: MultiTurnRequest,
 ) -> Result<MultiTurnResponse, Box<dyn std::error::Error + Send + Sync>> {
     let (mut write, read) = websocket_connection.split();

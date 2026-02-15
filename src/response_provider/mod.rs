@@ -5,7 +5,7 @@ use crate::protocol_types;
 use async_trait::async_trait;
 
 #[async_trait]
-pub trait ResponseProvider: Send + Sync + Clone {
+pub trait ResponseProvider: Send + Sync {
     async fn generate_response(
         &self,
         conversation_history: &[protocol_types::Message],
