@@ -1,8 +1,30 @@
 use crate::protocol_types::{MultiTurnRequest, SingleTurnRequest};
 use clap::{Parser, Subcommand, ValueEnum};
 
+macro_rules! cyan_bold {
+    ($s:expr) => {
+        const_format::formatcp!("\x1b[1;36m{}\x1b[0m", $s)
+    };
+}
+
+const ABOUT: &str = cyan_bold!("Circuit Breaker Labs CLI");
+
+const LONG_ABOUT: &str = const_format::formatcp!(
+    "{} {}
+
+https://github.com/circuitbreakerlabs/cli
+Protocol version {}",
+    cyan_bold!("Circuit Breaker Labs CLI"),
+    cyan_bold!(const_format::formatcp!("v{}", env!("CARGO_PKG_VERSION"))),
+    crate::consts::version::PROTOCOL_VERSION
+);
+
 #[derive(Parser, Debug)]
-#[command(about = "Circuit Breaker Labs CLI", long_about = None)]
+#[command(
+    version,
+    about = ABOUT,
+    long_about = LONG_ABOUT
+)]
 pub struct Args {
     /// Circuit Breaker Labs API key
     #[arg(long, env = "CBL_API_KEY")]
