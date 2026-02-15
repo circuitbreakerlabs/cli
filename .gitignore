@@ -22,3 +22,7 @@ target
 
 # Nix
 result
+
+# Ignores files containing .local. within the name
+**/*.local.*
+*.local
