@@ -6,6 +6,7 @@ mod response_provider;
 mod websockets;
 
 use std::sync::Arc;
+use url::Url;
 
 use clap::Parser;
 use response_provider::{AnthropicProvider, OllamaProvider, OpenAIProvider, ResponseProvider};
@@ -35,18 +36,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    let websocket = {
-        let endpoint = match &cli_args.evaluation {
-            cli::EvaluationCommand::SingleTurn { .. } => consts::endpoints::SINGLE_TURN_ENDPOINT,
-            cli::EvaluationCommand::MultiTurn { .. } => consts::endpoints::MULTI_TURN_ENDPOINT,
-        };
-
-        websockets::connect(
-            format!("{}/{}", cli_args.cbl_api_base_url, endpoint).as_str(),
-            &cli_args.cbl_api_key,
-        )
-        .await?
-    };
+    let websocket = websockets::connect(
+        &cli_args.cbl_api_base_url,
+        (&cli_args.evaluation).into(),
+        &cli_args.cbl_api_key,
+    )
+    .await?;
 
     match cli_args.evaluation {
         cli::EvaluationCommand::SingleTurn { request, .. } => {
