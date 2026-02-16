@@ -15,8 +15,7 @@ impl TryFrom<&OllamaMessageRole> for protocol_types::Role {
             OllamaMessageRole::Assistant => Ok(protocol_types::Role::Assistant),
             OllamaMessageRole::System => Ok(protocol_types::Role::System),
             OllamaMessageRole::Tool => Err(
-                "System messages from Ollama cannot be converted to protocol_types::Role"
-                    .to_string(),
+                "Tool messages from Ollama cannot be converted to protocol_types::Role".to_string(),
             ),
         }
     }
