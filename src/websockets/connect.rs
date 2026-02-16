@@ -1,6 +1,5 @@
 use crate::consts::headers;
 use tokio::net::TcpStream;
-use tokio_tungstenite::tungstenite;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use url::Url;
@@ -13,7 +12,7 @@ pub async fn connect(
     api_key: &str,
 ) -> Result<WebSocketConnection, Box<dyn std::error::Error>> {
     let endpoint = crate::consts::endpoints::endpoint_from_evaluation_type(&evaluation_type);
-    let mut url = Url::parse(format!("{}/{}", base_url, endpoint).as_str())?;
+    let mut url = Url::parse(format!("{base_url}/{endpoint}").as_str())?;
 
     url.set_path(
         url.path()

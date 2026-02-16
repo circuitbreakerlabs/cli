@@ -5,12 +5,9 @@ mod request;
 mod response;
 
 use super::common::{CompletionRequest, ConversationComplete, ConversationError};
-pub use optional::{
-    IterationComplete, IterationCompleteEnvelope, IterationStart, IterationStartEnvelope,
-    OptionalSingleTurnMessage,
-};
+pub use optional::{IterationComplete, IterationStart, OptionalSingleTurnMessage};
 pub use request::{SingleTurnRequest, SingleTurnRequestEnvelope};
-pub use response::{FailedSingleTurnResult, SingleTurnResponse, SingleTurnResponseEnvelope};
+pub use response::SingleTurnResponse;
 
 /// Messages that the server may send to the client during single-turn evaluation (Server -> Client).
 #[derive(Debug, Clone, Serialize, Deserialize)]

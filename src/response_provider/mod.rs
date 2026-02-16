@@ -1,7 +1,6 @@
 pub mod anthropic;
 pub mod ollama;
 pub mod openai;
-mod types;
 
 use crate::protocol_types;
 pub use anthropic::{AnthropicProvider, AnthropicProviderConfig};

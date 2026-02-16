@@ -4,12 +4,6 @@ mod errors;
 mod optional;
 
 pub use common::{
-    CompletionRequest, CompletionRequestEnvelope, CompletionResponse, CompletionResponseEnvelope,
-    Message, Role, TestCaseGroup,
+    CompletionRequest, CompletionResponse, CompletionResponseEnvelope, Message, Role, TestCaseGroup,
 };
-pub use errors::{CompletionErrorCode, ServerErrorCode};
-
-pub use optional::{
-    ConversationComplete, ConversationCompleteEnvelope, ConversationError,
-    ConversationErrorEnvelope,
-};
+pub use optional::{ConversationComplete, ConversationError};

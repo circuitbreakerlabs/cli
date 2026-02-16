@@ -1,6 +1,4 @@
-use crate::protocol_types::common::{
-    ConversationComplete, ConversationCompleteEnvelope, ConversationError,
-};
+use crate::protocol_types::common::{ConversationComplete, ConversationError};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

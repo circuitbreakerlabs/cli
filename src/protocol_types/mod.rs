@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 pub mod common;
 pub mod multi_turn;
 pub mod single_turn;
