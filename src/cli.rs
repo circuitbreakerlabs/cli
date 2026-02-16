@@ -26,7 +26,8 @@ Protocol version {}",
 #[command(
     version,
     about = ABOUT,
-    long_about = LONG_ABOUT
+    long_about = LONG_ABOUT,
+    arg_required_else_help = true
 )]
 pub struct Args {
     /// Circuit Breaker Labs API key
