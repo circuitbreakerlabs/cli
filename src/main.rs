@@ -6,7 +6,6 @@ mod response_provider;
 mod websockets;
 
 use std::sync::Arc;
-use url::Url;
 
 use clap::Parser;
 use response_provider::{AnthropicProvider, OllamaProvider, OpenAIProvider, ResponseProvider};
