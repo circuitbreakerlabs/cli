@@ -33,7 +33,13 @@
           let
             rustShell = pkgs.mkShell {
               name = "rust-development-shell";
-              nativeBuildInputs = rustBin ++ (with pkgs; [ rust-analyzer ]);
+              nativeBuildInputs =
+                rustBin
+                ++ (with pkgs; [
+                  rust-analyzer
+                  openssl
+                  pkg-config
+                ]);
             };
           in
           {
