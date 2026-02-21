@@ -89,9 +89,12 @@ fn parse_logit_bias(s: &str) -> Result<HashMap<String, i8>, String> {
             return Err("Invalid logit_bias format. Expected token_id:bias_value".to_string());
         }
         let token_id = parts[0].to_string();
-        let bias: i8 = parts[1]
-            .parse()
-            .map_err(|_| "Bias value must be an integer between -100 and 100".to_string())?;
+
+        let bias = match parts[1].parse() {
+            Ok(b) if (-100..=100).contains(&b) => b,
+            _ => return Err("Bias value must be an integer between -100 and 100".into()),
+        };
+
         map.insert(token_id, bias);
     }
     Ok(map)
