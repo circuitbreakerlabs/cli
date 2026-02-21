@@ -68,12 +68,15 @@ impl ResponseProvider for OpenAIProvider {
 
         let response = self.client.chat().create(request).await?;
 
-        let choice = response
+        let err_no_resp = "No response received from OpenAI";
+        let content = response
             .choices
-            .first()
-            .ok_or("No response received from OpenAI")?;
-
-        let content = choice.message.content.clone().unwrap_or_default();
+            .into_iter()
+            .next()
+            .ok_or(err_no_resp)?
+            .message
+            .content
+            .ok_or(err_no_resp)?;
 
         Ok(protocol_types::Message {
             role: protocol_types::Role::Assistant,
