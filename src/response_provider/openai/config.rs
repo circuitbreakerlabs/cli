@@ -1,4 +1,6 @@
-use async_openai::types::chat::{CreateChatCompletionRequest, StopConfiguration};
+use async_openai::types::chat::{
+    CreateChatCompletionRequest, ReasoningEffort, ServiceTier, StopConfiguration,
+};
 use std::collections::HashMap;
 
 const OPENAI_API_KEY: &str = "OPENAI_API_KEY";
@@ -25,6 +27,50 @@ pub struct RequiredOpenAIArgs {
     /// OpenAI model name (e.g., gpt-4o, gpt-4-turbo, gpt-3.5-turbo)
     #[arg(long)]
     pub model: String,
+}
+
+#[derive(Clone, Debug, clap::ValueEnum)]
+pub enum OpenAIReasoningEffort {
+    None,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    Xhigh,
+}
+
+impl From<OpenAIReasoningEffort> for ReasoningEffort {
+    fn from(effort: OpenAIReasoningEffort) -> Self {
+        match effort {
+            OpenAIReasoningEffort::None => ReasoningEffort::None,
+            OpenAIReasoningEffort::Minimal => ReasoningEffort::Minimal,
+            OpenAIReasoningEffort::Low => ReasoningEffort::Low,
+            OpenAIReasoningEffort::Medium => ReasoningEffort::Medium,
+            OpenAIReasoningEffort::High => ReasoningEffort::High,
+            OpenAIReasoningEffort::Xhigh => ReasoningEffort::Xhigh,
+        }
+    }
+}
+
+#[derive(Clone, Debug, clap::ValueEnum)]
+pub enum OpenAIServiceTier {
+    Auto,
+    Default,
+    Flex,
+    Scale,
+    Priority,
+}
+
+impl From<OpenAIServiceTier> for ServiceTier {
+    fn from(tier: OpenAIServiceTier) -> Self {
+        match tier {
+            OpenAIServiceTier::Auto => ServiceTier::Auto,
+            OpenAIServiceTier::Default => ServiceTier::Default,
+            OpenAIServiceTier::Flex => ServiceTier::Flex,
+            OpenAIServiceTier::Scale => ServiceTier::Scale,
+            OpenAIServiceTier::Priority => ServiceTier::Priority,
+        }
+    }
 }
 
 #[derive(Clone, Debug, clap::Args)]
@@ -88,11 +134,11 @@ pub struct OptionalOpenAIArgs {
 
     /// Specifies the processing type used for serving the request
     #[arg(long)]
-    pub service_tier: Option<String>,
+    pub service_tier: Option<OpenAIServiceTier>,
 
     /// Constrains effort on reasoning for reasoning models (minimal, low, medium, high)
     #[arg(long)]
-    pub reasoning_effort: Option<String>,
+    pub reasoning_effort: Option<OpenAIReasoningEffort>,
 }
 
 fn parse_logit_bias(s: &str) -> Result<HashMap<String, i8>, String> {
@@ -197,6 +243,14 @@ impl OpenAIProviderConfig {
 
         if let Some(store) = self.optional.store {
             request.store = Some(store);
+        }
+
+        if let Some(ref service_tier) = self.optional.service_tier {
+            request.service_tier = Some(service_tier.clone().into());
+        }
+
+        if let Some(ref reasoning_effort) = self.optional.reasoning_effort {
+            request.reasoning_effort = Some(reasoning_effort.clone().into());
         }
 
         request
