@@ -1,11 +1,25 @@
 use async_openai::types::chat::{CreateChatCompletionRequest, StopConfiguration};
 use std::collections::HashMap;
 
+const OPENAI_API_KEY: &str = "OPENAI_API_KEY";
+
+fn masked_api_key() -> String {
+    let var = std::env::var(OPENAI_API_KEY).ok();
+
+    let masked = match var {
+        Some(v) if v.len() > 4 => format!("****{}", &v[v.len() - 4..]),
+        Some(_) => "****".to_string(),
+        None => String::new(),
+    };
+
+    format!("[env: {OPENAI_API_KEY}={masked}]")
+}
+
 #[derive(Clone, Debug, clap::Args)]
 #[clap(next_help_heading = "Required Options")]
 pub struct RequiredOpenAIArgs {
     /// OpenAI API key
-    #[arg(long, env = "OPENAI_API_KEY")]
+    #[arg(long, env = OPENAI_API_KEY, help = masked_api_key(), hide_env = true)]
     pub api_key: String,
 
     /// OpenAI model name (e.g., gpt-4o, gpt-4-turbo, gpt-3.5-turbo)
