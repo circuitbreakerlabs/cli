@@ -8,7 +8,9 @@ mod websockets;
 use std::sync::Arc;
 
 use clap::Parser;
-use response_provider::{AnthropicProvider, CustomProvider, OllamaProvider, OpenAIProvider, ResponseProvider};
+use response_provider::{
+    AnthropicProvider, CustomProvider, OllamaProvider, OpenAIProvider, ResponseProvider,
+};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -18,6 +20,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_max_level(Into::<tracing::Level>::into(cli_args.log_level))
         .init();
 
+    let headers = cli_args.headers();
+
     let provider_command = match &cli_args.evaluation {
         cli::EvaluationCommand::SingleTurn { provider, .. }
         | cli::EvaluationCommand::MultiTurn { provider, .. } => provider,
@@ -25,16 +29,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let provider = match provider_command {
         cli::ProviderCommand::Ollama(config) => {
-            Arc::new(OllamaProvider::new(config.clone())?) as Arc<dyn ResponseProvider>
+            Arc::new(OllamaProvider::new(config.clone(), &headers)?) as Arc<dyn ResponseProvider>
         }
         cli::ProviderCommand::OpenAI(config) => {
-            Arc::new(OpenAIProvider::new(config.clone())?) as Arc<dyn ResponseProvider>
+            Arc::new(OpenAIProvider::new(config.clone(), &headers)?) as Arc<dyn ResponseProvider>
         }
         cli::ProviderCommand::Anthropic(config) => {
-            Arc::new(AnthropicProvider::new(config.clone())?) as Arc<dyn ResponseProvider>
+            Arc::new(AnthropicProvider::new(config.clone(), &headers)?) as Arc<dyn ResponseProvider>
         }
         cli::ProviderCommand::Custom(config) => {
-            Arc::new(CustomProvider::new(&config)?) as Arc<dyn ResponseProvider>
+            Arc::new(CustomProvider::new(&config, &headers)?) as Arc<dyn ResponseProvider>
         }
     };
 

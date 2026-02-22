@@ -2,6 +2,7 @@ use super::config::CustomProviderConfig;
 use crate::protocol_types;
 use crate::response_provider::ResponseProvider;
 use async_trait::async_trait;
+use reqwest::header::HeaderMap;
 use rhai::serde::to_dynamic;
 
 pub struct CustomProvider {
@@ -12,10 +13,15 @@ pub struct CustomProvider {
 }
 
 impl CustomProvider {
-    pub fn new(config: &CustomProviderConfig) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(
+        config: &CustomProviderConfig,
+        headers: &HeaderMap,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let engine = rhai::Engine::new();
         let ast = engine.compile_file(config.script.clone())?;
-        let client = reqwest::Client::new();
+        let client = reqwest::Client::builder()
+            .default_headers(headers.clone())
+            .build()?;
 
         Ok(Self {
             ast,
@@ -59,4 +65,3 @@ impl ResponseProvider for CustomProvider {
         })
     }
 }
-
