@@ -8,7 +8,7 @@ mod websockets;
 use std::sync::Arc;
 
 use clap::Parser;
-use response_provider::{AnthropicProvider, OllamaProvider, OpenAIProvider, ResponseProvider};
+use response_provider::{AnthropicProvider, CustomProvider, OllamaProvider, OpenAIProvider, ResponseProvider};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -32,6 +32,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         cli::ProviderCommand::Anthropic(config) => {
             Arc::new(AnthropicProvider::new(config.clone())?) as Arc<dyn ResponseProvider>
+        }
+        cli::ProviderCommand::Custom(config) => {
+            Arc::new(CustomProvider::new(&config)?) as Arc<dyn ResponseProvider>
         }
     };
 

@@ -1,10 +1,12 @@
 pub mod anthropic;
+pub mod custom;
 pub mod ollama;
 pub mod openai;
 
 use crate::protocol_types;
 pub use anthropic::{AnthropicProvider, AnthropicProviderConfig};
 use async_trait::async_trait;
+pub use custom::{CustomProvider, CustomProviderConfig};
 pub use ollama::{OllamaProvider, OllamaProviderConfig};
 pub use openai::{OpenAIProvider, OpenAIProviderConfig};
 
