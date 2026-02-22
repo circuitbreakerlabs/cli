@@ -1,6 +1,6 @@
 use crate::protocol_types::{MultiTurnRequest, SingleTurnRequest};
 use crate::response_provider::{
-    AnthropicProviderConfig, OllamaProviderConfig, OpenAIProviderConfig,
+    AnthropicProviderConfig, CustomProviderConfig, OllamaProviderConfig, OpenAIProviderConfig,
 };
 use clap::{Parser, Subcommand, ValueEnum};
 
@@ -78,6 +78,8 @@ pub enum ProviderCommand {
     OpenAI(OpenAIProviderConfig),
     /// Use Anthropic provider
     Anthropic(AnthropicProviderConfig),
+    /// Use Custom Rhai-scripted provider
+    Custom(CustomProviderConfig),
 }
 
 #[derive(Clone, ValueEnum, Debug)]
