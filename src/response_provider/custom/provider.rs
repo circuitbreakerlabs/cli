@@ -41,7 +41,6 @@ impl ResponseProvider for CustomProvider {
             .map_err(|e| format!("Rhai build_request error: {e}"))?;
 
         let json_body = rhai::serde::from_dynamic::<serde_json::Value>(&request_body.into())?;
-        dbg!(&json_body);
 
         let response = self.client.post(&self.url).json(&json_body).send().await?;
 
