@@ -1,3 +1,5 @@
+use super::WriterMessage;
+use super::handle_completion_request;
 use crate::protocol_types::common::CompletionResponseEnvelope;
 use crate::protocol_types::multi_turn::{
     CategorizedMultiTurnMessage, MultiTurnReceivableMessage, MultiTurnRequest,
@@ -13,34 +15,6 @@ use protocol_types::multi_turn::OptionalMultiTurnMessage;
 use std::sync::Arc;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
-
-enum WriterMessage {
-    CompletionResponse(protocol_types::CompletionResponse),
-    Pong(Vec<u8>),
-    Close(CloseFrame),
-    ServerClosed,
-}
-
-async fn handle_completion_request(
-    request: protocol_types::CompletionRequest,
-    provider: Arc<dyn ResponseProvider>,
-    writer_tx: tokio::sync::mpsc::Sender<WriterMessage>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let completion = provider
-        .generate_response(&request.messages)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    writer_tx
-        .send(WriterMessage::CompletionResponse(
-            protocol_types::CompletionResponse {
-                request_id: request.request_id.clone(),
-                model_response: completion.content,
-            },
-        ))
-        .await?;
-    Ok(())
-}
 
 async fn handle_optional_message(
     message: protocol_types::multi_turn::OptionalMultiTurnMessage,

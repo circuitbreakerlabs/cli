@@ -7,40 +7,13 @@ use crate::protocol_types::{self};
 use crate::response_provider::ResponseProvider;
 use crate::websockets::WebSocketConnection;
 
+use super::{WriterMessage, handle_completion_request};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use protocol_types::single_turn::OptionalSingleTurnMessage;
 use std::sync::Arc;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
-
-enum WriterMessage {
-    CompletionResponse(protocol_types::CompletionResponse),
-    Pong(Vec<u8>),
-    Close(CloseFrame),
-    ServerClosed,
-}
-
-async fn handle_completion_request(
-    request: protocol_types::CompletionRequest,
-    provider: Arc<dyn ResponseProvider>,
-    writer_tx: tokio::sync::mpsc::Sender<WriterMessage>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let completion = provider
-        .generate_response(&request.messages)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    writer_tx
-        .send(WriterMessage::CompletionResponse(
-            protocol_types::CompletionResponse {
-                request_id: request.request_id.clone(),
-                model_response: completion.content,
-            },
-        ))
-        .await?;
-    Ok(())
-}
 
 async fn handle_optional_message(
     message: protocol_types::single_turn::OptionalSingleTurnMessage,
