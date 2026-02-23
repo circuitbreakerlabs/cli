@@ -1,6 +1,7 @@
 use super::ResponseProvider;
 use crate::protocol_types;
 use async_trait::async_trait;
+use reqwest::header::HeaderMap;
 
 #[derive(Clone, Debug, clap::Args)]
 pub struct AnthropicProviderConfig {
@@ -19,7 +20,10 @@ pub struct AnthropicProvider {
 }
 
 impl AnthropicProvider {
-    pub fn new(config: AnthropicProviderConfig) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(
+        config: AnthropicProviderConfig,
+        _headers: &HeaderMap,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         Ok(Self { config })
     }
 }

@@ -1,24 +1,32 @@
 use super::config::OpenAIProviderConfig;
 use crate::protocol_types;
 use crate::response_provider::ResponseProvider;
-use async_openai::Client;
 use async_openai::types::chat::{
     ChatCompletionRequestAssistantMessage, ChatCompletionRequestMessage,
     ChatCompletionRequestSystemMessage, ChatCompletionRequestSystemMessageContent,
     ChatCompletionRequestUserMessage, ChatCompletionRequestUserMessageContent,
 };
 use async_trait::async_trait;
+use reqwest::header::HeaderMap;
 
 #[derive(Clone)]
 pub struct OpenAIProvider {
-    client: Client<async_openai::config::OpenAIConfig>,
+    client: async_openai::Client<async_openai::config::OpenAIConfig>,
     config: OpenAIProviderConfig,
 }
 
 impl OpenAIProvider {
-    pub fn new(config: OpenAIProviderConfig) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(
+        config: OpenAIProviderConfig,
+        headers: &HeaderMap,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let openai_config = config.build_openai_config();
-        let client = Client::with_config(openai_config);
+
+        let http_client = reqwest::Client::builder()
+            .default_headers(headers.clone())
+            .build()?;
+
+        let client = async_openai::Client::with_config(openai_config).with_http_client(http_client);
 
         Ok(Self { client, config })
     }

@@ -1,8 +1,10 @@
+use super::headers::Headers;
 use crate::protocol_types::{MultiTurnRequest, SingleTurnRequest};
 use crate::response_provider::{
-    AnthropicProviderConfig, OllamaProviderConfig, OpenAIProviderConfig,
+    AnthropicProviderConfig, CustomProviderConfig, OllamaProviderConfig, OpenAIProviderConfig,
 };
 use clap::{Parser, Subcommand, ValueEnum};
+use reqwest::header::HeaderMap;
 
 macro_rules! cyan_bold {
     ($s:expr) => {
@@ -46,8 +48,18 @@ pub struct Args {
     #[arg(long, value_enum, default_value_t = LogLevel::Info)]
     pub log_level: LogLevel,
 
+    /// Add custom headers to provider requests (format: "Key:Value", can be repeated)
+    #[arg(long = "add-header", value_parser = clap::value_parser!(Headers))]
+    headers: Vec<Headers>,
+
     #[command(subcommand)]
     pub evaluation: EvaluationCommand,
+}
+
+impl Args {
+    pub fn headers(&self) -> HeaderMap {
+        super::headers::merge_headers(&self.headers)
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -78,9 +90,11 @@ pub enum ProviderCommand {
     OpenAI(OpenAIProviderConfig),
     /// Use Anthropic provider
     Anthropic(AnthropicProviderConfig),
+    /// Use Custom Rhai-scripted provider
+    Custom(CustomProviderConfig),
 }
 
-#[derive(Clone, ValueEnum, Debug)]
+#[derive(Clone, Copy, ValueEnum, Debug)]
 pub enum LogLevel {
     Error,
     Warn,

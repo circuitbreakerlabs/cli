@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use ollama_rs::Ollama;
 use ollama_rs::generation::chat::request::ChatMessageRequest;
 use ollama_rs::generation::chat::{ChatMessage as OllamaMessage, MessageRole as OllamaMessageRole};
+use reqwest::header::HeaderMap;
 
 impl TryFrom<&OllamaMessageRole> for protocol_types::Role {
     type Error = String;
@@ -28,9 +29,12 @@ pub struct OllamaProvider {
 }
 
 impl OllamaProvider {
-    pub fn new(config: OllamaProviderConfig) -> Result<Self, Box<dyn std::error::Error>> {
-        let client = Ollama::try_new(&config.optional.base_url)?;
-
+    pub fn new(
+        config: OllamaProviderConfig,
+        headers: &HeaderMap,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut client = Ollama::try_new(&config.optional.base_url)?;
+        client.set_headers(Some(headers.clone()));
         Ok(Self { client, config })
     }
 
