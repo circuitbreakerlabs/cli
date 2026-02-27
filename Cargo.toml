@@ -18,6 +18,7 @@ const_format = "0.2.35"
 env = "1.0.1"
 futures-util = "0.3.31"
 ollama-rs = { version = "0.3.4", features = ["headers"] }
+ratatui = "0.30.0"
 reqwest = { version = "0.12", features = ["json"] }
 rhai = { version = "1.21", features = ["serde", "sync"] }
 serde = { version = "1.0.228", features = ["derive"] }
