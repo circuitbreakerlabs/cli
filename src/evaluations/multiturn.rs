@@ -72,6 +72,7 @@ async fn handle_completion_request(
 async fn handle_optional_message(
     message: protocol_types::multi_turn::OptionalMultiTurnMessage,
     progress_indicator: Option<tokio::sync::mpsc::Sender<MultiTurnProgressIndicatorMessage>>,
+    max_turns: usize,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match message {
         OptionalMultiTurnMessage::MultiTurnEvaluationStart(evaluation_start) => {
@@ -81,9 +82,10 @@ async fn handle_optional_message(
             );
             if let Some(progress_indicator) = progress_indicator {
                 progress_indicator
-                    .send(MultiTurnProgressIndicatorMessage::EvaluationStart(
-                        evaluation_start,
-                    ))
+                    .send(MultiTurnProgressIndicatorMessage::EvaluationStart {
+                        conversation_ids: evaluation_start.conversation_ids,
+                        max_turns,
+                    })
                     .await?;
             }
         }
@@ -127,6 +129,7 @@ async fn reader_task(
     provider: Arc<dyn ResponseProvider>,
     writer_tx: tokio::sync::mpsc::Sender<WriterMessage>,
     progress_indicator: Option<tokio::sync::mpsc::Sender<MultiTurnProgressIndicatorMessage>>,
+    request: MultiTurnRequest,
 ) -> Result<MultiTurnResponse, Box<dyn std::error::Error + Send + Sync>> {
     while let Some(msg) = read.next().await {
         match msg {
@@ -154,6 +157,7 @@ async fn reader_task(
                         tokio::spawn(handle_optional_message(
                             optional_msg,
                             progress_indicator.clone(),
+                            request.max_turns,
                         ));
                     }
                     Err(e) => {
@@ -245,7 +249,7 @@ pub async fn run_evaluation(
 
     write
         .send(Message::Text(
-            serde_json::to_string(&MultiTurnRequestEnvelope::from(request))?.into(),
+            serde_json::to_string(&MultiTurnRequestEnvelope::from(request.clone()))?.into(),
         ))
         .await?;
 
@@ -254,6 +258,7 @@ pub async fn run_evaluation(
         provider,
         writer_tx.clone(),
         progress_indicator,
+        request,
     ));
     let write_handle = tokio::spawn(writer_task(write, writer_rx));
 
