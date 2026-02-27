@@ -1,6 +1,6 @@
 use super::config::OpenAIProviderConfig;
 use crate::protocol_types;
-use crate::response_provider::ResponseProvider;
+use crate::response_provider::{ProviderError, ResponseProvider};
 use async_openai::types::chat::{
     ChatCompletionRequestAssistantMessage, ChatCompletionRequestMessage,
     ChatCompletionRequestSystemMessage, ChatCompletionRequestSystemMessageContent,
@@ -16,10 +16,7 @@ pub struct OpenAIProvider {
 }
 
 impl OpenAIProvider {
-    pub fn new(
-        config: OpenAIProviderConfig,
-        headers: &HeaderMap,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(config: OpenAIProviderConfig, headers: &HeaderMap) -> Result<Self, ProviderError> {
         let openai_config = config.build_openai_config();
 
         let http_client = reqwest::Client::builder()
@@ -66,7 +63,7 @@ impl ResponseProvider for OpenAIProvider {
     async fn generate_response(
         &self,
         conversation_history: &[protocol_types::Message],
-    ) -> Result<protocol_types::Message, Box<dyn std::error::Error>> {
+    ) -> Result<protocol_types::Message, ProviderError> {
         let messages: Vec<ChatCompletionRequestMessage> = conversation_history
             .iter()
             .map(Self::convert_message)
@@ -74,17 +71,22 @@ impl ResponseProvider for OpenAIProvider {
 
         let request = self.config.build_request(messages);
 
-        let response = self.client.chat().create(request).await?;
+        let response = self
+            .client
+            .chat()
+            .create(request)
+            .await
+            .map_err(|e| ProviderError::Api(e.to_string()))?;
 
         let err_no_resp = "No response received from OpenAI";
         let content = response
             .choices
             .into_iter()
             .next()
-            .ok_or(err_no_resp)?
+            .ok_or(ProviderError::Api(err_no_resp.to_string()))?
             .message
             .content
-            .ok_or(err_no_resp)?;
+            .ok_or(ProviderError::Api(err_no_resp.to_string()))?;
 
         Ok(protocol_types::Message {
             role: protocol_types::Role::Assistant,
