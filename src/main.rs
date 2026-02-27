@@ -54,7 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Single-turn evaluation result: {result:?}");
         }
         cli::EvaluationCommand::MultiTurn { request, .. } => {
-            let result = evaluations::multiturn::run_evaluation(websocket, provider, request)
+            let result = evaluations::multiturn::run_evaluation(websocket, provider, request, None) // TODO: pass in progress indicator channel
                 .await
                 .map_err(|e| e.to_string())?;
 
