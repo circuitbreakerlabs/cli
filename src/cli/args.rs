@@ -1,8 +1,6 @@
 use super::headers::Headers;
 use crate::protocol_types::{MultiTurnRequest, SingleTurnRequest};
-use crate::response_provider::{
-    AnthropicProviderConfig, CustomProviderConfig, OllamaProviderConfig, OpenAIProviderConfig,
-};
+use crate::response_provider::{CustomProviderConfig, OllamaProviderConfig, OpenAIProviderConfig};
 use clap::{Parser, Subcommand, ValueEnum};
 use reqwest::header::HeaderMap;
 
@@ -88,8 +86,6 @@ pub enum ProviderCommand {
     Ollama(OllamaProviderConfig),
     /// Use OpenAI provider
     OpenAI(OpenAIProviderConfig),
-    /// Use Anthropic provider
-    Anthropic(AnthropicProviderConfig),
     /// Use Custom Rhai-scripted provider
     Custom(CustomProviderConfig),
 }
