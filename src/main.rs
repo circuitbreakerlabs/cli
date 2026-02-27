@@ -3,6 +3,7 @@ mod consts;
 mod evaluations;
 mod protocol_types;
 mod response_provider;
+mod tui;
 mod websockets;
 
 use std::sync::Arc;
