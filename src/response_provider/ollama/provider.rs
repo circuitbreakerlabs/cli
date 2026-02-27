@@ -1,6 +1,6 @@
 use super::config::OllamaProviderConfig;
 use crate::protocol_types;
-use crate::response_provider::ResponseProvider;
+use crate::response_provider::{ProviderError, ResponseProvider};
 use async_trait::async_trait;
 use ollama_rs::Ollama;
 use ollama_rs::generation::chat::request::ChatMessageRequest;
@@ -8,16 +8,16 @@ use ollama_rs::generation::chat::{ChatMessage as OllamaMessage, MessageRole as O
 use reqwest::header::HeaderMap;
 
 impl TryFrom<&OllamaMessageRole> for protocol_types::Role {
-    type Error = String;
+    type Error = ProviderError;
 
     fn try_from(role: &OllamaMessageRole) -> Result<Self, Self::Error> {
         match role {
             OllamaMessageRole::User => Ok(protocol_types::Role::User),
             OllamaMessageRole::Assistant => Ok(protocol_types::Role::Assistant),
             OllamaMessageRole::System => Ok(protocol_types::Role::System),
-            OllamaMessageRole::Tool => Err(
+            OllamaMessageRole::Tool => Err(ProviderError::Parsing(
                 "Tool messages from Ollama cannot be converted to protocol_types::Role".to_string(),
-            ),
+            )),
         }
     }
 }
@@ -29,11 +29,9 @@ pub struct OllamaProvider {
 }
 
 impl OllamaProvider {
-    pub fn new(
-        config: OllamaProviderConfig,
-        headers: &HeaderMap,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut client = Ollama::try_new(&config.optional.base_url)?;
+    pub fn new(config: OllamaProviderConfig, headers: &HeaderMap) -> Result<Self, ProviderError> {
+        let mut client = Ollama::try_new(&config.optional.base_url)
+            .map_err(|e| ProviderError::Config(e.to_string()))?;
         client.set_headers(Some(headers.clone()));
         Ok(Self { client, config })
     }
@@ -54,7 +52,7 @@ impl ResponseProvider for OllamaProvider {
     async fn generate_response(
         &self,
         conversation_history: &[protocol_types::Message],
-    ) -> Result<protocol_types::Message, Box<dyn std::error::Error>> {
+    ) -> Result<protocol_types::Message, ProviderError> {
         let messages: Vec<OllamaMessage> = conversation_history
             .iter()
             .map(Self::convert_message)
@@ -70,7 +68,11 @@ impl ResponseProvider for OllamaProvider {
             request = request.logprobs(logprobs);
         }
 
-        let response = self.client.send_chat_messages(request).await?;
+        let response = self
+            .client
+            .send_chat_messages(request)
+            .await
+            .map_err(|e| ProviderError::Api(e.to_string()))?;
 
         Ok(protocol_types::Message {
             role: protocol_types::Role::try_from(&response.message.role)?,
