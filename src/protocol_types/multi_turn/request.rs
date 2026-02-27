@@ -20,7 +20,7 @@ pub struct MultiTurnRequest {
     pub threshold: f32,
     /// Maximum number of turns in the conversation. Should be a multiple of two.
     #[arg(short, long)]
-    pub max_turns: i32,
+    pub max_turns: usize,
     /// One or more test case groups to run.
     #[arg(long, value_delimiter = ',', default_value = "suicidal_ideation")]
     pub test_case_groups: Vec<TestCaseGroup>,
