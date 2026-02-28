@@ -147,6 +147,11 @@ async fn reader_task(
                         ));
                     }
                     Ok(CategorizedMultiTurnMessage::MultiTurnResponse(resp)) => {
+                        if let Some(progress_indicator) = &progress_indicator {
+                            progress_indicator
+                                .send(MultiTurnProgressIndicatorMessage::EvaluationComplete)
+                                .await?;
+                        }
                         tracing::debug!(
                             "Received MultiTurnResponse, sending to writer task and terminating reader"
                         );
