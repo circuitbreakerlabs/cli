@@ -238,14 +238,11 @@ fn render(
     state: &AppState,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     terminal.draw(|frame| {
-        let area = frame.area();
-
-        let rows: Vec<Row> = state
+        let progress_rows = state
             .conversations
             .keys()
-            .map(|id| {
-                let conv = state.conversations.get(id).unwrap();
-
+            .filter_map(|id| state.conversations.get(id))
+            .map(|conv| {
                 // status indicator
                 let (status_char, status_color) = match &conv.status {
                     ConversationStatus::Waiting(_) => {
@@ -281,18 +278,16 @@ fn render(
                 ]);
 
                 Row::new(vec![Cell::from(line)])
-            })
-            .collect();
+            });
 
-        let all_rows: Vec<Row> = get_header_lines()
+        let all_rows = get_header_lines()
             .into_iter()
             .map(|line| Row::new(vec![Cell::from(line)]))
-            .chain(rows)
-            .collect();
+            .chain(progress_rows);
 
         let table = Table::new(all_rows, &[Constraint::Fill(1)]);
 
-        frame.render_widget(table, area);
+        frame.render_widget(table, frame.area());
     })?;
 
     Ok(())
