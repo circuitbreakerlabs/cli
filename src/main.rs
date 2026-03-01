@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use clap::Parser;
 use response_provider::{CustomProvider, OllamaProvider, OpenAIProvider, ResponseProvider};
+use tui::{MultiTurnProgressIndicatorMessage, multiturn};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

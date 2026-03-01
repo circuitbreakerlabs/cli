@@ -12,7 +12,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Row, Table};
 use tokio::sync::RwLock;
 
-use super::{ConversationStatus, WaitingFor};
+use super::common::{ConversationStatus, WaitingFor};
 use crate::protocol_types::ConversationId;
 use crate::protocol_types::common::{ConversationComplete, ConversationError};
 
