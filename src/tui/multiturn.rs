@@ -56,16 +56,6 @@ struct AppState {
     warning_count: usize,
 }
 
-fn print_header() {
-    println!();
-    println!(
-        "{}Multi-turn evaluation{}",
-        SetAttribute(Attribute::Bold),
-        SetAttribute(Attribute::Reset)
-    );
-    println!();
-}
-
 fn print_footer(passed: usize, failed: usize, errors: usize) {
     println!();
     println!(
@@ -133,12 +123,10 @@ pub async fn render_task(
         }
     };
 
-    print_header();
-
     let stdout = std::io::stdout();
     let backend = CrosstermBackend::new(stdout);
     let options = ratatui::TerminalOptions {
-        viewport: ratatui::Viewport::Inline(num_cases as u16),
+        viewport: ratatui::Viewport::Inline((num_cases + 3) as u16),
     };
     let mut terminal = Terminal::with_options(backend, options)?;
 
@@ -241,6 +229,15 @@ fn render(
     terminal.draw(|frame| {
         let area = frame.area();
 
+        let header = vec![
+            Line::from(""),
+            Line::from(vec![Span::styled(
+                "Multi-turn evaluation",
+                Style::default().add_modifier(ratatui::style::Modifier::BOLD),
+            )]),
+            Line::from(""),
+        ];
+
         let rows: Vec<Row> = state
             .conversations
             .keys()
@@ -285,7 +282,16 @@ fn render(
             })
             .collect();
 
-        let table = Table::new(rows, &[Constraint::Min((3 + PROGRESS_BAR_WIDTH) as u16)]);
+        let all_rows: Vec<Row> = header
+            .into_iter()
+            .map(|line| Row::new(vec![Cell::from(line)]))
+            .chain(rows)
+            .collect();
+
+        let table = Table::new(
+            all_rows,
+            &[Constraint::Min((3 + PROGRESS_BAR_WIDTH) as u16)],
+        );
 
         frame.render_widget(table, area);
     })?;
