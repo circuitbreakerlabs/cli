@@ -17,6 +17,7 @@ use crate::protocol_types::common::{ConversationComplete, ConversationError};
 
 type ConversationId = i32;
 
+const SPINNER_PHASE_SPREAD: usize = 4;
 const PROGRESS_BAR_WIDTH: usize = 32;
 const DOTS_SPINNER_FRAMES: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
@@ -224,6 +225,47 @@ async fn handle_message(
     Ok(false)
 }
 
+fn get_status_indicator_spans(
+    conv: &ConversationState,
+    elapsed_spinner_frames: usize,
+) -> Vec<Span<'_>> {
+    let (status_char, status_color) = match &conv.status {
+        ConversationStatus::Waiting(_) => {
+            let phase_offset = usize::try_from(conv.id).unwrap_or(0) * SPINNER_PHASE_SPREAD
+                % DOTS_SPINNER_FRAMES.len();
+            let frame_idx = (elapsed_spinner_frames + phase_offset) % DOTS_SPINNER_FRAMES.len();
+            (DOTS_SPINNER_FRAMES[frame_idx], Color::Blue)
+        }
+        ConversationStatus::Passed => ('✓', Color::Green),
+        ConversationStatus::Failed => ('✗', Color::Red),
+        ConversationStatus::Warning => ('▲', Color::Yellow),
+    };
+    vec![
+        Span::raw("["),
+        Span::styled(status_char.to_string(), Style::default().fg(status_color)),
+        Span::raw("]"),
+    ]
+}
+
+fn get_progress_bar_spans(conv: &ConversationState) -> Vec<Span<'_>> {
+    let progress_len = if conv.max_turns > 0 {
+        (conv.current_turn * PROGRESS_BAR_WIDTH) / conv.max_turns
+    } else {
+        0
+    };
+    let progress_bar_filled = "=".repeat(progress_len);
+    let progress_bar_empty = " ".repeat(PROGRESS_BAR_WIDTH - progress_len);
+    vec![
+        Span::raw("["),
+        Span::styled(
+            progress_bar_filled,
+            Style::default().add_modifier(ratatui::style::Modifier::BOLD),
+        ),
+        Span::raw(progress_bar_empty),
+        Span::raw("]"),
+    ]
+}
+
 fn render(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     state: &AppState,
@@ -234,42 +276,10 @@ fn render(
 
     terminal.draw(|frame| {
         let progress_rows = state.conversations.values().map(|conv| {
-            // status indicator
-            let (status_char, status_color) = match &conv.status {
-                ConversationStatus::Waiting(_) => {
-                    let phase_offset =
-                        usize::try_from(conv.id * 4).unwrap_or(0) % DOTS_SPINNER_FRAMES.len();
-                    let frame_idx =
-                        (elapsed_spinner_frames + phase_offset) % DOTS_SPINNER_FRAMES.len();
-                    (DOTS_SPINNER_FRAMES[frame_idx], Color::Blue)
-                }
-                ConversationStatus::Passed => ('✓', Color::Green),
-                ConversationStatus::Failed => ('✗', Color::Red),
-                ConversationStatus::Warning => ('▲', Color::Yellow),
-            };
-
-            // progress bar
-            let progress_len = if conv.max_turns > 0 {
-                (conv.current_turn * PROGRESS_BAR_WIDTH) / conv.max_turns
-            } else {
-                0
-            };
-            let progress_bar_filled = "=".repeat(progress_len);
-            let progress_bar_empty = " ".repeat(PROGRESS_BAR_WIDTH - progress_len);
-
-            let line = Line::from(vec![
-                Span::raw("["),
-                Span::styled(status_char.to_string(), Style::default().fg(status_color)),
-                Span::raw("]"),
-                Span::raw("["),
-                Span::styled(
-                    progress_bar_filled,
-                    Style::default().add_modifier(ratatui::style::Modifier::BOLD),
-                ),
-                Span::raw(progress_bar_empty),
-                Span::raw("]"),
-            ]);
-
+            let spans = get_status_indicator_spans(conv, elapsed_spinner_frames)
+                .into_iter()
+                .chain(get_progress_bar_spans(conv));
+            let line = Line::from(spans.collect::<Vec<_>>());
             Row::new(vec![Cell::from(line)])
         });
 
