@@ -116,7 +116,7 @@ pub async fn render_task(
                 state_guard.num_cases = conversation_ids.len();
                 state_guard.max_turns = max_turns;
                 for id in conversation_ids {
-                    let spinner_offset = ((id * 4) as usize) % DOTS_SPINNER_FRAMES.len();
+                    let spinner_offset = usize::try_from(id * 4)? % DOTS_SPINNER_FRAMES.len();
                     state_guard.conversations.insert(
                         id,
                         ConversationState {
@@ -137,7 +137,7 @@ pub async fn render_task(
     let stdout = std::io::stdout();
     let backend = CrosstermBackend::new(stdout);
     let options = ratatui::TerminalOptions {
-        viewport: ratatui::Viewport::Inline((get_header_lines().len() + num_cases) as u16),
+        viewport: ratatui::Viewport::Inline(u16::try_from(get_header_lines().len() + num_cases)?),
     };
     let mut terminal = Terminal::with_options(backend, options)?;
 
@@ -199,7 +199,7 @@ async fn handle_message(
         }
         MultiTurnProgressIndicatorMessage::ConversationComplete(complete) => {
             if let Some(conv) = state.conversations.get_mut(&complete.conversation_id) {
-                conv.current_turn = complete.turns as usize;
+                conv.current_turn = usize::try_from(complete.turns)?;
                 if complete.passed {
                     conv.status = ConversationStatus::Passed;
                     state.passed_count += 1;
