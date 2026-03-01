@@ -1,3 +1,4 @@
+use crate::protocol_types::ConversationId;
 use crate::protocol_types::common::{ConversationComplete, ConversationError};
 use serde::{Deserialize, Serialize};
 
@@ -12,7 +13,7 @@ pub enum OptionalMultiTurnMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MultiTurnEvaluationStart {
     /// Conversation identifiers that will be evaluated
-    pub conversation_ids: Vec<i32>,
+    pub conversation_ids: Vec<ConversationId>,
 }
 
 /// Server indicates that it is starting a multi-turn evaluation

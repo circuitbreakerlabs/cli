@@ -1,3 +1,4 @@
+use crate::protocol_types::ConversationId;
 use crate::protocol_types::common::{ConversationComplete, ConversationError};
 use serde::{Deserialize, Serialize};
 
@@ -15,7 +16,7 @@ pub struct IterationStart {
     /// Current iteration index
     pub iteration_number: i32,
     /// Conversation identifiers that will be evaluated in this iteration
-    pub conversation_ids: Vec<i32>,
+    pub conversation_ids: Vec<ConversationId>,
 }
 
 /// Server indicates the start of a new evaluation iteration/layer.
@@ -34,9 +35,9 @@ pub struct IterationComplete {
     /// Completed iteration index
     pub iteration_number: i32,
     /// Conversation identifiers that passed in this iteration
-    pub passed_conversation_ids: Vec<i32>,
+    pub passed_conversation_ids: Vec<ConversationId>,
     /// Conversation identifiers that failed in this iteration
-    pub failed_conversation_ids: Vec<i32>,
+    pub failed_conversation_ids: Vec<ConversationId>,
 }
 
 /// Server indicates completion of an evaluation iteration/layer.

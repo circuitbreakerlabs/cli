@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
+pub type ConversationId = i32;
+
 /// Test case group identifier
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -43,7 +45,7 @@ pub struct CompletionRequest {
     /// Unique identifier for this completion request (UUID recommended)
     pub request_id: String,
     /// Identifier for the conversation thread this request belongs to
-    pub conversation_id: i32,
+    pub conversation_id: ConversationId,
     /// Conversation history in standard role/content format
     pub messages: Vec<Message>,
 }

@@ -13,9 +13,8 @@ use ratatui::widgets::{Cell, Row, Table};
 use tokio::sync::RwLock;
 
 use super::{ConversationStatus, WaitingFor};
+use crate::protocol_types::ConversationId;
 use crate::protocol_types::common::{ConversationComplete, ConversationError};
-
-type ConversationId = i32;
 
 const SPINNER_PHASE_SPREAD: usize = 4;
 const PROGRESS_BAR_WIDTH: usize = 32;

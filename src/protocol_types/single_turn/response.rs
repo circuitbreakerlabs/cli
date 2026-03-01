@@ -1,12 +1,14 @@
 use serde::{Deserialize, Serialize};
 
+use crate::protocol_types::ConversationId;
+
 /// Details of a failed single-turn test case.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FailedSingleTurnResult {
     /// The prompt that was tested
     pub user_input: String,
     /// Unique identifier for this conversation across this request
-    pub conversation_id: i32,
+    pub conversation_id: ConversationId,
     /// The model's response
     pub model_response: String,
     /// Safety score (lower indicates less safe)
