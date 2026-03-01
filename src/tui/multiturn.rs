@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use tokio::time::{Duration, Instant};
 
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
@@ -38,16 +39,15 @@ pub enum MultiTurnProgressIndicatorMessage {
 
 #[derive(Clone, Debug)]
 struct ConversationState {
+    id: ConversationId,
     current_turn: usize,
     max_turns: usize,
     status: ConversationStatus,
-    spinner_offset: usize,
 }
 
 #[derive(Clone, Debug, Default)]
 struct AppState {
     conversations: BTreeMap<ConversationId, ConversationState>,
-    spinner_frame: usize,
     num_cases: usize,
     max_turns: usize,
     completed: bool,
@@ -116,14 +116,13 @@ pub async fn render_task(
                 state_guard.num_cases = conversation_ids.len();
                 state_guard.max_turns = max_turns;
                 for id in conversation_ids {
-                    let spinner_offset = usize::try_from(id * 4)? % DOTS_SPINNER_FRAMES.len();
                     state_guard.conversations.insert(
                         id,
                         ConversationState {
+                            id,
                             current_turn: 0,
                             max_turns,
                             status: ConversationStatus::Waiting(WaitingFor::Provider),
-                            spinner_offset,
                         },
                     );
                 }
@@ -141,39 +140,31 @@ pub async fn render_task(
     };
     let mut terminal = Terminal::with_options(backend, options)?;
 
-    // spinner task
-    let spinner_state = Arc::clone(&state);
-    let _spinner_handle = tokio::spawn(async move {
-        let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
-        loop {
-            interval.tick().await;
-            let mut state = spinner_state.write().await;
-            state.spinner_frame = (state.spinner_frame + 1) % DOTS_SPINNER_FRAMES.len();
-        }
-    });
+    let start = Instant::now();
+    let mut render_interval = tokio::time::interval(Duration::from_millis(50));
 
     loop {
-        // check for new messages with timeout to allow spinner updates
-        match tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv()).await {
-            Ok(Some(msg)) => {
-                let is_done = handle_message(&state, msg).await?;
-                if is_done {
-                    break;
+        tokio::select! {
+            msg = rx.recv() => {
+                match msg {
+                    Some(msg) => {
+                        if handle_message(&state, msg).await? {
+                            break;
+                        }
+                    }
+                    None => break,
                 }
             }
-            Ok(None) => break,
-            Err(_) => {}
+            _ = render_interval.tick() => {}
         }
 
         let state_guard = state.read().await;
-        render(&mut terminal, &state_guard)?;
+        render(&mut terminal, &state_guard, start)?;
     }
 
     let state_guard = state.read().await;
-    render(&mut terminal, &state_guard)?;
-
+    render(&mut terminal, &state_guard, start)?;
     terminal.clear()?;
-
     print_footer(
         state_guard.passed_count,
         state_guard.failed_count,
@@ -236,49 +227,51 @@ async fn handle_message(
 fn render(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     state: &AppState,
+    start: Instant,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // 100ms per spinner tick
+    let elapsed_spinner_frames = (start.elapsed().as_millis() / 100) as usize;
+
     terminal.draw(|frame| {
-        let progress_rows = state
-            .conversations
-            .keys()
-            .filter_map(|id| state.conversations.get(id))
-            .map(|conv| {
-                // status indicator
-                let (status_char, status_color) = match &conv.status {
-                    ConversationStatus::Waiting(_) => {
-                        let frame =
-                            (state.spinner_frame + conv.spinner_offset) % DOTS_SPINNER_FRAMES.len();
-                        (DOTS_SPINNER_FRAMES[frame], Color::Blue)
-                    }
-                    ConversationStatus::Passed => ('✓', Color::Green),
-                    ConversationStatus::Failed => ('✗', Color::Red),
-                    ConversationStatus::Warning => ('▲', Color::Yellow),
-                };
+        let progress_rows = state.conversations.values().map(|conv| {
+            // status indicator
+            let (status_char, status_color) = match &conv.status {
+                ConversationStatus::Waiting(_) => {
+                    let phase_offset =
+                        usize::try_from(conv.id * 4).unwrap_or(0) % DOTS_SPINNER_FRAMES.len();
+                    let frame_idx =
+                        (elapsed_spinner_frames + phase_offset) % DOTS_SPINNER_FRAMES.len();
+                    (DOTS_SPINNER_FRAMES[frame_idx], Color::Blue)
+                }
+                ConversationStatus::Passed => ('✓', Color::Green),
+                ConversationStatus::Failed => ('✗', Color::Red),
+                ConversationStatus::Warning => ('▲', Color::Yellow),
+            };
 
-                // progress bar
-                let progress_len = if conv.max_turns > 0 {
-                    (conv.current_turn * PROGRESS_BAR_WIDTH) / conv.max_turns
-                } else {
-                    0
-                };
-                let progress_bar_filled = "=".repeat(progress_len);
-                let progress_bar_empty = " ".repeat(PROGRESS_BAR_WIDTH - progress_len);
+            // progress bar
+            let progress_len = if conv.max_turns > 0 {
+                (conv.current_turn * PROGRESS_BAR_WIDTH) / conv.max_turns
+            } else {
+                0
+            };
+            let progress_bar_filled = "=".repeat(progress_len);
+            let progress_bar_empty = " ".repeat(PROGRESS_BAR_WIDTH - progress_len);
 
-                let line = Line::from(vec![
-                    Span::raw("["),
-                    Span::styled(status_char.to_string(), Style::default().fg(status_color)),
-                    Span::raw("]"),
-                    Span::raw("["),
-                    Span::styled(
-                        progress_bar_filled,
-                        Style::default().add_modifier(ratatui::style::Modifier::BOLD),
-                    ),
-                    Span::raw(progress_bar_empty),
-                    Span::raw("]"),
-                ]);
+            let line = Line::from(vec![
+                Span::raw("["),
+                Span::styled(status_char.to_string(), Style::default().fg(status_color)),
+                Span::raw("]"),
+                Span::raw("["),
+                Span::styled(
+                    progress_bar_filled,
+                    Style::default().add_modifier(ratatui::style::Modifier::BOLD),
+                ),
+                Span::raw(progress_bar_empty),
+                Span::raw("]"),
+            ]);
 
-                Row::new(vec![Cell::from(line)])
-            });
+            Row::new(vec![Cell::from(line)])
+        });
 
         let all_rows = get_header_lines()
             .into_iter()
