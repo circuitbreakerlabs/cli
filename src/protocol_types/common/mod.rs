@@ -4,6 +4,7 @@ mod errors;
 mod optional;
 
 pub use common::{
-    CompletionRequest, CompletionResponse, CompletionResponseEnvelope, Message, Role, TestCaseGroup,
+    CompletionRequest, CompletionResponse, CompletionResponseEnvelope, ConversationId, Message,
+    Role, TestCaseGroup,
 };
 pub use optional::{ConversationComplete, ConversationError};

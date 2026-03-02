@@ -5,9 +5,11 @@ use crate::protocol_types::single_turn::{
 };
 use crate::protocol_types::{self};
 use crate::response_provider::ResponseProvider;
+use crate::tui::SingleTurnProgressIndicatorMessage;
+use crate::tui::WaitingFor;
 use crate::websockets::WebSocketConnection;
 
-use super::{WriterMessage, handle_completion_request};
+use super::WriterMessage;
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use protocol_types::single_turn::OptionalSingleTurnMessage;
@@ -15,8 +17,49 @@ use std::sync::Arc;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 
+async fn handle_completion_request(
+    request: protocol_types::CompletionRequest,
+    provider: Arc<dyn ResponseProvider>,
+    writer_tx: tokio::sync::mpsc::Sender<WriterMessage>,
+    progress_indicator: Option<tokio::sync::mpsc::Sender<SingleTurnProgressIndicatorMessage>>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if let Some(progress_indicator) = &progress_indicator {
+        progress_indicator
+            .send(SingleTurnProgressIndicatorMessage::WaitingFor {
+                conversation_id: request.conversation_id,
+                waiting_for: WaitingFor::Provider,
+            })
+            .await?;
+    }
+
+    let msg = match provider.generate_response(&request.messages).await {
+        Ok(completion) => WriterMessage::CompletionResponse(protocol_types::CompletionResponse {
+            request_id: request.request_id.clone(),
+            model_response: completion.content,
+        }),
+        Err(e) => {
+            let err = format!("Error generating response: {e}");
+            tracing::error!("{}", &err);
+            return Err(err.into());
+        }
+    };
+
+    if let Some(progress_indicator) = progress_indicator {
+        progress_indicator
+            .send(SingleTurnProgressIndicatorMessage::WaitingFor {
+                conversation_id: request.conversation_id,
+                waiting_for: WaitingFor::API,
+            })
+            .await?;
+    }
+
+    writer_tx.send(msg).await?;
+    Ok(())
+}
+
 async fn handle_optional_message(
     message: protocol_types::single_turn::OptionalSingleTurnMessage,
+    progress_indicator: Option<tokio::sync::mpsc::Sender<SingleTurnProgressIndicatorMessage>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match message {
         OptionalSingleTurnMessage::IterationStart(iteration_start) => {
@@ -25,6 +68,13 @@ async fn handle_optional_message(
                 iteration_start.iteration_number,
                 iteration_start.conversation_ids,
             );
+            if let Some(progress_indicator) = progress_indicator {
+                progress_indicator
+                    .send(SingleTurnProgressIndicatorMessage::IterationStart(
+                        iteration_start,
+                    ))
+                    .await?;
+            }
         }
         OptionalSingleTurnMessage::IterationComplete(iteration_complete) => {
             tracing::info!(
@@ -33,6 +83,13 @@ async fn handle_optional_message(
                 iteration_complete.passed_conversation_ids,
                 iteration_complete.failed_conversation_ids
             );
+            if let Some(progress_indicator) = progress_indicator {
+                progress_indicator
+                    .send(SingleTurnProgressIndicatorMessage::IterationComplete(
+                        iteration_complete,
+                    ))
+                    .await?;
+            }
         }
         OptionalSingleTurnMessage::ConversationError(conversation_error) => {
             tracing::error!(
@@ -40,6 +97,13 @@ async fn handle_optional_message(
                 conversation_error.conversation_id,
                 conversation_error.error_message
             );
+            if let Some(progress_indicator) = progress_indicator {
+                progress_indicator
+                    .send(SingleTurnProgressIndicatorMessage::ConversationError(
+                        conversation_error,
+                    ))
+                    .await?;
+            }
         }
         OptionalSingleTurnMessage::ConversationComplete(conversation_complete) => {
             tracing::info!(
@@ -47,6 +111,13 @@ async fn handle_optional_message(
                 conversation_complete.conversation_id,
                 conversation_complete.passed
             );
+            if let Some(progress_indicator) = progress_indicator {
+                progress_indicator
+                    .send(SingleTurnProgressIndicatorMessage::ConversationComplete(
+                        conversation_complete,
+                    ))
+                    .await?;
+            }
         }
     }
 
@@ -58,6 +129,7 @@ async fn reader_task(
     mut read: SplitStream<WebSocketConnection>,
     provider: Arc<dyn ResponseProvider>,
     writer_tx: tokio::sync::mpsc::Sender<WriterMessage>,
+    progress_indicator: Option<tokio::sync::mpsc::Sender<SingleTurnProgressIndicatorMessage>>,
 ) -> Result<SingleTurnResponse, Box<dyn std::error::Error + Send + Sync>> {
     while let Some(msg) = read.next().await {
         match msg {
@@ -71,6 +143,7 @@ async fn reader_task(
                             req,
                             provider.clone(),
                             writer_tx.clone(),
+                            progress_indicator.clone(),
                         ));
                     }
                     Ok(CategorizedSingleTurnMessage::SingleTurnResponse(resp)) => {
@@ -81,7 +154,10 @@ async fn reader_task(
                         return Ok(resp);
                     }
                     Ok(CategorizedSingleTurnMessage::OptionalSingleTurnMessage(optional_msg)) => {
-                        tokio::spawn(handle_optional_message(optional_msg));
+                        tokio::spawn(handle_optional_message(
+                            optional_msg,
+                            progress_indicator.clone(),
+                        ));
                     }
                     Err(e) => {
                         tracing::error!("Failed to parse incoming message '{e}'");
@@ -165,6 +241,7 @@ pub async fn run_evaluation(
     websocket_connection: WebSocketConnection,
     provider: Arc<dyn ResponseProvider>,
     request: SingleTurnRequest,
+    progress_indicator: Option<tokio::sync::mpsc::Sender<SingleTurnProgressIndicatorMessage>>,
 ) -> Result<SingleTurnResponse, Box<dyn std::error::Error + Send + Sync>> {
     let (mut write, read) = websocket_connection.split();
     let (writer_tx, writer_rx) = tokio::sync::mpsc::channel::<WriterMessage>(100);
@@ -175,7 +252,12 @@ pub async fn run_evaluation(
         ))
         .await?;
 
-    let reader_handle = tokio::spawn(reader_task(read, provider, writer_tx.clone()));
+    let reader_handle = tokio::spawn(reader_task(
+        read,
+        provider,
+        writer_tx.clone(),
+        progress_indicator,
+    ));
     let write_handle = tokio::spawn(writer_task(write, writer_rx));
 
     let single_turn_response = reader_handle.await??;

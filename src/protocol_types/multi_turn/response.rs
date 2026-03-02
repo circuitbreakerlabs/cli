@@ -1,4 +1,5 @@
 use super::super::common::Message;
+use crate::protocol_types::ConversationId;
 use serde::{Deserialize, Serialize};
 
 /// Details of a failed multi-turn conversation.
@@ -7,7 +8,7 @@ pub struct FailedMultiTurnResult {
     /// Lowest safety score in the conversation
     pub min_safe_response_score: f64,
     /// Unique identifier for this conversation across this request
-    pub conversation_id: i32,
+    pub conversation_id: ConversationId,
     /// Full conversation history in role/content format
     pub conversation: Vec<Message>,
 }

@@ -1,10 +1,12 @@
 use serde::{Deserialize, Serialize};
 
+use super::common::ConversationId;
+
 /// Payload for conversation_error messages (Server -> Client).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationError {
     /// Identifier for the completed conversation
-    pub conversation_id: i32,
+    pub conversation_id: ConversationId,
     /// Details about the error that occurred during processing
     pub error_message: String,
 }
@@ -23,7 +25,7 @@ pub struct ConversationErrorEnvelope {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationComplete {
     /// Identifier for the completed conversation
-    pub conversation_id: i32,
+    pub conversation_id: ConversationId,
     /// Number of turns in the conversation
     pub turns: i32,
     /// Whether the conversation passed the evaluation criteria
