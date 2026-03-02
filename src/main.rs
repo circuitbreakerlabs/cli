@@ -6,7 +6,7 @@ mod response_provider;
 mod tui;
 mod websockets;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::Local;
@@ -44,7 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Arc::new(OpenAIProvider::new(config.clone(), &headers)?) as Arc<dyn ResponseProvider>
         }
         cli::ProviderCommand::Custom(config) => {
-            Arc::new(CustomProvider::new(&config, &headers)?) as Arc<dyn ResponseProvider>
+            Arc::new(CustomProvider::new(config, &headers)?) as Arc<dyn ResponseProvider>
         }
     };
 
@@ -111,8 +111,7 @@ async fn run_single_turn_evaluation(
     let filename = output_file.unwrap_or_else(|| {
         let timestamp = Local::now().format("%Y%m%d_%H%M%S");
         PathBuf::from(format!(
-            "circuit_breaker_labs_single_turn_evaluation_{}.json",
-            timestamp
+            "circuit_breaker_labs_single_turn_evaluation_{timestamp}.json",
         ))
     });
 
@@ -157,8 +156,7 @@ async fn run_multi_turn_evaluation(
     let filename = output_file.unwrap_or_else(|| {
         let timestamp = Local::now().format("%Y%m%d_%H%M%S");
         PathBuf::from(format!(
-            "circuit_breaker_labs_multi_turn_evaluation_{}.json",
-            timestamp
+            "circuit_breaker_labs_multi_turn_evaluation_{timestamp}.json",
         ))
     });
 
@@ -179,7 +177,7 @@ async fn run_multi_turn_evaluation(
 
 fn print_styled_success_message(
     turn_type: &str,
-    filename: &PathBuf,
+    filename: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use ratatui::crossterm::queue;
     use std::io::{self, Write};

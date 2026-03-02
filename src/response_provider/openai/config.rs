@@ -227,15 +227,14 @@ impl OpenAIProviderConfig {
             request.top_logprobs = Some(top_logprobs);
         }
 
-        if let Some(ref stop) = self.optional.stop {
-            if !stop.is_empty() {
+        if let Some(ref stop) = self.optional.stop
+            && !stop.is_empty() {
                 if stop.len() == 1 {
                     request.stop = Some(StopConfiguration::String(stop[0].clone()));
                 } else {
                     request.stop = Some(StopConfiguration::StringArray(stop.clone()));
                 }
             }
-        }
 
         if let Some(ref logit_bias) = self.optional.logit_bias {
             request.logit_bias = Some(logit_bias.clone());

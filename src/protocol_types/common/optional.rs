@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::common::ConversationId;
 
-/// Payload for conversation_error messages (Server -> Client).
+/// Payload for `conversation_error` messages (Server -> Client).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationError {
     /// Identifier for the completed conversation
