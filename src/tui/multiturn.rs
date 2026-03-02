@@ -247,6 +247,20 @@ fn get_progress_bar_spans(conv: &ConversationState) -> Vec<Span<'_>> {
     ]
 }
 
+fn get_numeric_progress_spans(conv: &ConversationState) -> Option<Vec<Span<'_>>> {
+    if matches!(conv.status, ConversationStatus::Waiting(_)) {
+        Some(vec![
+            Span::raw("["),
+            Span::raw(conv.current_turn.to_string()),
+            Span::raw("/"),
+            Span::raw(conv.max_turns.to_string()),
+            Span::raw("]"),
+        ])
+    } else {
+        None
+    }
+}
+
 fn render(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     state: &AppState,
@@ -257,10 +271,13 @@ fn render(
 
     terminal.draw(|frame| {
         let progress_rows = state.conversations.values().map(|conv| {
-            let spans = get_status_indicator_spans(&conv.status, conv.id, elapsed_spinner_frames)
-                .into_iter()
-                .chain(get_progress_bar_spans(conv));
-            let line = Line::from(spans.collect::<Vec<_>>());
+            let spans: Vec<Span<'_>> =
+                get_status_indicator_spans(&conv.status, conv.id, elapsed_spinner_frames)
+                    .into_iter()
+                    .chain(get_progress_bar_spans(conv))
+                    .chain(get_numeric_progress_spans(conv).into_iter().flatten())
+                    .collect();
+            let line = Line::from(spans);
             Row::new(vec![Cell::from(line)])
         });
 
