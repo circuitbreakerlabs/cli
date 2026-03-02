@@ -76,7 +76,10 @@ async fn run_single_turn_evaluation(
             .map_err(|e| e.to_string())?
     } else {
         let (tx, rx) = tokio::sync::mpsc::channel::<SingleTurnProgressIndicatorMessage>(128);
-        let render_handle = tokio::spawn(singleturn::render_task(rx));
+        let render_handle = tokio::spawn(singleturn::render_task(
+            rx,
+            request.maximum_iteration_layers,
+        ));
 
         let result =
             evaluations::singleturn::run_evaluation(websocket, provider, request, Some(tx))

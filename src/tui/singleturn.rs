@@ -17,7 +17,7 @@ use crate::protocol_types::ConversationId;
 use crate::protocol_types::common::{ConversationComplete, ConversationError};
 use crate::protocol_types::single_turn::{IterationComplete, IterationStart};
 
-const GRID_COLUMNS: usize = 3;
+const GRID_COLUMNS: usize = 5;
 
 pub enum SingleTurnProgressIndicatorMessage {
     IterationStart(IterationStart),
@@ -167,15 +167,20 @@ fn print_final_summary(passed: usize, failed: usize, errors: usize) {
 
 pub async fn render_task(
     mut progress_rx: tokio::sync::mpsc::Receiver<SingleTurnProgressIndicatorMessage>,
+    maximum_iteration_layers: i32,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let state = Arc::new(RwLock::new(AppState::default()));
 
     let stdout = std::io::stdout();
     let backend = CrosstermBackend::new(stdout);
 
-    // Max viewport: header + blank + 10 grid rows + blank = 12 lines
-    // This handles up to 30 cases with 3 columns
-    let viewport_height = 12;
+    /*  this reserves the maximum needed viewport height for all iterations
+     *  this will break if there are more than <terminal_width> * 3 cases in the final iteration
+     */
+    let viewport_height = maximum_iteration_layers // summary line per layer
+    + 1 // header
+    + 1 // blank
+    + 3; // grid
     let options = ratatui::TerminalOptions {
         viewport: ratatui::Viewport::Inline(u16::try_from(viewport_height)?),
     };
