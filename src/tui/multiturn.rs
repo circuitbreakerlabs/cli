@@ -161,8 +161,11 @@ pub async fn render_task(
     }
 
     let state_guard = state.read().await;
+
     render(&mut terminal, &state_guard, start)?;
     terminal.clear()?;
+    drop(terminal);
+
     print_footer(
         state_guard.passed_count,
         state_guard.failed_count,
