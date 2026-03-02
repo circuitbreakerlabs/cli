@@ -46,6 +46,10 @@ pub struct Args {
     #[arg(long, value_enum, default_value_t = LogLevel::Info)]
     pub log_level: LogLevel,
 
+    /// Enable log mode (disables TUI, outputs logs to stdout)
+    #[arg(long)]
+    pub log_mode: bool,
+
     /// Add custom headers to provider requests (format: "Key:Value", can be repeated)
     #[arg(long = "add-header", value_parser = clap::value_parser!(Headers))]
     headers: Vec<Headers>,

@@ -9,16 +9,22 @@ mod websockets;
 use std::sync::Arc;
 
 use clap::Parser;
+use protocol_types::{MultiTurnRequest, SingleTurnRequest};
 use response_provider::{CustomProvider, OllamaProvider, OpenAIProvider, ResponseProvider};
-use tui::{MultiTurnProgressIndicatorMessage, multiturn};
+use tui::{
+    MultiTurnProgressIndicatorMessage, SingleTurnProgressIndicatorMessage, multiturn, singleturn,
+};
+use websockets::WebSocketConnection;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli_args = cli::Args::parse();
 
-    tracing_subscriber::fmt()
-        .with_max_level(Into::<tracing::Level>::into(cli_args.log_level))
-        .init();
+    if cli_args.log_mode {
+        tracing_subscriber::fmt()
+            .with_max_level(Into::<tracing::Level>::into(cli_args.log_level))
+            .init();
+    }
 
     let headers = cli_args.headers();
 
@@ -48,20 +54,65 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match cli_args.evaluation {
         cli::EvaluationCommand::SingleTurn { request, .. } => {
-            let result = evaluations::singleturn::run_evaluation(websocket, provider, request)
-                .await
-                .map_err(|e| e.to_string())?;
-
-            println!("Single-turn evaluation result: {result:?}");
+            run_single_turn_evaluation(websocket, provider, request, cli_args.log_mode).await?;
         }
         cli::EvaluationCommand::MultiTurn { request, .. } => {
-            let result = evaluations::multiturn::run_evaluation(websocket, provider, request, None) // TODO: pass in progress indicator channel
-                .await
-                .map_err(|e| e.to_string())?;
-
-            println!("Multi-turn evaluation result: {result:?}");
+            run_multi_turn_evaluation(websocket, provider, request, cli_args.log_mode).await?;
         }
     }
 
+    Ok(())
+}
+
+async fn run_single_turn_evaluation(
+    websocket: WebSocketConnection,
+    provider: Arc<dyn ResponseProvider>,
+    request: SingleTurnRequest,
+    log_mode: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let result = if log_mode {
+        evaluations::singleturn::run_evaluation(websocket, provider, request, None)
+            .await
+            .map_err(|e| e.to_string())?
+    } else {
+        let (tx, rx) = tokio::sync::mpsc::channel::<SingleTurnProgressIndicatorMessage>(128);
+        let render_handle = tokio::spawn(singleturn::render_task(rx));
+
+        let result =
+            evaluations::singleturn::run_evaluation(websocket, provider, request, Some(tx))
+                .await
+                .map_err(|e| e.to_string())?;
+
+        let _ = render_handle.await;
+        result
+    };
+
+    println!("Single-turn evaluation result: {result:?}");
+    Ok(())
+}
+
+async fn run_multi_turn_evaluation(
+    websocket: WebSocketConnection,
+    provider: Arc<dyn ResponseProvider>,
+    request: MultiTurnRequest,
+    log_mode: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let result = if log_mode {
+        evaluations::multiturn::run_evaluation(websocket, provider, request, None)
+            .await
+            .map_err(|e| e.to_string())?
+    } else {
+        let (tx, rx) = tokio::sync::mpsc::channel::<MultiTurnProgressIndicatorMessage>(128);
+        let render_handle = tokio::spawn(multiturn::render_task(rx));
+
+        let result = evaluations::multiturn::run_evaluation(websocket, provider, request, Some(tx))
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let _ = render_handle.await;
+        result
+    };
+
+    println!("Multi-turn evaluation result: {result:?}");
     Ok(())
 }
