@@ -17,8 +17,6 @@ use crate::protocol_types::ConversationId;
 use crate::protocol_types::common::{ConversationComplete, ConversationError};
 use crate::protocol_types::single_turn::{IterationComplete, IterationStart};
 
-const GRID_COLUMNS: usize = 5;
-
 pub enum SingleTurnProgressIndicatorMessage {
     IterationStart(IterationStart),
     IterationComplete(IterationComplete),
@@ -334,12 +332,14 @@ fn get_current_iteration_rows(
 
     // grid
     let conversation_values: Vec<&ConversationState> = iteration.conversations.values().collect();
-    let num_rows = conversation_values.len().div_ceil(GRID_COLUMNS);
+    let num_cases = conversation_values.len();
+    let grid_columns = num_cases.div_ceil(3).max(5);
+    let num_rows = conversation_values.len().div_ceil(grid_columns);
 
     rows.extend((0..num_rows).filter_map(|row_idx| {
-        let row_spans = (0..GRID_COLUMNS)
+        let row_spans = (0..grid_columns)
             .filter_map(|col_idx| {
-                let idx = row_idx * GRID_COLUMNS + col_idx;
+                let idx = row_idx * grid_columns + col_idx;
                 conversation_values.get(idx)
             })
             .flat_map(|conv| {
