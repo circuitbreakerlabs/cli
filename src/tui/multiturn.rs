@@ -226,11 +226,14 @@ async fn handle_message(
 }
 
 fn get_progress_bar_spans(conv: &ConversationState) -> Vec<Span<'_>> {
-    let progress_len = if conv.max_turns > 0 {
-        (conv.current_turn * PROGRESS_BAR_WIDTH) / conv.max_turns
+    let progress_len = if matches!(conv.status, ConversationStatus::Waiting(_)) {
+        (conv.current_turn * PROGRESS_BAR_WIDTH)
+            .checked_div(conv.max_turns)
+            .unwrap_or(0)
     } else {
-        0
+        PROGRESS_BAR_WIDTH
     };
+
     let progress_bar_filled = "=".repeat(progress_len);
     let progress_bar_empty = " ".repeat(PROGRESS_BAR_WIDTH - progress_len);
     vec![
