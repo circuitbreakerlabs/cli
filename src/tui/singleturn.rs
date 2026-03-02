@@ -321,7 +321,10 @@ async fn handle_message(
     Ok(false)
 }
 
-fn get_iteration_rows(iteration: &IterationState, elapsed_spinner_frames: usize) -> Vec<Row<'_>> {
+fn get_current_iteration_rows(
+    iteration: &IterationState,
+    elapsed_spinner_frames: usize,
+) -> Vec<Row<'_>> {
     let mut rows: Vec<Row<'_>> = Vec::new();
 
     // header
@@ -356,7 +359,9 @@ fn get_iteration_rows(iteration: &IterationState, elapsed_spinner_frames: usize)
     rows
 }
 
-fn get_previous_iterations_rows(completed_iterations: &[CompletedIteration]) -> Vec<Row<'_>> {
+fn get_previous_iterations_summary_rows(
+    completed_iterations: &[CompletedIteration],
+) -> Vec<Row<'_>> {
     completed_iterations
         .iter()
         .map(|iteration| {
@@ -380,12 +385,17 @@ fn render(
     terminal.draw(|frame| {
         let mut rows: Vec<Row<'_>> = Vec::new();
 
-        rows.extend(get_previous_iterations_rows(&state.completed_iterations));
+        rows.extend(get_previous_iterations_summary_rows(
+            &state.completed_iterations,
+        ));
 
         if let Some(iteration) = &state.current_iteration
             && !iteration.completed
         {
-            rows.extend(get_iteration_rows(iteration, elapsed_spinner_frames));
+            rows.extend(get_current_iteration_rows(
+                iteration,
+                elapsed_spinner_frames,
+            ));
         }
 
         let table = Table::new(rows, &[Constraint::Fill(1)]);
