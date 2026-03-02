@@ -6,10 +6,13 @@ mod response_provider;
 mod tui;
 mod websockets;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
+use chrono::Local;
 use clap::Parser;
 use protocol_types::{MultiTurnRequest, SingleTurnRequest};
+use ratatui::crossterm::style::{Attribute, Color, Print, SetAttribute, SetForegroundColor};
 use response_provider::{CustomProvider, OllamaProvider, OpenAIProvider, ResponseProvider};
 use tui::{
     MultiTurnProgressIndicatorMessage, SingleTurnProgressIndicatorMessage, multiturn, singleturn,
@@ -54,10 +57,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match cli_args.evaluation {
         cli::EvaluationCommand::SingleTurn { request, .. } => {
-            run_single_turn_evaluation(websocket, provider, request, cli_args.log_mode).await?;
+            run_single_turn_evaluation(
+                websocket,
+                provider,
+                request,
+                cli_args.log_mode,
+                cli_args.output_file,
+            )
+            .await?;
         }
         cli::EvaluationCommand::MultiTurn { request, .. } => {
-            run_multi_turn_evaluation(websocket, provider, request, cli_args.log_mode).await?;
+            run_multi_turn_evaluation(
+                websocket,
+                provider,
+                request,
+                cli_args.log_mode,
+                cli_args.output_file,
+            )
+            .await?;
         }
     }
 
@@ -69,6 +86,7 @@ async fn run_single_turn_evaluation(
     provider: Arc<dyn ResponseProvider>,
     request: SingleTurnRequest,
     log_mode: bool,
+    output_file: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let result = if log_mode {
         evaluations::singleturn::run_evaluation(websocket, provider, request, None)
@@ -90,7 +108,26 @@ async fn run_single_turn_evaluation(
         result
     };
 
-    println!("Single-turn evaluation result: {result:?}");
+    let filename = output_file.unwrap_or_else(|| {
+        let timestamp = Local::now().format("%Y%m%d_%H%M%S");
+        PathBuf::from(format!(
+            "circuit_breaker_labs_single_turn_evaluation_{}.json",
+            timestamp
+        ))
+    });
+
+    let json = serde_json::to_string_pretty(&result)?;
+    std::fs::write(&filename, json)?;
+
+    if log_mode {
+        tracing::info!(
+            "Saved full single-turn evaluation results to {}",
+            filename.display()
+        );
+    } else {
+        print_styled_success_message("single", &filename)?;
+    }
+
     Ok(())
 }
 
@@ -99,6 +136,7 @@ async fn run_multi_turn_evaluation(
     provider: Arc<dyn ResponseProvider>,
     request: MultiTurnRequest,
     log_mode: bool,
+    output_file: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let result = if log_mode {
         evaluations::multiturn::run_evaluation(websocket, provider, request, None)
@@ -116,6 +154,52 @@ async fn run_multi_turn_evaluation(
         result
     };
 
-    println!("Multi-turn evaluation result: {result:?}");
+    let filename = output_file.unwrap_or_else(|| {
+        let timestamp = Local::now().format("%Y%m%d_%H%M%S");
+        PathBuf::from(format!(
+            "circuit_breaker_labs_multi_turn_evaluation_{}.json",
+            timestamp
+        ))
+    });
+
+    let json = serde_json::to_string_pretty(&result)?;
+    std::fs::write(&filename, json)?;
+
+    if log_mode {
+        tracing::info!(
+            "Saved full multi-turn evaluation results to {}",
+            filename.display()
+        );
+    } else {
+        print_styled_success_message("multi", &filename)?;
+    }
+
+    Ok(())
+}
+
+fn print_styled_success_message(
+    turn_type: &str,
+    filename: &PathBuf,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use ratatui::crossterm::queue;
+    use std::io::{self, Write};
+
+    let mut stdout = io::stdout();
+
+    queue!(stdout, Print("Saved full "))?;
+    queue!(stdout, Print(turn_type))?;
+    queue!(stdout, Print("-turn evaluation results to "))?;
+
+    queue!(stdout, SetForegroundColor(Color::Magenta))?;
+    queue!(stdout, SetAttribute(Attribute::Bold))?;
+    queue!(stdout, SetAttribute(Attribute::Italic))?;
+    queue!(stdout, Print(filename.display().to_string()))?;
+    queue!(stdout, SetAttribute(Attribute::Reset))?;
+    queue!(stdout, SetForegroundColor(Color::Reset))?;
+
+    queue!(stdout, Print("\n"))?;
+
+    stdout.flush()?;
+
     Ok(())
 }

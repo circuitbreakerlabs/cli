@@ -3,6 +3,7 @@ use crate::protocol_types::{MultiTurnRequest, SingleTurnRequest};
 use crate::response_provider::{CustomProviderConfig, OllamaProviderConfig, OpenAIProviderConfig};
 use clap::{Parser, Subcommand, ValueEnum};
 use reqwest::header::HeaderMap;
+use std::path::PathBuf;
 
 macro_rules! cyan_bold {
     ($s:expr) => {
@@ -49,6 +50,10 @@ pub struct Args {
     /// Enable log mode (disables TUI, outputs logs to stdout)
     #[arg(long)]
     pub log_mode: bool,
+
+    /// Output file path for evaluation results (default: auto-generated with timestamp)
+    #[arg(long)]
+    pub output_file: Option<PathBuf>,
 
     /// Add custom headers to provider requests (format: "Key:Value", can be repeated)
     #[arg(long = "add-header", value_parser = clap::value_parser!(Headers))]

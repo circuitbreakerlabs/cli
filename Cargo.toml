@@ -13,6 +13,7 @@ path = "./src/main.rs"
 [dependencies]
 async-openai = { version = "0.32.4", features = ["chat-completion"] }
 async-trait = "0.1.89"
+chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5.57", features = ["derive", "env"] }
 const_format = "0.2.35"
 env = "1.0.1"
