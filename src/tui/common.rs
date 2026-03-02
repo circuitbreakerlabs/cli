@@ -18,6 +18,8 @@ pub enum ConversationStatus {
 
 pub const SPINNER_PHASE_SPREAD: usize = 4;
 pub const DOTS_SPINNER_FRAMES: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+pub const REVERSED_DOTS_SPINNER_FRAMES: &[char] =
+    &['⠏', '⠇', '⠧', '⠦', '⠴', '⠼', '⠸', '⠹', '⠙', '⠋'];
 
 pub fn get_status_indicator_spans(
     status: &ConversationStatus,
@@ -25,11 +27,20 @@ pub fn get_status_indicator_spans(
     elapsed_spinner_frames: usize,
 ) -> Vec<Span<'_>> {
     let (status_char, status_color) = match status {
-        ConversationStatus::Waiting(_) => {
-            let phase_offset = usize::try_from(conversation_id).unwrap_or(0) * SPINNER_PHASE_SPREAD
-                % DOTS_SPINNER_FRAMES.len();
-            let frame_idx = (elapsed_spinner_frames + phase_offset) % DOTS_SPINNER_FRAMES.len();
-            (DOTS_SPINNER_FRAMES[frame_idx], Color::Blue)
+        ConversationStatus::Waiting(waiting_for) => {
+            let phase_offset = usize::try_from(conversation_id).unwrap_or(0) * SPINNER_PHASE_SPREAD;
+            match waiting_for {
+                WaitingFor::Provider => {
+                    let frame_idx = (elapsed_spinner_frames + phase_offset)
+                        % REVERSED_DOTS_SPINNER_FRAMES.len();
+                    (REVERSED_DOTS_SPINNER_FRAMES[frame_idx], Color::Magenta)
+                }
+                WaitingFor::API => {
+                    let frame_idx =
+                        (elapsed_spinner_frames + phase_offset) % DOTS_SPINNER_FRAMES.len();
+                    (DOTS_SPINNER_FRAMES[frame_idx], Color::Blue)
+                }
+            }
         }
         ConversationStatus::Passed => ('✓', Color::Green),
         ConversationStatus::Failed => ('✗', Color::Red),
