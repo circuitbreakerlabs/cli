@@ -12,13 +12,29 @@ pub enum ServerErrorCode {
     Timeout = 4007,
 }
 
-/// Error codes for completion errors (4500-4599).
+/// Error reasons for completion errors.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum CompletionErrorCode {
-    Unknown = 4500,
-    ModelTimeout = 4501,
-    ModelUnreachable = 4502,
-    InvalidResponse = 4503,
-    RateLimited = 4504,
-    AuthenticationFailure = 4505,
+#[serde(rename_all = "snake_case")]
+pub enum CompletionErrorReason {
+    ModelTimeout,
+    ModelUnreachable,
+    InvalidResponse,
+    RateLimited,
+    AuthenticationFailed,
+    Unknown,
+}
+
+/// Payload for `completion_error` messages (Client -> Server).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompletionError {
+    pub request_id: String,
+    pub error_reason: CompletionErrorReason,
+}
+
+/// Client returns an error that occurred while processing a completion request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompletionErrorEnvelope {
+    #[serde(rename = "type")]
+    pub message_type: String,
+    pub data: CompletionError,
 }
