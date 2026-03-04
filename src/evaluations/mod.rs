@@ -1,5 +1,8 @@
+pub mod err;
 pub mod multiturn;
 pub mod singleturn;
+
+pub use err::EvaluationError;
 
 use crate::protocol_types::{self};
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
