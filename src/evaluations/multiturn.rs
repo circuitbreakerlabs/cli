@@ -1,4 +1,4 @@
-use super::WriterMessage;
+use super::{EvaluationError, WriterMessage};
 use crate::protocol_types::common::{CompletionErrorEnvelope, CompletionResponseEnvelope};
 use crate::protocol_types::multi_turn::{
     CategorizedMultiTurnMessage, MultiTurnReceivableMessage, MultiTurnRequest,
@@ -22,7 +22,7 @@ async fn handle_completion_request(
     provider: Arc<dyn ResponseProvider>,
     writer_tx: tokio::sync::mpsc::Sender<WriterMessage>,
     progress_indicator: Option<tokio::sync::mpsc::Sender<MultiTurnProgressIndicatorMessage>>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(), EvaluationError> {
     if let Some(progress_indicator) = &progress_indicator {
         progress_indicator
             .send(MultiTurnProgressIndicatorMessage::ConversationTurn {
@@ -81,7 +81,7 @@ async fn handle_optional_message(
     message: protocol_types::multi_turn::OptionalMultiTurnMessage,
     progress_indicator: Option<tokio::sync::mpsc::Sender<MultiTurnProgressIndicatorMessage>>,
     max_turns: usize,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(), EvaluationError> {
     match message {
         OptionalMultiTurnMessage::MultiTurnEvaluationStart(evaluation_start) => {
             tracing::info!(
@@ -138,7 +138,7 @@ async fn reader_task(
     writer_tx: tokio::sync::mpsc::Sender<WriterMessage>,
     progress_indicator: Option<tokio::sync::mpsc::Sender<MultiTurnProgressIndicatorMessage>>,
     request: MultiTurnRequest,
-) -> Result<MultiTurnResponse, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<MultiTurnResponse, EvaluationError> {
     while let Some(msg) = read.next().await {
         match msg {
             Ok(Message::Text(text)) => {
@@ -215,18 +215,20 @@ async fn reader_task(
                         reason: err.clone().into(),
                     }))
                     .await?;
-                return Err(err.into());
+                return Err(EvaluationError::WebSocketClosed(err));
             }
         }
     }
-    Err("WebSocket stream ended without receiving a MultiTurnResponse".into())
+    Err(EvaluationError::WebSocketClosed(
+        "WebSocket stream ended without receiving a MultiTurnResponse".to_string()
+    ))
 }
 
 /// Listens for completion responses and errors from the reader task and forwards them to the server. If an error is received, it sends a close frame and terminates.
 async fn writer_task(
     mut write: SplitSink<WebSocketConnection, Message>,
     mut writer_rx: tokio::sync::mpsc::Receiver<WriterMessage>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(), EvaluationError> {
     while let Some(msg) = writer_rx.recv().await {
         match msg {
             WriterMessage::CompletionResponse(completion_response) => {
@@ -260,7 +262,7 @@ pub async fn run_evaluation(
     provider: Arc<dyn ResponseProvider>,
     request: MultiTurnRequest,
     progress_indicator: Option<tokio::sync::mpsc::Sender<MultiTurnProgressIndicatorMessage>>,
-) -> Result<MultiTurnResponse, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<MultiTurnResponse, EvaluationError> {
     let (mut write, read) = websocket_connection.split();
     let (writer_tx, writer_rx) = tokio::sync::mpsc::channel::<WriterMessage>(100);
 
