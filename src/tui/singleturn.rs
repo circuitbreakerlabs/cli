@@ -12,6 +12,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Row, Table};
 use tokio::sync::RwLock;
 
+use super::TuiError;
 use super::common::{ConversationStatus, WaitingFor, get_status_indicator_spans};
 use crate::protocol_types::ConversationId;
 use crate::protocol_types::common::{ConversationComplete, ConversationError};
@@ -166,7 +167,7 @@ fn print_final_summary(passed: usize, failed: usize, errors: usize) {
 pub async fn render_task(
     mut progress_rx: tokio::sync::mpsc::Receiver<SingleTurnProgressIndicatorMessage>,
     maximum_iteration_layers: i32,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(), TuiError> {
     let state = Arc::new(RwLock::new(AppState::default()));
 
     let stdout = std::io::stdout();
@@ -180,7 +181,9 @@ pub async fn render_task(
     + 1 // blank
     + 3; // grid
     let options = ratatui::TerminalOptions {
-        viewport: ratatui::Viewport::Inline(u16::try_from(viewport_height)?),
+        viewport: ratatui::Viewport::Inline(
+            u16::try_from(viewport_height).expect("viewport height should fit in u16"),
+        ),
     };
     let mut terminal = Terminal::with_options(backend, options)?;
 
@@ -196,7 +199,7 @@ pub async fn render_task(
                             break;
                         }
                     }
-                    None => break,
+                    None => return Err(TuiError::ChannelClosed),
                 }
             }
             _ = render_interval.tick() => {}
@@ -238,7 +241,7 @@ pub async fn render_task(
 async fn handle_message(
     state: &Arc<RwLock<AppState>>,
     msg: SingleTurnProgressIndicatorMessage,
-) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<bool, TuiError> {
     let mut state = state.write().await;
 
     match msg {
@@ -379,28 +382,30 @@ fn render(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     state: &AppState,
     start: Instant,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(), TuiError> {
     let elapsed_spinner_frames = (start.elapsed().as_millis() / 100) as usize;
 
-    terminal.draw(|frame| {
-        let mut rows: Vec<Row<'_>> = Vec::new();
+    terminal
+        .draw(|frame| {
+            let mut rows: Vec<Row<'_>> = Vec::new();
 
-        rows.extend(get_previous_iterations_summary_rows(
-            &state.completed_iterations,
-        ));
-
-        if let Some(iteration) = &state.current_iteration
-            && !iteration.completed
-        {
-            rows.extend(get_current_iteration_rows(
-                iteration,
-                elapsed_spinner_frames,
+            rows.extend(get_previous_iterations_summary_rows(
+                &state.completed_iterations,
             ));
-        }
 
-        let table = Table::new(rows, &[Constraint::Fill(1)]);
-        frame.render_widget(table, frame.area());
-    })?;
+            if let Some(iteration) = &state.current_iteration
+                && !iteration.completed
+            {
+                rows.extend(get_current_iteration_rows(
+                    iteration,
+                    elapsed_spinner_frames,
+                ));
+            }
+
+            let table = Table::new(rows, &[Constraint::Fill(1)]);
+            frame.render_widget(table, frame.area());
+        })
+        .map_err(|e| TuiError::Render(e.to_string()))?;
 
     Ok(())
 }

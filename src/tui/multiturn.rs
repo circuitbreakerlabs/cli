@@ -12,6 +12,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Row, Table};
 use tokio::sync::RwLock;
 
+use super::TuiError;
 use super::common::{ConversationStatus, WaitingFor, get_status_indicator_spans};
 use crate::protocol_types::ConversationId;
 use crate::protocol_types::common::{ConversationComplete, ConversationError};
@@ -100,7 +101,7 @@ fn print_footer(passed: usize, failed: usize, errors: usize) {
 
 pub async fn render_task(
     mut rx: tokio::sync::mpsc::Receiver<MultiTurnProgressIndicatorMessage>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(), TuiError> {
     let state = Arc::new(RwLock::new(AppState::default()));
 
     let (num_cases, _max_turns) = loop {
@@ -127,14 +128,17 @@ pub async fn render_task(
                 break (state_guard.num_cases, max_turns);
             }
         } else {
-            return Ok(());
+            return Err(TuiError::ChannelClosed);
         }
     };
 
     let stdout = std::io::stdout();
     let backend = CrosstermBackend::new(stdout);
     let options = ratatui::TerminalOptions {
-        viewport: ratatui::Viewport::Inline(u16::try_from(get_header_lines().len() + num_cases)?),
+        viewport: ratatui::Viewport::Inline(
+            u16::try_from(get_header_lines().len() + num_cases)
+                .expect("terminal height should fit in u16"),
+        ),
     };
     let mut terminal = Terminal::with_options(backend, options)?;
 
@@ -150,7 +154,7 @@ pub async fn render_task(
                             break;
                         }
                     }
-                    None => break,
+                    None => return Err(TuiError::ChannelClosed),
                 }
             }
             _ = render_interval.tick() => {}
@@ -178,7 +182,7 @@ pub async fn render_task(
 async fn handle_message(
     state: &Arc<RwLock<AppState>>,
     msg: MultiTurnProgressIndicatorMessage,
-) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<bool, TuiError> {
     let mut state = state.write().await;
 
     match msg {
@@ -191,7 +195,7 @@ async fn handle_message(
         }
         MultiTurnProgressIndicatorMessage::ConversationComplete(complete) => {
             if let Some(conv) = state.conversations.get_mut(&complete.conversation_id) {
-                conv.current_turn = usize::try_from(complete.turns)?;
+                conv.current_turn = complete.turns;
                 if complete.passed {
                     conv.status = ConversationStatus::Passed;
                     state.passed_count += 1;
@@ -265,31 +269,33 @@ fn render(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     state: &AppState,
     start: Instant,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(), TuiError> {
     // 100ms per spinner tick
     let elapsed_spinner_frames = (start.elapsed().as_millis() / 100) as usize;
 
-    terminal.draw(|frame| {
-        let progress_rows = state.conversations.values().map(|conv| {
-            let spans: Vec<Span<'_>> =
-                get_status_indicator_spans(&conv.status, conv.id, elapsed_spinner_frames)
-                    .into_iter()
-                    .chain(get_progress_bar_spans(conv))
-                    .chain(get_numeric_progress_spans(conv).into_iter().flatten())
-                    .collect();
-            let line = Line::from(spans);
-            Row::new(vec![Cell::from(line)])
-        });
+    terminal
+        .draw(|frame| {
+            let progress_rows = state.conversations.values().map(|conv| {
+                let spans: Vec<Span<'_>> =
+                    get_status_indicator_spans(&conv.status, conv.id, elapsed_spinner_frames)
+                        .into_iter()
+                        .chain(get_progress_bar_spans(conv))
+                        .chain(get_numeric_progress_spans(conv).into_iter().flatten())
+                        .collect();
+                let line = Line::from(spans);
+                Row::new(vec![Cell::from(line)])
+            });
 
-        let all_rows = get_header_lines()
-            .into_iter()
-            .map(|line| Row::new(vec![Cell::from(line)]))
-            .chain(progress_rows);
+            let all_rows = get_header_lines()
+                .into_iter()
+                .map(|line| Row::new(vec![Cell::from(line)]))
+                .chain(progress_rows);
 
-        let table = Table::new(all_rows, &[Constraint::Fill(1)]);
+            let table = Table::new(all_rows, &[Constraint::Fill(1)]);
 
-        frame.render_widget(table, frame.area());
-    })?;
+            frame.render_widget(table, frame.area());
+        })
+        .map_err(|e| TuiError::Render(e.to_string()))?;
 
     Ok(())
 }
