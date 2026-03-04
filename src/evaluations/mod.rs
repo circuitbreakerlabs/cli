@@ -21,6 +21,7 @@ impl From<&crate::cli::EvaluationCommand> for EvaluationType {
 
 enum WriterMessage {
     CompletionResponse(protocol_types::CompletionResponse),
+    CompletionError(protocol_types::CompletionError),
     Pong(Vec<u8>),
     Close(CloseFrame),
     ServerClosed,

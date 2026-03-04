@@ -7,4 +7,5 @@ pub use common::{
     CompletionRequest, CompletionResponse, CompletionResponseEnvelope, ConversationId, Message,
     Role, TestCaseGroup,
 };
+pub use errors::{CompletionError, CompletionErrorEnvelope};
 pub use optional::{ConversationComplete, ConversationError};

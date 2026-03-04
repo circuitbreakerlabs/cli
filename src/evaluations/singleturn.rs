@@ -1,4 +1,4 @@
-use crate::protocol_types::common::CompletionResponseEnvelope;
+use crate::protocol_types::common::{CompletionErrorEnvelope, CompletionResponseEnvelope};
 use crate::protocol_types::single_turn::{
     CategorizedSingleTurnMessage, SingleTurnReceivableMessage, SingleTurnRequest,
     SingleTurnRequestEnvelope, SingleTurnResponse,
@@ -38,9 +38,17 @@ async fn handle_completion_request(
             model_response: completion.content,
         }),
         Err(e) => {
-            let err = format!("Error generating response: {e}");
-            tracing::error!("{}", &err);
-            return Err(err.into());
+            tracing::error!("Error generating response: {e}");
+            writer_tx
+                .send(WriterMessage::CompletionError(
+                    protocol_types::CompletionError {
+                        request_id: request.request_id.clone(),
+                        error_reason: (&e).into(),
+                    },
+                ))
+                .await?;
+
+            return Err(e.into());
         }
     };
 
@@ -218,6 +226,10 @@ async fn writer_task(
             WriterMessage::CompletionResponse(completion_response) => {
                 let msg =
                     serde_json::to_string(&CompletionResponseEnvelope::from(completion_response))?;
+                write.send(Message::Text(msg.into())).await?;
+            }
+            WriterMessage::CompletionError(completion_error) => {
+                let msg = serde_json::to_string(&CompletionErrorEnvelope::from(completion_error))?;
                 write.send(Message::Text(msg.into())).await?;
             }
             WriterMessage::Close(close_frame) => {
