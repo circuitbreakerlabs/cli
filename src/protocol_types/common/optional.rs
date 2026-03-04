@@ -27,7 +27,7 @@ pub struct ConversationComplete {
     /// Identifier for the completed conversation
     pub conversation_id: ConversationId,
     /// Number of turns in the conversation
-    pub turns: i32,
+    pub turns: usize,
     /// Whether the conversation passed the evaluation criteria
     pub passed: bool,
 }
