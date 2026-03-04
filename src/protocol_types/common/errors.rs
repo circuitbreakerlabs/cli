@@ -1,3 +1,4 @@
+use crate::response_provider::ProviderError;
 use serde::{Deserialize, Serialize};
 
 /// Error codes for server errors (4000-4499).
@@ -37,4 +38,32 @@ pub struct CompletionErrorEnvelope {
     #[serde(rename = "type")]
     pub message_type: String,
     pub data: CompletionError,
+}
+
+impl From<&ProviderError> for CompletionErrorReason {
+    fn from(error: &ProviderError) -> Self {
+        match error {
+            ProviderError::Network(_) => CompletionErrorReason::ModelUnreachable,
+            ProviderError::Api(msg) => {
+                if msg.contains("rate") || msg.contains("Rate") {
+                    CompletionErrorReason::RateLimited
+                } else if msg.contains("auth") || msg.contains("Auth") || msg.contains("key") {
+                    CompletionErrorReason::AuthenticationFailed
+                } else {
+                    CompletionErrorReason::Unknown
+                }
+            }
+            ProviderError::Parsing(_) => CompletionErrorReason::InvalidResponse,
+            _ => CompletionErrorReason::Unknown,
+        }
+    }
+}
+
+impl From<CompletionError> for CompletionErrorEnvelope {
+    fn from(error: CompletionError) -> Self {
+        CompletionErrorEnvelope {
+            message_type: "completion_error".to_string(),
+            data: error,
+        }
+    }
 }
