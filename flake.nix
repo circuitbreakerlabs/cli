@@ -27,18 +27,13 @@
             ];
           })
         ];
-
-        externalDeps = with pkgs; [
-          openssl
-          pkg-config
-        ];
       in
       {
         devShells =
           let
             rustShell = pkgs.mkShell {
               name = "rust-development-shell";
-              nativeBuildInputs = rustBin ++ (with pkgs; [ rust-analyzer ]) ++ externalDeps;
+              nativeBuildInputs = rustBin ++ (with pkgs; [ rust-analyzer ]);
             };
           in
           {
@@ -53,10 +48,6 @@
           pkgs.rustPlatform.buildRustPackage {
             pname = cargoToml.package.name;
             inherit (cargoToml.package) version;
-
-            buildInputs = externalDeps;
-
-            nativeBuildInputs = externalDeps;
 
             src = ./.;
             cargoLock = {
