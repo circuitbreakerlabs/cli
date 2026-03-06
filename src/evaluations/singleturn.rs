@@ -1,3 +1,4 @@
+use super::{EvaluationError, WriterMessage};
 use crate::protocol_types::common::{CompletionErrorEnvelope, CompletionResponseEnvelope};
 use crate::protocol_types::single_turn::{
     CategorizedSingleTurnMessage, SingleTurnReceivableMessage, SingleTurnRequest,
@@ -9,7 +10,6 @@ use crate::tui::SingleTurnProgressIndicatorMessage;
 use crate::tui::WaitingFor;
 use crate::websockets::WebSocketConnection;
 
-use super::WriterMessage;
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use protocol_types::single_turn::OptionalSingleTurnMessage;
@@ -22,7 +22,7 @@ async fn handle_completion_request(
     provider: Arc<dyn ResponseProvider>,
     writer_tx: tokio::sync::mpsc::Sender<WriterMessage>,
     progress_indicator: Option<tokio::sync::mpsc::Sender<SingleTurnProgressIndicatorMessage>>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(), EvaluationError> {
     if let Some(progress_indicator) = &progress_indicator {
         progress_indicator
             .send(SingleTurnProgressIndicatorMessage::WaitingFor {
@@ -68,7 +68,7 @@ async fn handle_completion_request(
 async fn handle_optional_message(
     message: protocol_types::single_turn::OptionalSingleTurnMessage,
     progress_indicator: Option<tokio::sync::mpsc::Sender<SingleTurnProgressIndicatorMessage>>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(), EvaluationError> {
     match message {
         OptionalSingleTurnMessage::IterationStart(iteration_start) => {
             tracing::info!(
@@ -138,7 +138,7 @@ async fn reader_task(
     provider: Arc<dyn ResponseProvider>,
     writer_tx: tokio::sync::mpsc::Sender<WriterMessage>,
     progress_indicator: Option<tokio::sync::mpsc::Sender<SingleTurnProgressIndicatorMessage>>,
-) -> Result<SingleTurnResponse, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<SingleTurnResponse, EvaluationError> {
     while let Some(msg) = read.next().await {
         match msg {
             Ok(Message::Text(text)) => {
@@ -158,6 +158,11 @@ async fn reader_task(
                         tracing::debug!(
                             "Received SingleTurnResponse, sending to writer task and terminating reader"
                         );
+                        if let Some(progress) = progress_indicator {
+                            progress
+                                .send(SingleTurnProgressIndicatorMessage::EvaluationComplete)
+                                .await?;
+                        }
                         writer_tx.send(WriterMessage::ServerClosed).await?;
                         return Ok(resp);
                     }
@@ -209,18 +214,20 @@ async fn reader_task(
                         reason: err.clone().into(),
                     }))
                     .await?;
-                return Err(err.into());
+                return Err(EvaluationError::WebSocketClosed(err));
             }
         }
     }
-    Err("WebSocket stream ended without receiving a SingleTurnResponse".into())
+    Err(EvaluationError::WebSocketClosed(
+        "WebSocket stream ended without receiving a SingleTurnResponse".to_string(),
+    ))
 }
 
 /// Listens for completion responses and errors from the reader task and forwards them to the server. If an error is received, it sends a close frame and terminates.
 async fn writer_task(
     mut write: SplitSink<WebSocketConnection, Message>,
     mut writer_rx: tokio::sync::mpsc::Receiver<WriterMessage>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(), EvaluationError> {
     while let Some(msg) = writer_rx.recv().await {
         match msg {
             WriterMessage::CompletionResponse(completion_response) => {
@@ -254,7 +261,7 @@ pub async fn run_evaluation(
     provider: Arc<dyn ResponseProvider>,
     request: SingleTurnRequest,
     progress_indicator: Option<tokio::sync::mpsc::Sender<SingleTurnProgressIndicatorMessage>>,
-) -> Result<SingleTurnResponse, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<SingleTurnResponse, EvaluationError> {
     let (mut write, read) = websocket_connection.split();
     let (writer_tx, writer_rx) = tokio::sync::mpsc::channel::<WriterMessage>(100);
 

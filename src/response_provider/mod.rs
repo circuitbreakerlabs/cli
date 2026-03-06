@@ -1,4 +1,5 @@
 pub mod custom;
+pub mod err;
 pub mod ollama;
 pub mod openai;
 
@@ -8,7 +9,6 @@ pub use custom::{CustomProvider, CustomProviderConfig};
 pub use err::ProviderError;
 pub use ollama::{OllamaProvider, OllamaProviderConfig};
 pub use openai::{OpenAIProvider, OpenAIProviderConfig};
-mod err;
 
 #[async_trait]
 pub trait ResponseProvider: Send + Sync {

@@ -12,12 +12,27 @@ use std::sync::Arc;
 use chrono::Local;
 use clap::Parser;
 use protocol_types::{MultiTurnRequest, SingleTurnRequest};
-use ratatui::crossterm::style::{Attribute, Color, Print, SetAttribute, SetForegroundColor};
+use ratatui::crossterm::style::{Attribute, Color, SetAttribute, SetForegroundColor};
 use response_provider::{CustomProvider, OllamaProvider, OpenAIProvider, ResponseProvider};
 use tui::{
     MultiTurnProgressIndicatorMessage, SingleTurnProgressIndicatorMessage, multiturn, singleturn,
 };
 use websockets::WebSocketConnection;
+
+use evaluations::EvaluationError;
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+enum RunEvaluationError {
+    #[error("Evaluation error: {0}")]
+    Evaluation(#[from] EvaluationError),
+
+    #[error("Result Serialization error: {0}")]
+    Serialize(#[from] serde_json::Error),
+
+    #[error("Result save error: {0}")]
+    FileSave(#[from] std::io::Error),
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -87,11 +102,9 @@ async fn run_single_turn_evaluation(
     request: SingleTurnRequest,
     log_mode: bool,
     output_file: Option<PathBuf>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), RunEvaluationError> {
     let result = if log_mode {
-        evaluations::singleturn::run_evaluation(websocket, provider, request, None)
-            .await
-            .map_err(|e| e.to_string())?
+        evaluations::singleturn::run_evaluation(websocket, provider, request, None).await?
     } else {
         let (tx, rx) = tokio::sync::mpsc::channel::<SingleTurnProgressIndicatorMessage>(128);
         let render_handle = tokio::spawn(singleturn::render_task(
@@ -100,9 +113,7 @@ async fn run_single_turn_evaluation(
         ));
 
         let result =
-            evaluations::singleturn::run_evaluation(websocket, provider, request, Some(tx))
-                .await
-                .map_err(|e| e.to_string())?;
+            evaluations::singleturn::run_evaluation(websocket, provider, request, Some(tx)).await?;
 
         let _ = render_handle.await;
         result
@@ -118,14 +129,7 @@ async fn run_single_turn_evaluation(
     let json = serde_json::to_string_pretty(&result)?;
     std::fs::write(&filename, json)?;
 
-    if log_mode {
-        tracing::info!(
-            "Saved full single-turn evaluation results to {}",
-            filename.display()
-        );
-    } else {
-        print_styled_success_message("single", &filename)?;
-    }
+    print_success_message(log_mode, "single", &filename);
 
     Ok(())
 }
@@ -136,18 +140,15 @@ async fn run_multi_turn_evaluation(
     request: MultiTurnRequest,
     log_mode: bool,
     output_file: Option<PathBuf>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), RunEvaluationError> {
     let result = if log_mode {
-        evaluations::multiturn::run_evaluation(websocket, provider, request, None)
-            .await
-            .map_err(|e| e.to_string())?
+        evaluations::multiturn::run_evaluation(websocket, provider, request, None).await?
     } else {
         let (tx, rx) = tokio::sync::mpsc::channel::<MultiTurnProgressIndicatorMessage>(128);
         let render_handle = tokio::spawn(multiturn::render_task(rx));
 
-        let result = evaluations::multiturn::run_evaluation(websocket, provider, request, Some(tx))
-            .await
-            .map_err(|e| e.to_string())?;
+        let result =
+            evaluations::multiturn::run_evaluation(websocket, provider, request, Some(tx)).await?;
 
         let _ = render_handle.await;
         result
@@ -163,41 +164,28 @@ async fn run_multi_turn_evaluation(
     let json = serde_json::to_string_pretty(&result)?;
     std::fs::write(&filename, json)?;
 
-    if log_mode {
-        tracing::info!(
-            "Saved full multi-turn evaluation results to {}",
-            filename.display()
-        );
-    } else {
-        print_styled_success_message("multi", &filename)?;
-    }
+    print_success_message(log_mode, "multi", &filename);
 
     Ok(())
 }
 
-fn print_styled_success_message(
-    turn_type: &str,
-    filename: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    use ratatui::crossterm::queue;
-    use std::io::{self, Write};
-
-    let mut stdout = io::stdout();
-
-    queue!(stdout, Print("Saved full "))?;
-    queue!(stdout, Print(turn_type))?;
-    queue!(stdout, Print("-turn evaluation results to "))?;
-
-    queue!(stdout, SetForegroundColor(Color::Magenta))?;
-    queue!(stdout, SetAttribute(Attribute::Bold))?;
-    queue!(stdout, SetAttribute(Attribute::Italic))?;
-    queue!(stdout, Print(filename.display().to_string()))?;
-    queue!(stdout, SetAttribute(Attribute::Reset))?;
-    queue!(stdout, SetForegroundColor(Color::Reset))?;
-
-    queue!(stdout, Print("\n"))?;
-
-    stdout.flush()?;
-
-    Ok(())
+fn print_success_message(log_mode: bool, turn_type: &str, filename: &Path) {
+    if log_mode {
+        tracing::info!(
+            "Saved full {}-turn evaluation results to {}",
+            turn_type,
+            filename.display(),
+        );
+    } else {
+        println!(
+            "Saved full {}-turn evaluation results to {}{}{}{}{}{}",
+            turn_type,
+            SetForegroundColor(Color::Magenta),
+            SetAttribute(Attribute::Bold),
+            SetAttribute(Attribute::Italic),
+            filename.display(),
+            SetAttribute(Attribute::Reset),
+            SetForegroundColor(Color::Reset),
+        );
+    }
 }
