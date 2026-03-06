@@ -158,6 +158,11 @@ async fn reader_task(
                         tracing::debug!(
                             "Received SingleTurnResponse, sending to writer task and terminating reader"
                         );
+                        if let Some(progress) = progress_indicator {
+                            progress
+                                .send(SingleTurnProgressIndicatorMessage::EvaluationComplete)
+                                .await?;
+                        }
                         writer_tx.send(WriterMessage::ServerClosed).await?;
                         return Ok(resp);
                     }
@@ -214,7 +219,7 @@ async fn reader_task(
         }
     }
     Err(EvaluationError::WebSocketClosed(
-        "WebSocket stream ended without receiving a SingleTurnResponse".to_string()
+        "WebSocket stream ended without receiving a SingleTurnResponse".to_string(),
     ))
 }
 

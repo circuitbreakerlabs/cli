@@ -23,6 +23,7 @@ pub enum SingleTurnProgressIndicatorMessage {
     IterationComplete(IterationComplete),
     ConversationComplete(ConversationComplete),
     ConversationError(ConversationError),
+    EvaluationComplete,
     WaitingFor {
         conversation_id: ConversationId,
         waiting_for: WaitingFor,
@@ -316,6 +317,9 @@ async fn handle_message(
             {
                 conv.status = ConversationStatus::Waiting(waiting_for);
             }
+        }
+        SingleTurnProgressIndicatorMessage::EvaluationComplete => {
+            return Ok(true);
         }
     }
 
