@@ -36,7 +36,7 @@ jobs:
       - name: Create tag
         if: steps.check_tag.outputs.exists == 'false'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.TAG_CREATION_PAT }}
         run: |
           git config user.name github-actions
           git config user.email github-actions@github.com
