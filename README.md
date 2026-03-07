@@ -48,3 +48,7 @@ cbl \
 ### Integrating With a Custom Model Endpoint
 
 For APIs that aren't already supported or OpenAI compatible, `cbl` supports scripting. The `custom` provider expects a [Rhai](https://rhai.rs/) script that defines the translation between `cbl`'s and the custom endpoint's request/response schema. Examples scripts are available in [`examples/providers/`](https://github.com/circuitbreakerlabs/cli/tree/main/examples/providers).
+
+---
+
+Questions? Feedback? Reach us at [team@circuitbreakerlabs.ai](mailto:team@circuitbreakerlabs.ai).
