@@ -17,6 +17,8 @@
 
 Pre-built executables and installation methods for Linux, Mac, and Windows are automatically generated and available with each [release](https://github.com/circuitbreakerlabs/cli/releases).
 
+Click [here](mailto:team@circuitbreakerlabs.ai?subject="Getting Set Up"&body=I'm interested in using Circuit Breaker Labs' CLI tool.) to get API access.
+
 ## Usage
 
 ### Flags and Options
