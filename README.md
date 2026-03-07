@@ -28,3 +28,7 @@ cbl --top-level-arg1 <evaluation_type> --evaluation-arg1 <provider> --provider-a
 where `<evaluation_type>` and `<provider>` are subcommands.
 
 The available evaluation types are `single-turn` and `multi-turn`. The available providers are `ollama`, `openai`, and `custom`.
+
+### Integrating With a Custom Model Endpoint
+
+For APIs that aren't already supported or OpenAI compatible, `cbl` supports scripting. The `custom` provider expects a [Rhai](https://rhai.rs/) script that defines the translation between `cbl`'s and the custom endpoint's request/response schema. Examples scripts are available in [`examples/providers/`](https://github.com/circuitbreakerlabs/cli/tree/main/examples/providers).
