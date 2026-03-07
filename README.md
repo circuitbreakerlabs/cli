@@ -1,7 +1,7 @@
 # Circuit Breaker Labs Command-Line Interface
 
 <p align="center">
-  <img src="./assets/single_turn_demo.gif" alt="Single Turn Demo" style="padding: 0 60px;">
+  <img src="./assets/demo.gif" alt="TUI Demo" hspace="60">
 </p>
 <p align="center">
   <i>Recorded with <a href="https://github.com/charmbracelet/vhs">vhs</i>💙</a>
