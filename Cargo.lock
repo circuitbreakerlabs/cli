@@ -311,7 +311,7 @@ dependencies = [
 
 [[package]]
 name = "circuit-breaker-labs"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "async-openai",
  "async-trait",
