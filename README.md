@@ -7,6 +7,12 @@
   <i>Recorded with <a href="https://github.com/charmbracelet/vhs">vhs</i>💙</a>
 </p>
 
+## Quickstart
+
+1. Copy the installation command for your preferred shell from the [releases page](https://github.com/circuitbreakerlabs/cli/releases).
+2. Verify `cbl` installed correctly with `cbl help`
+3. Try an evaluation against an OpenAI model `cbl single-turn --threshold 0.5 --variations 2 --maximum-iteration-layers 2 openai --model gpt-4.1-nano`
+
 ## Installation
 
 Pre-built executables and installation methods for Linux, Mac, and Windows are automatically generated and available with each [release](https://github.com/circuitbreakerlabs/cli/releases).
