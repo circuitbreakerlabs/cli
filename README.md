@@ -1,3 +1,5 @@
 # Circuit Breaker Labs Command-Line Interface
 
-Command-line interface for the API
+## Installation
+
+Pre-built binaries and installation scripts are automatically generated and available with each [release](https://github.com/circuitbreakerlabs/cli/releases).
