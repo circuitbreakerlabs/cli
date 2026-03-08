@@ -11,14 +11,19 @@
 
 1. Copy the installation command for your preferred shell from the [releases page](https://github.com/circuitbreakerlabs/cli/releases).
 2. Verify `cbl` installed correctly with `cbl help`
-3. Set the Circuit Breaker Labs API key environment variable `export CBL_API_KEY="<your_api_key_here>"`
-4. Set the OpenAI API key environment variable `export OPENAI_API_KEY="<your_api_key_here>"` (required for this example)
+3. Set the Circuit Breaker Labs API key environment variable:
+   * **macOS/Linux:** `export CBL_API_KEY="<your_api_key_here>"`
+   * **Windows (PowerShell):** `$env:CBL_API_KEY="<your_api_key_here>"`
+4. Set the OpenAI API key environment variable (required for this example):
+   * **macOS/Linux:** `export OPENAI_API_KEY="<your_api_key_here>"`
+   * **Windows (PowerShell):** `$env:OPENAI_API_KEY="<your_api_key_here>"`
+
 
 Try a single-turn evaluation:
 
 ```sh
 cbl single-turn \
-    --threshold 0.5 \
+    --threshold 0.75 \
     --variations 2 \
     --maximum-iteration-layers 2 \
     openai --model gpt-4.1-nano
@@ -28,7 +33,7 @@ Try a multi-turn evaluation:
 
 ```sh
 cbl multi-turn \
-    --threshold 0.5 \
+    --threshold 0.95 \
     --max-turns 8 \
     --test-types user_persona,semantic_chunks \
     openai --model gpt-4.1-nano
