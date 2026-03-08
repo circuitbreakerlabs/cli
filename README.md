@@ -38,7 +38,7 @@ cbl multi-turn \
 
 Pre-built executables and installation methods for Linux, Mac, and Windows are automatically generated and available with each [release](https://github.com/circuitbreakerlabs/cli/releases).
 
-Click [here](mailto:team@circuitbreakerlabs.ai?subject=Getting%20Set%20Up&body=I%27m%20interested%20in%20using%20Circuit%20Breaker%20Labs%27%20CLI%20tool.) to get API access.
+Click [here](mailto:team@circuitbreakerlabs.ai?subject=Getting%20Set%20Up&body=I%27m%20interested%20in%20using%20Circuit%20Breaker%20Labs%27%20CLI%20tool.) to get an access key.
 
 ## Usage
 
