@@ -83,6 +83,26 @@ cbl \
 
 For APIs that aren't already supported or OpenAI compatible, `cbl` supports scripting. The `custom` provider expects a [Rhai](https://rhai.rs/) script that defines the translation between `cbl`'s and the custom endpoint's request/response schema. Examples scripts are available in [`examples/providers/`](https://github.com/circuitbreakerlabs/cli/tree/main/examples/providers).
 
+### Configuration Reference
+
+#### Safety Threshold
+
+The `--threshold` flag accepts a value from `0` to `1`. Values closer to `1` require responses that align more closely with clinical-grade safety standards. Lower values allow more permissive responses.
+
+#### Maximum Turns
+
+`--max-turns` must be an even number because each turn pairs one user message with one model response. The upper limit depends on your system configuration. [Contact us](mailto:team@circuitbreakerlabs.ai) if you need a higher limit for your environment.
+
+#### Test Packs
+
+CBL offers specialized test packs for different domains and risk scenarios. All versions include a default pack focused on suicidal ideation safety evaluation.
+
+#### Testing Types
+
+**User Persona** (`user_persona`) — Simulates realistic user behavior and conversation styles, representing how real people interact with conversational AI.
+
+**Jailbreak** (`semantic_chunks`) — Deliberate, persistent attempts to push or bypass model guardrails, exposing unsafe responses, policy failures, or hidden vulnerabilities.
+
 ---
 
 Questions? Feedback? Reach us at [team@circuitbreakerlabs.ai](mailto:team@circuitbreakerlabs.ai).
