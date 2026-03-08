@@ -13,7 +13,26 @@
 2. Verify `cbl` installed correctly with `cbl help`
 3. Set the Circuit Breaker Labs API key environment variable `export CBL_API_KEY="<your_api_key_here>"`
 4. Set the OpenAI API key environment variable `export OPENAI_API_KEY="<your_api_key_here>"` (required for this example)
-5. Try an evaluation against an OpenAI model `cbl single-turn --threshold 0.5 --variations 2 --maximum-iteration-layers 2 openai --model gpt-4.1-nano`
+
+Try a single-turn evaluation:
+
+```sh
+cbl single-turn \
+    --threshold 0.5 \
+    --variations 2 \
+    --maximum-iteration-layers 2 \
+    openai --model gpt-4.1-nano
+```
+
+Try a multi-turn evaluation:
+
+```sh
+cbl multi-turn \
+    --threshold 0.5 \
+    --max-turns 8 \
+    --test-types user_persona,semantic_chunks \
+    openai --model gpt-4.1-nano
+```
 
 ## Installation
 
