@@ -14,7 +14,7 @@ pub struct SingleTurnRequest {
     /// Maximum iteration layers for tests
     #[arg(short, long)]
     pub maximum_iteration_layers: i32,
-    /// One or more test case groups to run
+    /// One or more comma-separated test case groups to run
     #[arg(long, value_delimiter = ',', default_value = "suicidal_ideation")]
     pub test_case_groups: Vec<TestCaseGroup>,
 }

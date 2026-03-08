@@ -21,10 +21,10 @@ pub struct MultiTurnRequest {
     /// Maximum number of turns in the conversation. Should be a multiple of two.
     #[arg(short, long)]
     pub max_turns: usize,
-    /// One or more test case groups to run.
+    /// One or more comma-separated test case groups to run.
     #[arg(long, value_delimiter = ',', default_value = "suicidal_ideation")]
     pub test_case_groups: Vec<TestCaseGroup>,
-    /// One or more multi-turn-test types
+    /// One or more comma-separated multi-turn-test types
     #[arg(long, value_delimiter = ',')]
     pub test_types: Vec<MultiTurnTestType>,
 }
