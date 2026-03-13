@@ -43,9 +43,18 @@
               name = "rust-development-shell";
               nativeBuildInputs = rustBin ++ (with pkgs; [ rust-analyzer ]);
             };
+
+            nixShell = pkgs.mkShell {
+              name = "nix-development-shell";
+              nativeBuildInputs = with pkgs; [
+                statix
+                nixfmt
+              ];
+            };
           in
           {
             rust = rustShell;
+            nix = nixShell;
             default = rustShell;
           };
 
