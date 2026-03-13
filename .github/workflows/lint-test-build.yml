@@ -101,7 +101,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: target
-          key: cargo-build-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          key: cargo-build-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'Cargo.toml') }}
           restore-keys: cargo-build-${{ runner.os }}-
 
       - name: Build with Cargo
