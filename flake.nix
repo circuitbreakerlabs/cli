@@ -65,35 +65,6 @@
           type = "app";
           program = "${lib.getExe self.packages.${system}.default}";
         };
-
-        checks =
-          let
-            mkCheck =
-              {
-                name,
-                cmds,
-                src ? self,
-                inputs ? [ ],
-              }:
-              pkgs.runCommand name { buildInputs = inputs; } ''
-                cd ${src}
-                ${pkgs.lib.strings.concatLines cmds}
-                touch $out
-              '';
-
-            checkArgs = {
-              rustFormatting = {
-                inputs = rustBin;
-                cmds = [ "cargo fmt --check" ];
-              };
-
-              clippy = {
-                inputs = rustBin;
-                cmds = [ "cargo check" ];
-              };
-            };
-          in
-          builtins.mapAttrs (name: args: mkCheck (args // { inherit name; })) checkArgs;
       }
     );
 }
