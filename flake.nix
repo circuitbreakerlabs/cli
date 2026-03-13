@@ -27,6 +27,14 @@
             ];
           })
         ];
+
+        cargoToml = fromTOML (builtins.readFile ./Cargo.toml);
+
+        meta = {
+          inherit (cargoToml.package) description;
+          homepage = cargoToml.package.repository;
+          mainProgram = (builtins.head cargoToml.bin).name;
+        };
       in
       {
         devShells =
@@ -41,28 +49,20 @@
             default = rustShell;
           };
 
-        packages.default =
-          let
-            cargoToml = fromTOML (builtins.readFile ./Cargo.toml);
-          in
-          pkgs.rustPlatform.buildRustPackage {
-            pname = cargoToml.package.name;
-            inherit (cargoToml.package) version;
+        packages.default = pkgs.rustPlatform.buildRustPackage {
+          pname = cargoToml.package.name;
+          inherit (cargoToml.package) version;
+          inherit meta;
 
-            src = ./.;
-            cargoLock = {
-              lockFile = ./Cargo.lock;
-            };
-
-            meta = {
-              inherit (cargoToml.package) description;
-              homepage = cargoToml.package.repository;
-              mainProgram = (builtins.head cargoToml.bin).name;
-            };
+          src = ./.;
+          cargoLock = {
+            lockFile = ./Cargo.lock;
           };
+        };
 
         apps.default = {
           type = "app";
+          inherit meta;
           program = "${lib.getExe self.packages.${system}.default}";
         };
       }
