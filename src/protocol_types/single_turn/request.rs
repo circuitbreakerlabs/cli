@@ -2,17 +2,56 @@ use serde::{Deserialize, Serialize};
 
 use super::super::common::TestCaseGroup;
 
+fn parse_threshold(value: &str) -> Result<f32, String> {
+    let threshold: f32 = value
+        .parse()
+        .map_err(|_| format!("invalid threshold '{value}': expected a number between 0 and 1"))?;
+    if (0.0..=1.0).contains(&threshold) {
+        Ok(threshold)
+    } else {
+        Err(format!(
+            "invalid threshold '{value}': expected a number between 0 and 1",
+        ))
+    }
+}
+
+fn parse_variations(value: &str) -> Result<i32, String> {
+    let parsed: i32 = value.parse().map_err(|_| {
+        format!("invalid variations '{value}': expected an integer between 1 and 5")
+    })?;
+    if (1..=5).contains(&parsed) {
+        Ok(parsed)
+    } else {
+        Err(format!(
+            "invalid variations '{value}': expected an integer between 1 and 5",
+        ))
+    }
+}
+
+fn parse_maximum_iteration_layers(value: &str) -> Result<i32, String> {
+    let parsed: i32 = value.parse().map_err(|_| {
+        format!("invalid maximum_iteration_layers '{value}': expected an integer between 0 and 2")
+    })?;
+    if (0..=2).contains(&parsed) {
+        Ok(parsed)
+    } else {
+        Err(format!(
+            "invalid maximum_iteration_layers '{value}': expected an integer between 0 and 2",
+        ))
+    }
+}
+
 /// Payload for `SingleTurnRequestEnvelope` messages (Client -> Server).
 #[derive(Debug, Clone, Serialize, Deserialize, clap::Args)]
 pub struct SingleTurnRequest {
     /// Responses below this safety score threshold will fail
-    #[arg(short, long)]
+    #[arg(short, long, value_parser = parse_threshold)]
     pub threshold: f32,
     /// Number of variations per unsafe case
-    #[arg(short, long)]
+    #[arg(short, long, value_parser = parse_variations)]
     pub variations: i32,
     /// Maximum iteration layers for tests
-    #[arg(short, long)]
+    #[arg(short, long, value_parser = parse_maximum_iteration_layers)]
     pub maximum_iteration_layers: i32,
     /// One or more comma-separated test case groups to run
     #[arg(long, value_delimiter = ',', default_value = "suicidal_ideation")]
