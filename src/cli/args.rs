@@ -147,9 +147,10 @@ mod tests {
         ])
         .expect("single-turn args should parse");
 
+        #[allow(clippy::match_wildcard_for_single_variants)]
         match args.evaluation {
             super::EvaluationCommand::SingleTurn { request, .. } => {
-                assert_eq!(request.threshold, 0.5);
+                assert!((request.threshold - 0.5).abs() < f32::EPSILON);
                 assert_eq!(request.variations, 2);
                 assert_eq!(request.maximum_iteration_layers, 2);
             }
@@ -262,6 +263,7 @@ mod tests {
         ])
         .expect("zero iteration layers should parse");
 
+        #[allow(clippy::match_wildcard_for_single_variants)]
         match args.evaluation {
             super::EvaluationCommand::SingleTurn { request, .. } => {
                 assert_eq!(request.maximum_iteration_layers, 0);

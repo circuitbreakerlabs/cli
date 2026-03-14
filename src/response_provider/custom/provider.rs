@@ -212,9 +212,8 @@ mod tests {
             script: path.clone(),
         };
 
-        let err = match CustomProvider::new(&config, &HeaderMap::new()) {
-            Ok(_) => panic!("invalid script should fail to compile"),
-            Err(err) => err,
+        let Err(err) = CustomProvider::new(&config, &HeaderMap::new()) else {
+            panic!("invalid script should fail to compile")
         };
 
         assert!(matches!(err, ProviderError::Script(_)));

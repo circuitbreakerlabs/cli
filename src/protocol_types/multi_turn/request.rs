@@ -21,7 +21,7 @@ fn parse_even_turn_count(value: &str) -> Result<usize, String> {
     let turns: usize = value.parse().map_err(|_| {
         format!("invalid max_turns '{value}': expected an even integer between 2 and 20")
     })?;
-    if (2..=20).contains(&turns) && turns % 2 == 0 {
+    if (2..=20).contains(&turns) && turns.is_multiple_of(2) {
         Ok(turns)
     } else {
         Err(format!(
