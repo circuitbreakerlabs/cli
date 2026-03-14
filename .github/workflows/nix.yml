@@ -49,7 +49,7 @@ jobs:
         run: |
           nix develop .#nix -c sh -c 'find . -name "*.nix" -print0 | xargs -0 nixfmt --check'
 
-  build:
+  nix-build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
