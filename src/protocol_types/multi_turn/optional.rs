@@ -25,3 +25,25 @@ pub struct MultiTurnEvaluationStartEnvelope {
     /// Start payload
     pub data: MultiTurnEvaluationStart,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::MultiTurnEvaluationStartEnvelope;
+    use serde_json::json;
+
+    #[test]
+    fn multi_turn_evaluation_start_envelope_deserializes_from_protocol_shape() {
+        let value = json!({
+            "type": "multi_turn_evaluation_start",
+            "data": {
+                "conversation_ids": [10, 11, 12]
+            }
+        });
+
+        let envelope: MultiTurnEvaluationStartEnvelope =
+            serde_json::from_value(value).expect("evaluation start should deserialize");
+
+        assert_eq!(envelope.message_type, "multi_turn_evaluation_start");
+        assert_eq!(envelope.data.conversation_ids, vec![10, 11, 12]);
+    }
+}

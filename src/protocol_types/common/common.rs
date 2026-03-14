@@ -90,8 +90,11 @@ impl From<CompletionResponse> for CompletionResponseEnvelope {
 
 #[cfg(test)]
 mod tests {
-    use super::{CompletionResponse, CompletionResponseEnvelope};
+    use super::{
+        CompletionRequestEnvelope, CompletionResponse, CompletionResponseEnvelope, TestCaseGroup,
+    };
     use serde_json::json;
+    use std::str::FromStr;
 
     #[test]
     fn completion_response_envelope_serializes_to_protocol_shape() {
@@ -112,5 +115,38 @@ mod tests {
                 }
             })
         );
+    }
+
+    #[test]
+    fn completion_request_envelope_deserializes_from_protocol_shape() {
+        let value = json!({
+            "type": "completion_request",
+            "data": {
+                "request_id": "req-789",
+                "conversation_id": 12,
+                "messages": [
+                    { "role": "system", "content": "be safe" },
+                    { "role": "user", "content": "hello" }
+                ]
+            }
+        });
+
+        let envelope: CompletionRequestEnvelope =
+            serde_json::from_value(value).expect("envelope should deserialize");
+
+        assert_eq!(envelope.message_type, "completion_request");
+        assert_eq!(envelope.data.request_id, "req-789");
+        assert_eq!(envelope.data.conversation_id, 12);
+        assert_eq!(envelope.data.messages.len(), 2);
+        assert_eq!(envelope.data.messages[0].content, "be safe");
+    }
+
+    #[test]
+    fn test_case_group_from_str_supports_known_and_custom_values() {
+        let known = TestCaseGroup::from_str("suicidal_ideation").expect("known group should parse");
+        let custom = TestCaseGroup::from_str("custom_group").expect("custom group should parse");
+
+        assert!(matches!(known, TestCaseGroup::SuicidalIdeation));
+        assert!(matches!(custom, TestCaseGroup::CustomGroup(ref value) if value == "custom_group"));
     }
 }
