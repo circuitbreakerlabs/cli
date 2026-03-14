@@ -2,15 +2,35 @@ use crate::response_provider::ProviderError;
 use serde::{Deserialize, Serialize};
 
 /// Error codes for server errors (4000-4499).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u16)]
 pub enum ServerErrorCode {
     Unknown = 4000,
     Unauthorized = 4001,
     QuotaExceeded = 4002,
     NotFound = 4003,
+    VersionMismatch = 4004,
     InvalidMessageType = 4005,
     InvalidRequestFormat = 4006,
     Timeout = 4007,
+}
+
+impl TryFrom<u16> for ServerErrorCode {
+    type Error = u16;
+
+    fn try_from(value: u16) -> Result<Self, Self::Error> {
+        match value {
+            4000 => Ok(Self::Unknown),
+            4001 => Ok(Self::Unauthorized),
+            4002 => Ok(Self::QuotaExceeded),
+            4003 => Ok(Self::NotFound),
+            4004 => Ok(Self::VersionMismatch),
+            4005 => Ok(Self::InvalidMessageType),
+            4006 => Ok(Self::InvalidRequestFormat),
+            4007 => Ok(Self::Timeout),
+            _ => Err(value),
+        }
+    }
 }
 
 /// Error reasons for completion errors.
@@ -70,10 +90,51 @@ impl From<CompletionError> for CompletionErrorEnvelope {
 
 #[cfg(test)]
 mod tests {
-    use super::CompletionErrorReason;
-    use super::{CompletionError, CompletionErrorEnvelope};
+    use super::{CompletionError, CompletionErrorEnvelope, CompletionErrorReason, ServerErrorCode};
     use crate::response_provider::ProviderError;
     use serde_json::json;
+
+    #[test]
+    fn parses_known_server_error_codes() {
+        assert_eq!(
+            ServerErrorCode::try_from(4000),
+            Ok(ServerErrorCode::Unknown)
+        );
+        assert_eq!(
+            ServerErrorCode::try_from(4001),
+            Ok(ServerErrorCode::Unauthorized)
+        );
+        assert_eq!(
+            ServerErrorCode::try_from(4002),
+            Ok(ServerErrorCode::QuotaExceeded)
+        );
+        assert_eq!(
+            ServerErrorCode::try_from(4003),
+            Ok(ServerErrorCode::NotFound)
+        );
+        assert_eq!(
+            ServerErrorCode::try_from(4004),
+            Ok(ServerErrorCode::VersionMismatch)
+        );
+        assert_eq!(
+            ServerErrorCode::try_from(4005),
+            Ok(ServerErrorCode::InvalidMessageType)
+        );
+        assert_eq!(
+            ServerErrorCode::try_from(4006),
+            Ok(ServerErrorCode::InvalidRequestFormat)
+        );
+        assert_eq!(
+            ServerErrorCode::try_from(4007),
+            Ok(ServerErrorCode::Timeout)
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_server_error_codes() {
+        assert_eq!(ServerErrorCode::try_from(3999), Err(3999));
+        assert_eq!(ServerErrorCode::try_from(4008), Err(4008));
+    }
 
     #[test]
     fn maps_network_errors_to_model_unreachable() {
