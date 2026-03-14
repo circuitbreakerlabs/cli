@@ -80,3 +80,45 @@ impl ResponseProvider for OllamaProvider {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::OllamaProvider;
+    use crate::protocol_types::{Message, Role};
+    use crate::response_provider::ProviderError;
+    use ollama_rs::generation::chat::MessageRole as OllamaMessageRole;
+
+    #[test]
+    fn converts_protocol_message_to_ollama_shape() {
+        let message = Message {
+            role: Role::User,
+            content: "hello".to_string(),
+        };
+
+        let converted = OllamaProvider::convert_message(&message);
+
+        assert!(matches!(converted.role, OllamaMessageRole::User));
+        assert_eq!(converted.content, "hello");
+    }
+
+    #[test]
+    fn converts_ollama_roles_back_to_protocol_roles() {
+        let user = Role::try_from(&OllamaMessageRole::User).expect("user role should convert");
+        let assistant =
+            Role::try_from(&OllamaMessageRole::Assistant).expect("assistant should convert");
+        let system = Role::try_from(&OllamaMessageRole::System).expect("system should convert");
+
+        assert!(matches!(user, Role::User));
+        assert!(matches!(assistant, Role::Assistant));
+        assert!(matches!(system, Role::System));
+    }
+
+    #[test]
+    fn rejects_ollama_tool_role() {
+        let err = Role::try_from(&OllamaMessageRole::Tool)
+            .expect_err("tool role should not convert to protocol role");
+
+        assert!(matches!(err, ProviderError::Parsing(_)));
+        assert!(err.to_string().contains("Tool messages from Ollama"));
+    }
+}
