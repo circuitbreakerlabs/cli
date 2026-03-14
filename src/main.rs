@@ -4,10 +4,12 @@ mod evaluations;
 mod protocol_types;
 mod response_provider;
 mod tui;
+mod update_check;
 mod websockets;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use update_check::print_update_warning_if_needed;
 
 use chrono::Local;
 use clap::Parser;
@@ -130,6 +132,7 @@ async fn run_single_turn_evaluation(
     std::fs::write(&filename, json)?;
 
     print_success_message(log_mode, "single", &filename);
+    print_update_warning_if_needed(log_mode).await;
 
     Ok(())
 }
@@ -165,6 +168,7 @@ async fn run_multi_turn_evaluation(
     std::fs::write(&filename, json)?;
 
     print_success_message(log_mode, "multi", &filename);
+    print_update_warning_if_needed(log_mode).await;
 
     Ok(())
 }
