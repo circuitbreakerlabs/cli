@@ -27,6 +27,14 @@
             ];
           })
         ];
+
+        cargoToml = fromTOML (builtins.readFile ./Cargo.toml);
+
+        meta = {
+          inherit (cargoToml.package) description;
+          homepage = cargoToml.package.repository;
+          mainProgram = (builtins.head cargoToml.bin).name;
+        };
       in
       {
         devShells =
@@ -35,65 +43,37 @@
               name = "rust-development-shell";
               nativeBuildInputs = rustBin ++ (with pkgs; [ rust-analyzer ]);
             };
+
+            nixShell = pkgs.mkShell {
+              name = "nix-development-shell";
+              nativeBuildInputs = with pkgs; [
+                statix
+                nixfmt
+              ];
+            };
           in
           {
             rust = rustShell;
+            nix = nixShell;
             default = rustShell;
           };
 
-        packages.default =
-          let
-            cargoToml = fromTOML (builtins.readFile ./Cargo.toml);
-          in
-          pkgs.rustPlatform.buildRustPackage {
-            pname = cargoToml.package.name;
-            inherit (cargoToml.package) version;
+        packages.default = pkgs.rustPlatform.buildRustPackage {
+          pname = cargoToml.package.name;
+          inherit (cargoToml.package) version;
+          inherit meta;
 
-            src = ./.;
-            cargoLock = {
-              lockFile = ./Cargo.lock;
-            };
-
-            meta = {
-              inherit (cargoToml.package) description;
-              homepage = cargoToml.package.repository;
-              mainProgram = (builtins.head cargoToml.bin).name;
-            };
+          src = ./.;
+          cargoLock = {
+            lockFile = ./Cargo.lock;
           };
+        };
 
         apps.default = {
           type = "app";
+          inherit meta;
           program = "${lib.getExe self.packages.${system}.default}";
         };
-
-        checks =
-          let
-            mkCheck =
-              {
-                name,
-                cmds,
-                src ? self,
-                inputs ? [ ],
-              }:
-              pkgs.runCommand name { buildInputs = inputs; } ''
-                cd ${src}
-                ${pkgs.lib.strings.concatLines cmds}
-                touch $out
-              '';
-
-            checkArgs = {
-              rustFormatting = {
-                inputs = rustBin;
-                cmds = [ "cargo fmt --check" ];
-              };
-
-              clippy = {
-                inputs = rustBin;
-                cmds = [ "cargo check" ];
-              };
-            };
-          in
-          builtins.mapAttrs (name: args: mkCheck (args // { inherit name; })) checkArgs;
       }
     );
 }

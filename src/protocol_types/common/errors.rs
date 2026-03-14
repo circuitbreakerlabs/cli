@@ -67,3 +67,74 @@ impl From<CompletionError> for CompletionErrorEnvelope {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::CompletionErrorReason;
+    use super::{CompletionError, CompletionErrorEnvelope};
+    use crate::response_provider::ProviderError;
+    use serde_json::json;
+
+    #[test]
+    fn maps_network_errors_to_model_unreachable() {
+        let reason = CompletionErrorReason::from(&ProviderError::Network("boom".to_string()));
+
+        assert!(matches!(reason, CompletionErrorReason::ModelUnreachable));
+    }
+
+    #[test]
+    fn maps_rate_limit_api_errors() {
+        let reason =
+            CompletionErrorReason::from(&ProviderError::Api("Rate limit exceeded".to_string()));
+
+        assert!(matches!(reason, CompletionErrorReason::RateLimited));
+    }
+
+    #[test]
+    fn maps_auth_api_errors() {
+        let reason = CompletionErrorReason::from(&ProviderError::Api(
+            "Invalid API key provided".to_string(),
+        ));
+
+        assert!(matches!(
+            reason,
+            CompletionErrorReason::AuthenticationFailed
+        ));
+    }
+
+    #[test]
+    fn maps_parsing_errors_to_invalid_response() {
+        let reason = CompletionErrorReason::from(&ProviderError::Parsing("bad json".to_string()));
+
+        assert!(matches!(reason, CompletionErrorReason::InvalidResponse));
+    }
+
+    #[test]
+    fn leaves_other_errors_as_unknown() {
+        let reason =
+            CompletionErrorReason::from(&ProviderError::Script("script failed".to_string()));
+
+        assert!(matches!(reason, CompletionErrorReason::Unknown));
+    }
+
+    #[test]
+    fn completion_error_envelope_serializes_to_protocol_shape() {
+        let envelope = CompletionErrorEnvelope::from(CompletionError {
+            request_id: "req-456".to_string(),
+            error_reason: CompletionErrorReason::RateLimited,
+        });
+
+        let value = serde_json::to_value(envelope).expect("envelope should serialize");
+
+        assert_eq!(
+            value,
+            json!({
+                "type": "completion_error",
+                "data": {
+                    "request_id": "req-456",
+                    "error_reason": "rate_limited"
+                }
+            })
+        );
+    }
+}

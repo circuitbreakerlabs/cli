@@ -101,3 +101,89 @@ impl From<SingleTurnReceivableMessage> for CategorizedSingleTurnMessage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        CategorizedSingleTurnMessage, OptionalSingleTurnMessage, SingleTurnReceivableMessage,
+    };
+    use serde_json::json;
+
+    #[test]
+    fn parses_completion_request_message() {
+        let payload = json!({
+            "type": "completion_request",
+            "data": {
+                "request_id": "req-1",
+                "conversation_id": 7,
+                "messages": [
+                    { "role": "user", "content": "hello" }
+                ]
+            }
+        });
+
+        let message = SingleTurnReceivableMessage::try_from(payload.to_string().as_bytes())
+            .expect("message should parse");
+
+        match message {
+            SingleTurnReceivableMessage::CompletionRequest(req) => {
+                assert_eq!(req.request_id, "req-1");
+                assert_eq!(req.conversation_id, 7);
+                assert_eq!(req.messages.len(), 1);
+            }
+            other => panic!("expected completion request, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn categorizes_optional_messages() {
+        let payload = json!({
+            "type": "iteration_complete",
+            "data": {
+                "iteration_number": 2,
+                "passed_conversation_ids": [1, 2],
+                "failed_conversation_ids": [3]
+            }
+        });
+
+        let message = SingleTurnReceivableMessage::try_from(payload.to_string().as_bytes())
+            .expect("message should parse");
+        let categorized = CategorizedSingleTurnMessage::from(message);
+
+        match categorized {
+            CategorizedSingleTurnMessage::OptionalSingleTurnMessage(
+                OptionalSingleTurnMessage::IterationComplete(iteration),
+            ) => {
+                assert_eq!(iteration.iteration_number, 2);
+                assert_eq!(iteration.passed_conversation_ids, vec![1, 2]);
+                assert_eq!(iteration.failed_conversation_ids, vec![3]);
+            }
+            other => panic!("expected iteration complete, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_message_type() {
+        let payload = json!({
+            "type": "unexpected",
+            "data": {}
+        });
+
+        let err = SingleTurnReceivableMessage::try_from(payload.to_string().as_bytes())
+            .expect_err("unknown message type should fail");
+
+        assert!(err.to_string().contains("Unknown message type"));
+    }
+
+    #[test]
+    fn rejects_message_without_type() {
+        let payload = json!({
+            "data": {}
+        });
+
+        let err = SingleTurnReceivableMessage::try_from(payload.to_string().as_bytes())
+            .expect_err("missing type should fail");
+
+        assert!(err.to_string().contains("Missing 'type' field"));
+    }
+}

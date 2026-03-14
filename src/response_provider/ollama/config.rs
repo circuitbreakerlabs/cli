@@ -188,3 +188,88 @@ impl OllamaProviderConfig {
         if has_options { Some(options) } else { None }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{OllamaProviderConfig, OptionalOllamaArgs, RequiredOllamaArgs};
+    use serde_json::json;
+
+    fn make_config() -> OllamaProviderConfig {
+        OllamaProviderConfig {
+            required: RequiredOllamaArgs {
+                model: "llama-test".to_string(),
+            },
+            optional: OptionalOllamaArgs {
+                base_url: "http://localhost:11434".to_string(),
+                logprobs: Some(true),
+                mirostat: Some(2),
+                mirostat_eta: Some(0.1),
+                mirostat_tau: Some(5.0),
+                num_ctx: Some(4096),
+                num_gpu: Some(1),
+                num_gqa: Some(8),
+                num_predict: Some(128),
+                num_thread: Some(4),
+                repeat_last_n: Some(64),
+                repeat_penalty: Some(1.2),
+                seed: Some(7),
+                stop: Some(vec!["END".to_string()]),
+                temperature: Some(0.8),
+                tfs_z: Some(1.1),
+                top_k: Some(40),
+                top_p: Some(0.9),
+            },
+        }
+    }
+
+    #[test]
+    fn build_model_options_returns_none_when_no_options_are_set() {
+        let config = OllamaProviderConfig {
+            required: RequiredOllamaArgs {
+                model: "llama-test".to_string(),
+            },
+            optional: OptionalOllamaArgs {
+                base_url: "http://localhost:11434".to_string(),
+                logprobs: None,
+                mirostat: None,
+                mirostat_eta: None,
+                mirostat_tau: None,
+                num_ctx: None,
+                num_gpu: None,
+                num_gqa: None,
+                num_predict: None,
+                num_thread: None,
+                repeat_last_n: None,
+                repeat_penalty: None,
+                seed: None,
+                stop: None,
+                temperature: None,
+                tfs_z: None,
+                top_k: None,
+                top_p: None,
+            },
+        };
+
+        assert!(config.build_model_options().is_none());
+    }
+
+    #[test]
+    fn build_model_options_sets_selected_fields() {
+        let options = make_config()
+            .build_model_options()
+            .expect("model options should be present");
+        let value = serde_json::to_value(options).expect("options should serialize");
+
+        assert_eq!(value["mirostat"], json!(2));
+        assert_eq!(value["num_ctx"], json!(4096));
+        assert_eq!(value["stop"], json!(["END"]));
+        assert!(
+            (value["top_p"]
+                .as_f64()
+                .expect("top_p should serialize as a number")
+                - 0.9)
+                .abs()
+                < 1e-6
+        );
+    }
+}

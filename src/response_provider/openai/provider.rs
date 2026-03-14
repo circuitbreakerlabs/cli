@@ -94,3 +94,77 @@ impl ResponseProvider for OpenAIProvider {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::OpenAIProvider;
+    use crate::protocol_types::{Message, Role};
+    use async_openai::types::chat::{
+        ChatCompletionRequestAssistantMessageContent, ChatCompletionRequestMessage,
+        ChatCompletionRequestSystemMessageContent, ChatCompletionRequestUserMessageContent,
+    };
+
+    #[test]
+    fn converts_system_message_to_openai_shape() {
+        let message = Message {
+            role: Role::System,
+            content: "system prompt".to_string(),
+        };
+
+        let converted = OpenAIProvider::convert_message(&message);
+
+        match converted {
+            ChatCompletionRequestMessage::System(system) => {
+                assert!(matches!(
+                    system.content,
+                    ChatCompletionRequestSystemMessageContent::Text(ref content)
+                        if content == "system prompt"
+                ));
+            }
+            other => panic!("expected system message, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn converts_user_message_to_openai_shape() {
+        let message = Message {
+            role: Role::User,
+            content: "hello".to_string(),
+        };
+
+        let converted = OpenAIProvider::convert_message(&message);
+
+        match converted {
+            ChatCompletionRequestMessage::User(user) => {
+                assert!(matches!(
+                    user.content,
+                    ChatCompletionRequestUserMessageContent::Text(ref content)
+                        if content == "hello"
+                ));
+            }
+            other => panic!("expected user message, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn converts_assistant_message_to_openai_shape() {
+        let message = Message {
+            role: Role::Assistant,
+            content: "assistant reply".to_string(),
+        };
+
+        let converted = OpenAIProvider::convert_message(&message);
+
+        match converted {
+            ChatCompletionRequestMessage::Assistant(assistant) => {
+                assert!(matches!(
+                    assistant.content,
+                    Some(ChatCompletionRequestAssistantMessageContent::Text(ref content))
+                        if content == "assistant reply"
+                ));
+                assert!(assistant.tool_calls.is_none());
+            }
+            other => panic!("expected assistant message, got {other:?}"),
+        }
+    }
+}

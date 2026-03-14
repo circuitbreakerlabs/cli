@@ -220,7 +220,7 @@ async fn reader_task(
         }
     }
     Err(EvaluationError::WebSocketClosed(
-        "WebSocket stream ended without receiving a MultiTurnResponse".to_string()
+        "WebSocket stream ended without receiving a MultiTurnResponse".to_string(),
     ))
 }
 

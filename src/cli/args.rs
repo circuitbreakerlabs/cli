@@ -93,6 +93,7 @@ pub enum EvaluationCommand {
 pub enum ProviderCommand {
     /// Use Ollama provider
     Ollama(OllamaProviderConfig),
+    #[allow(clippy::doc_markdown)]
     /// Use OpenAI provider
     OpenAI(OpenAIProviderConfig),
     /// Use Custom Rhai-scripted provider
@@ -117,5 +118,262 @@ impl From<LogLevel> for tracing::Level {
             LogLevel::Debug => tracing::Level::DEBUG,
             LogLevel::Trace => tracing::Level::TRACE,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Args;
+    use clap::{Parser, error::ErrorKind};
+
+    #[test]
+    fn parses_valid_single_turn_command() {
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "single-turn",
+            "--threshold",
+            "0.5",
+            "--variations",
+            "2",
+            "--maximum-iteration-layers",
+            "2",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect("single-turn args should parse");
+
+        match args.evaluation {
+            super::EvaluationCommand::SingleTurn { request, .. } => {
+                assert_eq!(request.threshold, 0.5);
+                assert_eq!(request.variations, 2);
+                assert_eq!(request.maximum_iteration_layers, 2);
+            }
+            _ => panic!("expected single-turn command"),
+        }
+    }
+
+    #[test]
+    fn rejects_out_of_range_threshold() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "single-turn",
+            "--threshold",
+            "1.5",
+            "--variations",
+            "2",
+            "--maximum-iteration-layers",
+            "3",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect_err("threshold should be rejected");
+
+        assert_eq!(err.kind(), ErrorKind::ValueValidation);
+        assert!(
+            err.to_string()
+                .contains("expected a number between 0 and 1")
+        );
+    }
+
+    #[test]
+    fn rejects_non_positive_variations() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "single-turn",
+            "--threshold",
+            "0.5",
+            "--variations",
+            "0",
+            "--maximum-iteration-layers",
+            "3",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect_err("variations should be rejected");
+
+        assert_eq!(err.kind(), ErrorKind::ValueValidation);
+        assert!(
+            err.to_string()
+                .contains("expected an integer between 1 and 5")
+        );
+    }
+
+    #[test]
+    fn rejects_variations_above_spec_maximum() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "single-turn",
+            "--threshold",
+            "0.5",
+            "--variations",
+            "6",
+            "--maximum-iteration-layers",
+            "2",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect_err("variations above spec maximum should be rejected");
+
+        assert_eq!(err.kind(), ErrorKind::ValueValidation);
+        assert!(
+            err.to_string()
+                .contains("expected an integer between 1 and 5")
+        );
+    }
+
+    #[test]
+    fn allows_zero_maximum_iteration_layers() {
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "single-turn",
+            "--threshold",
+            "0.5",
+            "--variations",
+            "2",
+            "--maximum-iteration-layers",
+            "0",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect("zero iteration layers should parse");
+
+        match args.evaluation {
+            super::EvaluationCommand::SingleTurn { request, .. } => {
+                assert_eq!(request.maximum_iteration_layers, 0);
+            }
+            _ => panic!("expected single-turn command"),
+        }
+    }
+
+    #[test]
+    fn rejects_maximum_iteration_layers_above_spec_maximum() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "single-turn",
+            "--threshold",
+            "0.5",
+            "--variations",
+            "2",
+            "--maximum-iteration-layers",
+            "3",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect_err("maximum_iteration_layers above spec maximum should be rejected");
+
+        assert_eq!(err.kind(), ErrorKind::ValueValidation);
+        assert!(
+            err.to_string()
+                .contains("expected an integer between 0 and 2")
+        );
+    }
+
+    #[test]
+    fn rejects_odd_max_turns() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "multi-turn",
+            "--threshold",
+            "0.5",
+            "--max-turns",
+            "3",
+            "--test-types",
+            "user_persona",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect_err("odd max_turns should be rejected");
+
+        assert_eq!(err.kind(), ErrorKind::ValueValidation);
+        assert!(
+            err.to_string()
+                .contains("expected an even integer between 2 and 20")
+        );
+    }
+
+    #[test]
+    fn rejects_max_turns_above_spec_maximum() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "multi-turn",
+            "--threshold",
+            "0.5",
+            "--max-turns",
+            "22",
+            "--test-types",
+            "user_persona",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect_err("max_turns above spec maximum should be rejected");
+
+        assert_eq!(err.kind(), ErrorKind::ValueValidation);
+        assert!(
+            err.to_string()
+                .contains("expected an even integer between 2 and 20")
+        );
+    }
+
+    #[test]
+    fn rejects_missing_multi_turn_test_types() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "multi-turn",
+            "--threshold",
+            "0.5",
+            "--max-turns",
+            "4",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect_err("missing test types should be rejected");
+
+        assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
+        assert!(err.to_string().contains("--test-types"));
     }
 }

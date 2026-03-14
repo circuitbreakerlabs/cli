@@ -20,10 +20,12 @@ fn masked_api_key() -> String {
 #[derive(Clone, Debug, clap::Args)]
 #[clap(next_help_heading = "Required Options")]
 pub struct RequiredOpenAIArgs {
+    #[allow(clippy::doc_markdown)]
     /// OpenAI API key
     #[arg(long, env = OPENAI_API_KEY, help = masked_api_key(), hide_env = true)]
     pub api_key: String,
 
+    #[allow(clippy::doc_markdown)]
     /// OpenAI model name (e.g., gpt-4o, gpt-4-turbo, gpt-3.5-turbo)
     #[arg(long)]
     pub model: String,
@@ -76,6 +78,7 @@ impl From<OpenAIServiceTier> for ServiceTier {
 #[derive(Clone, Debug, clap::Args)]
 #[clap(next_help_heading = "Extra Options")]
 pub struct OptionalOpenAIArgs {
+    #[allow(clippy::doc_markdown)]
     /// OpenAI API base URL for compatible endpoints
     #[arg(
         long,
@@ -84,6 +87,7 @@ pub struct OptionalOpenAIArgs {
     )]
     pub base_url: String,
 
+    #[allow(clippy::doc_markdown)]
     /// OpenAI organization ID
     #[arg(long, env = "OPENAI_ORG_ID")]
     pub org_id: Option<String>,
@@ -228,13 +232,14 @@ impl OpenAIProviderConfig {
         }
 
         if let Some(ref stop) = self.optional.stop
-            && !stop.is_empty() {
-                if stop.len() == 1 {
-                    request.stop = Some(StopConfiguration::String(stop[0].clone()));
-                } else {
-                    request.stop = Some(StopConfiguration::StringArray(stop.clone()));
-                }
+            && !stop.is_empty()
+        {
+            if stop.len() == 1 {
+                request.stop = Some(StopConfiguration::String(stop[0].clone()));
+            } else {
+                request.stop = Some(StopConfiguration::StringArray(stop.clone()));
             }
+        }
 
         if let Some(ref logit_bias) = self.optional.logit_bias {
             request.logit_bias = Some(logit_bias.clone());
@@ -253,5 +258,111 @@ impl OpenAIProviderConfig {
         }
 
         request
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        OpenAIProviderConfig, OpenAIReasoningEffort, OpenAIServiceTier, OptionalOpenAIArgs,
+        RequiredOpenAIArgs, parse_logit_bias,
+    };
+    use async_openai::config::Config;
+    use async_openai::types::chat::StopConfiguration;
+    use reqwest::header::AUTHORIZATION;
+    use std::collections::HashMap;
+
+    fn make_config() -> OpenAIProviderConfig {
+        OpenAIProviderConfig {
+            required: RequiredOpenAIArgs {
+                api_key: "test-key".to_string(),
+                model: "gpt-test".to_string(),
+            },
+            optional: OptionalOpenAIArgs {
+                base_url: "https://example.com/v1".to_string(),
+                org_id: Some("org_123".to_string()),
+                temperature: Some(0.7),
+                top_p: Some(0.8),
+                max_completion_tokens: Some(256),
+                n: Some(2),
+                frequency_penalty: Some(0.3),
+                presence_penalty: Some(0.4),
+                logprobs: Some(true),
+                top_logprobs: Some(5),
+                stop: Some(vec!["END".to_string()]),
+                logit_bias: Some(HashMap::from([("42".to_string(), 7)])),
+                store: Some(true),
+                service_tier: Some(OpenAIServiceTier::Priority),
+                reasoning_effort: Some(OpenAIReasoningEffort::High),
+            },
+        }
+    }
+
+    #[test]
+    fn parses_logit_bias_pairs() {
+        let bias = parse_logit_bias("12:5,42:-7").expect("logit bias should parse");
+
+        assert_eq!(bias["12"], 5);
+        assert_eq!(bias["42"], -7);
+    }
+
+    #[test]
+    fn rejects_out_of_range_logit_bias() {
+        let err = parse_logit_bias("12:101").expect_err("logit bias should fail");
+
+        assert!(err.contains("between -100 and 100"));
+    }
+
+    #[test]
+    fn build_openai_config_applies_base_url_org_and_auth() {
+        let config = make_config().build_openai_config();
+        let headers = config.headers();
+
+        assert_eq!(
+            config.url("/chat/completions"),
+            "https://example.com/v1/chat/completions"
+        );
+        assert_eq!(config.org_id(), "org_123");
+        assert_eq!(headers[AUTHORIZATION], "Bearer test-key");
+    }
+
+    #[test]
+    fn build_request_maps_optional_fields() {
+        let request = make_config().build_request(Vec::new());
+
+        assert_eq!(request.model, "gpt-test");
+        assert_eq!(request.temperature, Some(0.7));
+        assert_eq!(request.top_p, Some(0.8));
+        assert_eq!(request.max_completion_tokens, Some(256));
+        assert_eq!(request.n, Some(2));
+        assert_eq!(request.frequency_penalty, Some(0.3));
+        assert_eq!(request.presence_penalty, Some(0.4));
+        assert_eq!(request.logprobs, Some(true));
+        assert_eq!(request.top_logprobs, Some(5));
+        assert_eq!(
+            request.logit_bias.as_ref().and_then(|m| m.get("42")),
+            Some(&7)
+        );
+        assert_eq!(request.store, Some(true));
+        assert!(request.service_tier.is_some());
+        assert!(request.reasoning_effort.is_some());
+        assert!(matches!(
+            request.stop,
+            Some(StopConfiguration::String(ref value)) if value == "END"
+        ));
+    }
+
+    #[test]
+    fn build_request_uses_string_array_for_multiple_stop_sequences() {
+        let mut config = make_config();
+        config.optional.stop = Some(vec!["END".to_string(), "HALT".to_string()]);
+
+        let request = config.build_request(Vec::new());
+
+        assert!(matches!(
+            request.stop,
+            Some(StopConfiguration::StringArray(ref value))
+                if value == &vec!["END".to_string(), "HALT".to_string()]
+        ));
     }
 }

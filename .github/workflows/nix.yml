@@ -1,0 +1,119 @@
+name: Nix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/*.nix"
+      - "flake.nix"
+      - "flake.lock"
+      - "**/*.rs"
+      - "Cargo.toml"
+      - "Cargo.lock"
+  pull_request:
+    branches: [main]
+    paths:
+      - "**/*.nix"
+      - "flake.nix"
+      - "flake.lock"
+      - "**/*.rs"
+      - "Cargo.toml"
+      - "Cargo.lock"
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  nixfmt:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install Nix
+        uses: nixbuild/nix-quick-install-action@v34
+
+      - name: Cache Nix store
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 2G
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-created: 0
+          purge-primary-key: never
+
+      - name: Check formatting
+        run: |
+          nix develop .#nix -c sh -c 'find . -name "*.nix" -print0 | xargs -0 nixfmt --check'
+
+  nix-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install Nix
+        uses: nixbuild/nix-quick-install-action@v34
+
+      - name: Cache Nix store
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 2G
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-created: 0
+          purge-primary-key: never
+
+      - name: Build with Nix
+        run: nix build
+
+  flake-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install Nix
+        uses: nixbuild/nix-quick-install-action@v34
+
+      - name: Cache Nix store
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 2G
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-created: 0
+          purge-primary-key: never
+
+      - name: Run flake checks
+        run: nix flake check
+
+  statix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install Nix
+        uses: nixbuild/nix-quick-install-action@v34
+
+      - name: Cache Nix store
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 2G
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-created: 0
+          purge-primary-key: never
+
+      - name: Run statix
+        run: nix develop .#nix -c statix check .

@@ -91,3 +91,79 @@ impl From<MultiTurnReceivableMessage> for CategorizedMultiTurnMessage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        CategorizedMultiTurnMessage, MultiTurnReceivableMessage, OptionalMultiTurnMessage,
+    };
+    use serde_json::json;
+
+    #[test]
+    fn parses_multi_turn_response_message() {
+        let payload = json!({
+            "type": "multi_turn_response",
+            "data": {
+                "total_passed": 2,
+                "total_failed": 1,
+                "failed_results": [
+                    {
+                        "min_safe_response_score": 0.12,
+                        "conversation_id": 9,
+                        "conversation": [
+                            { "role": "user", "content": "hello" },
+                            { "role": "assistant", "content": "hi" }
+                        ]
+                    }
+                ]
+            }
+        });
+
+        let message = MultiTurnReceivableMessage::try_from(payload.to_string().as_bytes())
+            .expect("message should parse");
+
+        match message {
+            MultiTurnReceivableMessage::MultiTurnResponse(resp) => {
+                assert_eq!(resp.total_passed, 2);
+                assert_eq!(resp.total_failed, 1);
+                assert_eq!(resp.failed_results.len(), 1);
+            }
+            other => panic!("expected multi turn response, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn categorizes_evaluation_start_messages() {
+        let payload = json!({
+            "type": "multi_turn_evaluation_start",
+            "data": {
+                "conversation_ids": [10, 11]
+            }
+        });
+
+        let message = MultiTurnReceivableMessage::try_from(payload.to_string().as_bytes())
+            .expect("message should parse");
+        let categorized = CategorizedMultiTurnMessage::from(message);
+
+        match categorized {
+            CategorizedMultiTurnMessage::OptionalMultiTurnMessage(
+                OptionalMultiTurnMessage::MultiTurnEvaluationStart(start),
+            ) => {
+                assert_eq!(start.conversation_ids, vec![10, 11]);
+            }
+            other => panic!("expected evaluation start, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_message_without_data() {
+        let payload = json!({
+            "type": "conversation_complete"
+        });
+
+        let err = MultiTurnReceivableMessage::try_from(payload.to_string().as_bytes())
+            .expect_err("missing data should fail");
+
+        assert!(err.to_string().contains("Missing 'data' field"));
+    }
+}

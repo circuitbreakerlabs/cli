@@ -11,6 +11,9 @@ documentation = "https://api.circuitbreakerlabs.ai/v1/docs"
 name = "cbl"
 path = "./src/main.rs"
 
+[lints.clippy]
+pedantic = "deny"
+
 [dependencies]
 async-openai = { version = "0.32.4", default-features = false, features = ["chat-completion", "rustls"] }
 async-trait = "0.1.89"
