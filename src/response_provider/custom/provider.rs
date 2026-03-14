@@ -82,6 +82,12 @@ impl ResponseProvider for CustomProvider {
         .await
         .map_err(|e| ProviderError::Script(format!("Spawn error: {e}")))??;
 
+        if content.is_empty() {
+            return Err(ProviderError::Parsing(
+                "parse_response returned an empty string".to_string(),
+            ));
+        }
+
         Ok(protocol_types::Message {
             role: protocol_types::Role::Assistant,
             content,
@@ -332,6 +338,41 @@ mod tests {
 
         assert!(matches!(err, ProviderError::Script(_)));
         assert!(err.to_string().contains("parse_response"));
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn generate_response_rejects_empty_parse_response_output() {
+        let path = write_temp_script(
+            r#"
+                fn build_request(messages) {
+                    #{ "ok": true }
+                }
+
+                fn parse_response(body) {
+                    ""
+                }
+            "#,
+        );
+        let (url, _server_handle) = spawn_json_server(json!({ "reply": "ignored" })).await;
+        let config = CustomProviderConfig {
+            url,
+            script: path.clone(),
+        };
+        let provider =
+            CustomProvider::new(&config, &HeaderMap::new()).expect("provider should build");
+
+        let err = provider
+            .generate_response(&[Message {
+                role: Role::User,
+                content: "hello".to_string(),
+            }])
+            .await
+            .expect_err("empty parse_response output should be rejected");
+
+        assert!(matches!(err, ProviderError::Parsing(_)));
+        assert!(err.to_string().contains("empty string"));
 
         let _ = std::fs::remove_file(path);
     }
