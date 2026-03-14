@@ -5,24 +5,6 @@ use clap::{Parser, Subcommand, ValueEnum};
 use reqwest::header::HeaderMap;
 use std::path::PathBuf;
 
-macro_rules! cyan_bold {
-    ($s:expr) => {
-        const_format::formatcp!("\x1b[1;36m{}\x1b[0m", $s)
-    };
-}
-
-const ABOUT: &str = cyan_bold!("Circuit Breaker Labs CLI");
-
-const LONG_ABOUT: &str = const_format::formatcp!(
-    "{} {}
-
-https://github.com/circuitbreakerlabs/cli
-Protocol version {}",
-    cyan_bold!("Circuit Breaker Labs CLI"),
-    cyan_bold!(const_format::formatcp!("v{}", env!("CARGO_PKG_VERSION"))),
-    crate::consts::version::PROTOCOL_VERSION
-);
-
 #[derive(Parser, Debug)]
 #[command(
     version,
