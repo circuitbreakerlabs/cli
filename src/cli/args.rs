@@ -7,9 +7,10 @@ use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(
-    version,
-    about = ABOUT,
-    long_about = LONG_ABOUT,
+    version = crate::cli::version::VERSION,
+    long_version = crate::cli::version::VERSION,
+    about = crate::cli::about::ABOUT,
+    long_about = crate::cli::about::LONG_ABOUT,
     arg_required_else_help = true
 )]
 pub struct Args {
