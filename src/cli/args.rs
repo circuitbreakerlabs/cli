@@ -93,6 +93,7 @@ pub enum EvaluationCommand {
 pub enum ProviderCommand {
     /// Use Ollama provider
     Ollama(OllamaProviderConfig),
+    #[allow(clippy::doc_markdown)]
     /// Use OpenAI provider
     OpenAI(OpenAIProviderConfig),
     /// Use Custom Rhai-scripted provider

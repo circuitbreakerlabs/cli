@@ -20,10 +20,12 @@ fn masked_api_key() -> String {
 #[derive(Clone, Debug, clap::Args)]
 #[clap(next_help_heading = "Required Options")]
 pub struct RequiredOpenAIArgs {
+    #[allow(clippy::doc_markdown)]
     /// OpenAI API key
     #[arg(long, env = OPENAI_API_KEY, help = masked_api_key(), hide_env = true)]
     pub api_key: String,
 
+    #[allow(clippy::doc_markdown)]
     /// OpenAI model name (e.g., gpt-4o, gpt-4-turbo, gpt-3.5-turbo)
     #[arg(long)]
     pub model: String,
@@ -76,6 +78,7 @@ impl From<OpenAIServiceTier> for ServiceTier {
 #[derive(Clone, Debug, clap::Args)]
 #[clap(next_help_heading = "Extra Options")]
 pub struct OptionalOpenAIArgs {
+    #[allow(clippy::doc_markdown)]
     /// OpenAI API base URL for compatible endpoints
     #[arg(
         long,
@@ -84,6 +87,7 @@ pub struct OptionalOpenAIArgs {
     )]
     pub base_url: String,
 
+    #[allow(clippy::doc_markdown)]
     /// OpenAI organization ID
     #[arg(long, env = "OPENAI_ORG_ID")]
     pub org_id: Option<String>,
@@ -340,8 +344,8 @@ mod tests {
             Some(&7)
         );
         assert_eq!(request.store, Some(true));
-        assert!(matches!(request.service_tier, Some(_)));
-        assert!(matches!(request.reasoning_effort, Some(_)));
+        assert!(request.service_tier.is_some());
+        assert!(request.reasoning_effort.is_some());
         assert!(matches!(
             request.stop,
             Some(StopConfiguration::String(ref value)) if value == "END"
