@@ -1,11 +1,11 @@
+mod engine;
 pub mod err;
 pub mod multiturn;
 pub mod singleturn;
+#[cfg(test)]
+mod test_support;
 
 pub use err::EvaluationError;
-
-use crate::protocol_types::{self};
-use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 
 #[derive(Clone, Debug)]
 pub enum EvaluationType {
@@ -20,12 +20,4 @@ impl From<&crate::cli::EvaluationCommand> for EvaluationType {
             crate::cli::EvaluationCommand::MultiTurn { .. } => EvaluationType::MultiTurn,
         }
     }
-}
-
-enum WriterMessage {
-    CompletionResponse(protocol_types::CompletionResponse),
-    CompletionError(protocol_types::CompletionError),
-    Pong(Vec<u8>),
-    Close(CloseFrame),
-    ServerClosed,
 }
