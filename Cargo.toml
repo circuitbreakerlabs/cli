@@ -2,6 +2,7 @@
 name = "circuit-breaker-labs"
 version = "0.1.3"
 edition = "2024"
+build = "build.rs"
 description = "Circuit Breaker Labs command-line interface"
 repository = "https://github.com/circuitbreakerlabs/cli"
 homepage = "https://github.com/circuitbreakerlabs/cli"
@@ -35,6 +36,11 @@ tokio-tungstenite = { version = "0.28.0", features = ["rustls-tls-native-roots"]
 tracing = "0.1.44"
 tracing-subscriber = "0.3.22"
 url = "2.5.8"
+
+[build-dependencies]
+anyhow = "1.0.100"
+vergen = "10.0.0-beta.5"
+vergen-gitcl = "10.0.0-beta.5"
 
 # The profile that 'dist' will build with
 [profile.dist]
