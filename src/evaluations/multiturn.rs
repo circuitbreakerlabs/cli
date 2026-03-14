@@ -195,7 +195,10 @@ async fn reader_task(
                     tracing::debug!("Received close message from server without close frame");
                 }
                 writer_tx.send(WriterMessage::ServerClosed).await?;
-                break;
+                return Err(EvaluationError::from_close_frame_or_eof(
+                    frame.as_ref(),
+                    "MultiTurnResponse",
+                ));
             }
             Ok(Message::Ping(payload)) => {
                 tracing::debug!("Received ping from server, sending pong");
@@ -219,8 +222,9 @@ async fn reader_task(
             }
         }
     }
-    Err(EvaluationError::WebSocketClosed(
-        "WebSocket stream ended without receiving a MultiTurnResponse".to_string(),
+    Err(EvaluationError::from_close_frame_or_eof(
+        None,
+        "MultiTurnResponse",
     ))
 }
 
