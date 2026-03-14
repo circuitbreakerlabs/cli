@@ -87,3 +87,30 @@ impl From<CompletionResponse> for CompletionResponseEnvelope {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{CompletionResponse, CompletionResponseEnvelope};
+    use serde_json::json;
+
+    #[test]
+    fn completion_response_envelope_serializes_to_protocol_shape() {
+        let envelope = CompletionResponseEnvelope::from(CompletionResponse {
+            request_id: "req-123".to_string(),
+            model_response: "safe reply".to_string(),
+        });
+
+        let value = serde_json::to_value(envelope).expect("envelope should serialize");
+
+        assert_eq!(
+            value,
+            json!({
+                "type": "completion_response",
+                "data": {
+                    "request_id": "req-123",
+                    "model_response": "safe reply"
+                }
+            })
+        );
+    }
+}

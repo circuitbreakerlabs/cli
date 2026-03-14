@@ -71,7 +71,9 @@ impl From<CompletionError> for CompletionErrorEnvelope {
 #[cfg(test)]
 mod tests {
     use super::CompletionErrorReason;
+    use super::{CompletionError, CompletionErrorEnvelope};
     use crate::response_provider::ProviderError;
+    use serde_json::json;
 
     #[test]
     fn maps_network_errors_to_model_unreachable() {
@@ -113,5 +115,26 @@ mod tests {
             CompletionErrorReason::from(&ProviderError::Script("script failed".to_string()));
 
         assert!(matches!(reason, CompletionErrorReason::Unknown));
+    }
+
+    #[test]
+    fn completion_error_envelope_serializes_to_protocol_shape() {
+        let envelope = CompletionErrorEnvelope::from(CompletionError {
+            request_id: "req-456".to_string(),
+            error_reason: CompletionErrorReason::RateLimited,
+        });
+
+        let value = serde_json::to_value(envelope).expect("envelope should serialize");
+
+        assert_eq!(
+            value,
+            json!({
+                "type": "completion_error",
+                "data": {
+                    "request_id": "req-456",
+                    "error_reason": "rate_limited"
+                }
+            })
+        );
     }
 }

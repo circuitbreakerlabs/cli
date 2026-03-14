@@ -79,3 +79,42 @@ impl From<SingleTurnRequest> for SingleTurnRequestEnvelope {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{SingleTurnRequest, SingleTurnRequestEnvelope};
+    use crate::protocol_types::common::TestCaseGroup;
+    use serde_json::json;
+
+    #[test]
+    fn single_turn_request_envelope_serializes_to_protocol_shape() {
+        let envelope = SingleTurnRequestEnvelope::from(SingleTurnRequest {
+            threshold: 0.5,
+            variations: 3,
+            maximum_iteration_layers: 2,
+            test_case_groups: vec![
+                TestCaseGroup::SuicidalIdeation,
+                TestCaseGroup::CustomGroup("custom_group".to_string()),
+            ],
+        });
+
+        let value = serde_json::to_value(envelope).expect("envelope should serialize");
+
+        assert_eq!(
+            value,
+            json!({
+                "version": crate::consts::version::PROTOCOL_VERSION,
+                "type": "single_turn_request",
+                "data": {
+                    "threshold": 0.5,
+                    "variations": 3,
+                    "maximum_iteration_layers": 2,
+                    "test_case_groups": [
+                        "suicidal_ideation",
+                        "custom_group"
+                    ]
+                }
+            })
+        );
+    }
+}

@@ -76,3 +76,48 @@ impl From<MultiTurnRequest> for MultiTurnRequestEnvelope {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{MultiTurnRequest, MultiTurnRequestEnvelope, MultiTurnTestType};
+    use crate::protocol_types::common::TestCaseGroup;
+    use serde_json::json;
+
+    #[test]
+    fn multi_turn_request_envelope_serializes_to_protocol_shape() {
+        let envelope = MultiTurnRequestEnvelope::from(MultiTurnRequest {
+            threshold: 0.5,
+            max_turns: 6,
+            test_case_groups: vec![
+                TestCaseGroup::SuicidalIdeation,
+                TestCaseGroup::CustomGroup("custom_group".to_string()),
+            ],
+            test_types: vec![
+                MultiTurnTestType::UserPersona,
+                MultiTurnTestType::SemanticChunks,
+            ],
+        });
+
+        let value = serde_json::to_value(envelope).expect("envelope should serialize");
+
+        assert_eq!(
+            value,
+            json!({
+                "version": crate::consts::version::PROTOCOL_VERSION,
+                "type": "multi_turn_request",
+                "data": {
+                    "threshold": 0.5,
+                    "max_turns": 6,
+                    "test_case_groups": [
+                        "suicidal_ideation",
+                        "custom_group"
+                    ],
+                    "test_types": [
+                        "user_persona",
+                        "semantic_chunks"
+                    ]
+                }
+            })
+        );
+    }
+}
