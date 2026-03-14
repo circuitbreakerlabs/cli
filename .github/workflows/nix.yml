@@ -3,29 +3,40 @@ name: Nix
 on:
   push:
     branches: [main]
-    paths:
-      - "**/*.nix"
-      - "flake.nix"
-      - "flake.lock"
-      - "**/*.rs"
-      - "Cargo.toml"
-      - "Cargo.lock"
   pull_request:
     branches: [main]
-    paths:
-      - "**/*.nix"
-      - "flake.nix"
-      - "flake.lock"
-      - "**/*.rs"
-      - "Cargo.toml"
-      - "Cargo.lock"
 
 permissions:
   contents: read
   pull-requests: read
 
 jobs:
+  detect_changes:
+    runs-on: ubuntu-latest
+    outputs:
+      ci_files: ${{ steps.filter.outputs.ci_files }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Detect Nix or Rust file changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            ci_files:
+              - '**/*.nix'
+              - 'flake.nix'
+              - 'flake.lock'
+              - '**/*.rs'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+
   nixfmt:
+    needs: detect_changes
+    if: needs.detect_changes.outputs.ci_files == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -50,6 +61,8 @@ jobs:
           nix develop .#nix -c sh -c 'find . -name "*.nix" -print0 | xargs -0 nixfmt --check'
 
   nix-build:
+    needs: detect_changes
+    if: needs.detect_changes.outputs.ci_files == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -73,6 +86,8 @@ jobs:
         run: nix build
 
   flake-check:
+    needs: detect_changes
+    if: needs.detect_changes.outputs.ci_files == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -96,6 +111,8 @@ jobs:
         run: nix flake check
 
   statix:
+    needs: detect_changes
+    if: needs.detect_changes.outputs.ci_files == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code

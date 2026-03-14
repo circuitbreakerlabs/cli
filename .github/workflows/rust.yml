@@ -3,23 +3,37 @@ name: Rust
 on:
   push:
     branches: [main]
-    paths:
-      - "**/*.rs"
-      - "Cargo.toml"
-      - "Cargo.lock"
   pull_request:
     branches: [main]
-    paths:
-      - "**/*.rs"
-      - "Cargo.toml"
-      - "Cargo.lock"
 
 permissions:
   contents: read
   pull-requests: read
 
 jobs:
+  detect_changes:
+    runs-on: ubuntu-latest
+    outputs:
+      rust_files: ${{ steps.filter.outputs.rust_files }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Detect Rust file changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            rust_files:
+              - '**/*.rs'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+
   fmt:
+    needs: detect_changes
+    if: needs.detect_changes.outputs.rust_files == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -34,6 +48,8 @@ jobs:
         run: cargo fmt --all -- --check
 
   rust:
+    needs: detect_changes
+    if: needs.detect_changes.outputs.rust_files == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
