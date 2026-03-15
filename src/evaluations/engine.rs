@@ -13,14 +13,14 @@ use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::{self, Message};
 
-pub(crate) enum ParsedIncoming<FinalResponse, OptionalMessage> {
+pub(super) enum ParsedIncoming<FinalResponse, OptionalMessage> {
     CompletionRequest(protocol_types::CompletionRequest),
     FinalResponse(FinalResponse),
     OptionalMessage(OptionalMessage),
 }
 
 #[derive(Debug, PartialEq)]
-pub(crate) enum TransportEvent {
+enum TransportEvent {
     Text(String),
     Ping(Vec<u8>),
     Close(Option<CloseFrame>),
@@ -29,30 +29,30 @@ pub(crate) enum TransportEvent {
 }
 
 #[derive(Debug, PartialEq)]
-pub(crate) struct CloseDirective {
-    pub(crate) code: CloseCode,
-    pub(crate) reason: String,
+struct CloseDirective {
+    code: CloseCode,
+    reason: String,
 }
 
 #[derive(Debug)]
-pub(crate) enum OutboundProtocolMessage {
+enum OutboundProtocolMessage {
     CompletionResponse(protocol_types::CompletionResponse),
     CompletionError(protocol_types::CompletionError),
 }
 
 #[derive(Debug)]
-pub(crate) enum OutboundEvent {
+enum OutboundEvent {
     Protocol(OutboundProtocolMessage),
     Pong(Vec<u8>),
     Close(CloseDirective),
 }
 
-pub(crate) struct CompletionTaskOutput<ProgressMessage> {
-    pub(crate) progress: Vec<ProgressMessage>,
-    pub(crate) outbound: OutboundProtocolMessage,
+struct CompletionTaskOutput<ProgressMessage> {
+    progress: Vec<ProgressMessage>,
+    outbound: OutboundProtocolMessage,
 }
 
-pub(crate) trait EvaluationMode: Clone + Send + Sync + 'static {
+pub(super) trait EvaluationMode: Clone + Send + Sync + 'static {
     type Request: Send + 'static;
     type FinalResponse: Send + 'static;
     type OptionalMessage: Send + 'static;
@@ -82,9 +82,7 @@ pub(crate) trait EvaluationMode: Clone + Send + Sync + 'static {
     fn expected_response_name(&self) -> &'static str;
 }
 
-pub(crate) fn classify_transport_message(
-    result: Result<Message, tungstenite::Error>,
-) -> TransportEvent {
+fn classify_transport_message(result: Result<Message, tungstenite::Error>) -> TransportEvent {
     match result {
         Ok(Message::Text(text)) => TransportEvent::Text(text.to_string()),
         Ok(Message::Ping(payload)) => TransportEvent::Ping(payload.to_vec()),
@@ -97,7 +95,7 @@ pub(crate) fn classify_transport_message(
     }
 }
 
-pub(crate) fn serialize_outbound_protocol_message(
+fn serialize_outbound_protocol_message(
     message: OutboundProtocolMessage,
 ) -> Result<String, serde_json::Error> {
     match message {
@@ -110,9 +108,7 @@ pub(crate) fn serialize_outbound_protocol_message(
     }
 }
 
-pub(crate) fn websocket_message_from_outbound(
-    event: OutboundEvent,
-) -> Result<Message, serde_json::Error> {
+fn websocket_message_from_outbound(event: OutboundEvent) -> Result<Message, serde_json::Error> {
     match event {
         OutboundEvent::Protocol(message) => Ok(Message::Text(
             serialize_outbound_protocol_message(message)?.into(),
@@ -125,7 +121,7 @@ pub(crate) fn websocket_message_from_outbound(
     }
 }
 
-pub(crate) async fn execute_completion_request<M: EvaluationMode>(
+async fn execute_completion_request<M: EvaluationMode>(
     request: protocol_types::CompletionRequest,
     provider: Arc<dyn ResponseProvider>,
     mode: M,
@@ -155,7 +151,7 @@ pub(crate) async fn execute_completion_request<M: EvaluationMode>(
     }
 }
 
-pub(crate) async fn run_evaluation<M>(
+pub(super) async fn run_evaluation<M>(
     websocket_connection: WebSocketConnection,
     provider: Arc<dyn ResponseProvider>,
     request: M::Request,

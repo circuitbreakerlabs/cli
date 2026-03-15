@@ -37,7 +37,7 @@ impl<T> From<tokio::sync::mpsc::error::SendError<T>> for EvaluationError {
 }
 
 impl EvaluationError {
-    pub(crate) fn from_close_frame_or_eof(
+    pub(super) fn from_close_frame_or_eof(
         frame: Option<&CloseFrame>,
         expected_response: &'static str,
     ) -> Self {

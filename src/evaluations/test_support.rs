@@ -12,17 +12,17 @@ use tokio::sync::{Mutex, oneshot};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{WebSocketStream, accept_async, connect_async};
 
-pub(crate) enum ProviderBehavior {
+pub(super) enum ProviderBehavior {
     Immediate(Result<String, ProviderError>),
     Gate(oneshot::Receiver<Result<String, ProviderError>>),
 }
 
-pub(crate) struct ControlledProvider {
+pub(super) struct ControlledProvider {
     behaviors: Mutex<HashMap<String, ProviderBehavior>>,
 }
 
 impl ControlledProvider {
-    pub(crate) fn new(behaviors: HashMap<String, ProviderBehavior>) -> Self {
+    pub(super) fn new(behaviors: HashMap<String, ProviderBehavior>) -> Self {
         Self {
             behaviors: Mutex::new(behaviors),
         }
@@ -61,7 +61,7 @@ impl ResponseProvider for ControlledProvider {
     }
 }
 
-pub(crate) fn gated_behavior() -> (
+pub(super) fn gated_behavior() -> (
     ProviderBehavior,
     oneshot::Sender<Result<String, ProviderError>>,
 ) {
@@ -69,7 +69,7 @@ pub(crate) fn gated_behavior() -> (
     (ProviderBehavior::Gate(receiver), sender)
 }
 
-pub(crate) async fn spawn_websocket_server<F, Fut>(
+pub(super) async fn spawn_websocket_server<F, Fut>(
     handler: F,
 ) -> (WebSocketConnection, tokio::task::JoinHandle<()>)
 where
@@ -98,7 +98,7 @@ where
     (client, server)
 }
 
-pub(crate) async fn recv_text_json(
+pub(super) async fn recv_text_json(
     read: &mut SplitStream<WebSocketStream<TcpStream>>,
 ) -> serde_json::Value {
     match read.next().await.expect("websocket should yield a message") {
@@ -109,7 +109,7 @@ pub(crate) async fn recv_text_json(
     }
 }
 
-pub(crate) async fn send_json(
+pub(super) async fn send_json(
     write: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
     value: serde_json::Value,
 ) {
