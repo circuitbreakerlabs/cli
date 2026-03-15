@@ -155,10 +155,11 @@ mod tests {
     use crate::protocol_types::{self, Role};
     use crate::tui::MultiTurnProgressIndicatorMessage;
     use crate::tui::WaitingFor;
-    use futures_util::StreamExt;
+    use futures_util::{SinkExt, StreamExt};
     use serde_json::json;
     use std::collections::HashMap;
     use std::sync::Arc;
+    use tokio_tungstenite::tungstenite::Message;
 
     #[test]
     fn completion_progress_preserves_double_turn_increment() {
@@ -324,5 +325,62 @@ mod tests {
         assert_eq!(response.total_passed, 1);
         assert_eq!(response.total_failed, 0);
         assert!(response.failed_results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn run_evaluation_replies_to_ping_with_pong() {
+        let provider = Arc::new(ControlledProvider::new(HashMap::new()));
+
+        let (websocket, server_handle) = spawn_websocket_server(|server_websocket| async move {
+            let (mut write, mut read) = server_websocket.split();
+
+            let initial_request = recv_text_json(&mut read).await;
+            assert_eq!(initial_request["type"], "multi_turn_request");
+
+            write
+                .send(Message::Ping(vec![9, 8, 7].into()))
+                .await
+                .expect("server should send ping");
+
+            match read.next().await.expect("client should respond to ping") {
+                Ok(Message::Pong(payload)) => assert_eq!(payload.to_vec(), vec![9, 8, 7]),
+                other => panic!("expected pong message, got {other:?}"),
+            }
+
+            send_json(
+                &mut write,
+                json!({
+                    "type": "multi_turn_response",
+                    "data": {
+                        "total_passed": 1,
+                        "total_failed": 0,
+                        "failed_results": []
+                    }
+                }),
+            )
+            .await;
+        })
+        .await;
+
+        let response = run_evaluation(
+            websocket,
+            provider,
+            MultiTurnRequest {
+                threshold: 0.5,
+                max_turns: 4,
+                test_case_groups: vec![],
+                test_types: vec![MultiTurnTestType::UserPersona],
+            },
+            None,
+        )
+        .await
+        .expect("multi-turn evaluation should succeed after ping/pong");
+
+        server_handle
+            .await
+            .expect("multi-turn ping server should finish");
+
+        assert_eq!(response.total_passed, 1);
+        assert_eq!(response.total_failed, 0);
     }
 }

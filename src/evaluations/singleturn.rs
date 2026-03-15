@@ -141,13 +141,15 @@ mod tests {
     use super::{EvaluationMode, OptionalSingleTurnMessage, SingleTurnMode, run_evaluation};
     use crate::evaluations::EvaluationError;
     use crate::evaluations::test_support::{
-        ControlledProvider, gated_behavior, recv_text_json, send_json, spawn_websocket_server,
+        ControlledProvider, ProviderBehavior, gated_behavior, recv_text_json, send_json,
+        spawn_websocket_server,
     };
-    use crate::protocol_types::common::{ConversationComplete, ConversationError};
+    use crate::protocol_types::common::{ConversationComplete, ConversationError, ServerErrorCode};
     use crate::protocol_types::single_turn::{
         IterationComplete, IterationStart, SingleTurnRequest,
     };
     use crate::protocol_types::{self, Role};
+    use crate::response_provider::ProviderError;
     use crate::tui::SingleTurnProgressIndicatorMessage;
     use crate::tui::WaitingFor;
     use futures_util::{SinkExt, StreamExt};
@@ -155,6 +157,7 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
     use tokio_tungstenite::tungstenite::Message;
+    use tokio_tungstenite::tungstenite::protocol::CloseFrame;
     use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 
     #[test]
@@ -387,6 +390,123 @@ mod tests {
             error,
             EvaluationError::WebSocketClosed(message)
                 if message.contains("Failed to parse incoming message")
+        ));
+    }
+
+    #[tokio::test]
+    async fn run_evaluation_returns_final_response_after_completion_error() {
+        let provider = Arc::new(ControlledProvider::new(HashMap::from([(
+            "broken".to_string(),
+            ProviderBehavior::Immediate(Err(ProviderError::Network("timeout".to_string()))),
+        )])));
+
+        let (websocket, server_handle) = spawn_websocket_server(|server_websocket| async move {
+            let (mut write, mut read) = server_websocket.split();
+
+            let initial_request = recv_text_json(&mut read).await;
+            assert_eq!(initial_request["type"], "single_turn_request");
+
+            send_json(
+                &mut write,
+                json!({
+                    "type": "completion_request",
+                    "data": {
+                        "request_id": "req-err",
+                        "conversation_id": 7,
+                        "messages": [{ "role": "user", "content": "broken" }]
+                    }
+                }),
+            )
+            .await;
+
+            let completion_error = recv_text_json(&mut read).await;
+            assert_eq!(completion_error["type"], "completion_error");
+            assert_eq!(completion_error["data"]["request_id"], "req-err");
+            assert_eq!(
+                completion_error["data"]["error_reason"],
+                "model_unreachable"
+            );
+
+            send_json(
+                &mut write,
+                json!({
+                    "type": "single_turn_response",
+                    "data": {
+                        "total_passed": 0,
+                        "total_failed": 1,
+                        "failed_results": []
+                    }
+                }),
+            )
+            .await;
+        })
+        .await;
+
+        let response = run_evaluation(
+            websocket,
+            provider,
+            SingleTurnRequest {
+                threshold: 0.5,
+                variations: 2,
+                maximum_iteration_layers: 1,
+                test_case_groups: vec![],
+            },
+            None,
+        )
+        .await
+        .expect("evaluation should still finish after a completion error");
+
+        server_handle
+            .await
+            .expect("single-turn completion-error server should finish");
+
+        assert_eq!(response.total_passed, 0);
+        assert_eq!(response.total_failed, 1);
+    }
+
+    #[tokio::test]
+    async fn run_evaluation_maps_server_close_frames() {
+        let provider = Arc::new(ControlledProvider::new(HashMap::new()));
+        let (websocket, server_handle) = spawn_websocket_server(|server_websocket| async move {
+            let (mut write, mut read) = server_websocket.split();
+
+            let initial_request = recv_text_json(&mut read).await;
+            assert_eq!(initial_request["type"], "single_turn_request");
+
+            write
+                .send(Message::Close(Some(CloseFrame {
+                    code: CloseCode::Library(4001),
+                    reason: "bad token".into(),
+                })))
+                .await
+                .expect("server should send close frame");
+        })
+        .await;
+
+        let error = run_evaluation(
+            websocket,
+            provider,
+            SingleTurnRequest {
+                threshold: 0.5,
+                variations: 2,
+                maximum_iteration_layers: 1,
+                test_case_groups: vec![],
+            },
+            None,
+        )
+        .await
+        .expect_err("server close should fail the evaluation");
+
+        server_handle
+            .await
+            .expect("single-turn close-frame server should finish");
+
+        assert!(matches!(
+            error,
+            EvaluationError::ServerClose {
+                code: ServerErrorCode::Unauthorized,
+                reason
+            } if reason == "bad token"
         ));
     }
 }
