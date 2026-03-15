@@ -4,7 +4,7 @@ mod response;
 
 use crate::protocol_types::common::{CompletionRequest, ConversationComplete, ConversationError};
 pub use optional::{MultiTurnEvaluationStart, OptionalMultiTurnMessage};
-pub use request::{MultiTurnRequest, MultiTurnRequestEnvelope, MultiTurnTestType};
+pub use request::{MultiTurnRequest, MultiTurnRequestEnvelope};
 pub use response::MultiTurnResponse;
 use serde::{Deserialize, Serialize, de::Error};
 
