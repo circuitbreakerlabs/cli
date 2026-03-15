@@ -193,47 +193,17 @@ where
 
                     match classify_transport_message(message) {
                         TransportEvent::Text(text) => {
-                            match mode.parse_text(&text) {
-                                Ok(ParsedIncoming::CompletionRequest(request)) => {
-                                    emit_progress(
-                                        progress_indicator_ref,
-                                        mode.progress_on_completion_start(&request),
-                                    )
-                                    .await?;
-
-                                    completion_tasks.spawn(execute_completion_request(
-                                        request,
-                                        provider.clone(),
-                                        mode.clone(),
-                                    ));
-                                }
-                                Ok(ParsedIncoming::FinalResponse(response)) => {
-                                    if let Some(progress) = mode.evaluation_complete_progress() {
-                                        emit_progress(progress_indicator_ref, vec![progress]).await?;
-                                    }
-
-                                    break Ok(response);
-                                }
-                                Ok(ParsedIncoming::OptionalMessage(optional)) => {
-                                    emit_progress(
-                                        progress_indicator_ref,
-                                        mode.progress_from_optional(optional),
-                                    )
-                                    .await?;
-                                }
-                                Err(err) => {
-                                    let reason = format!("Failed to parse incoming message: {err}");
-                                    tracing::error!("{reason}");
-                                    send_outbound(
-                                        &mut write,
-                                        OutboundEvent::Close(CloseDirective {
-                                            code: CloseCode::Protocol,
-                                            reason: reason.clone(),
-                                        }),
-                                    )
-                                    .await?;
-                                    break Err(EvaluationError::WebSocketClosed(reason));
-                                }
+                            if let Some(response) = handle_text_message(
+                                &mut write,
+                                &mode,
+                                text,
+                                provider.clone(),
+                                progress_indicator_ref,
+                                &mut completion_tasks,
+                            )
+                            .await?
+                            {
+                                break Ok(response);
                             }
                         }
                         TransportEvent::Ping(payload) => {
@@ -278,6 +248,55 @@ where
 
     drain_completion_tasks(&mut completion_tasks).await?;
     session_result
+}
+
+async fn handle_text_message<M>(
+    write: &mut SplitSink<WebSocketConnection, Message>,
+    mode: &M,
+    text: String,
+    provider: Arc<dyn ResponseProvider>,
+    progress_indicator: Option<&mpsc::Sender<M::ProgressMessage>>,
+    completion_tasks: &mut JoinSet<CompletionTaskOutput<M::ProgressMessage>>,
+) -> Result<Option<M::FinalResponse>, EvaluationError>
+where
+    M: EvaluationMode,
+{
+    match mode.parse_text(&text) {
+        Ok(ParsedIncoming::CompletionRequest(request)) => {
+            emit_progress(
+                progress_indicator,
+                mode.progress_on_completion_start(&request),
+            )
+            .await?;
+
+            completion_tasks.spawn(execute_completion_request(request, provider, mode.clone()));
+            Ok(None)
+        }
+        Ok(ParsedIncoming::FinalResponse(response)) => {
+            if let Some(progress) = mode.evaluation_complete_progress() {
+                emit_progress(progress_indicator, vec![progress]).await?;
+            }
+
+            Ok(Some(response))
+        }
+        Ok(ParsedIncoming::OptionalMessage(optional)) => {
+            emit_progress(progress_indicator, mode.progress_from_optional(optional)).await?;
+            Ok(None)
+        }
+        Err(err) => {
+            let reason = format!("Failed to parse incoming message: {err}");
+            tracing::error!("{reason}");
+            send_outbound(
+                write,
+                OutboundEvent::Close(CloseDirective {
+                    code: CloseCode::Protocol,
+                    reason: reason.clone(),
+                }),
+            )
+            .await?;
+            Err(EvaluationError::WebSocketClosed(reason))
+        }
+    }
 }
 
 async fn emit_progress<ProgressMessage>(
