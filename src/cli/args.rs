@@ -43,13 +43,22 @@ pub struct Args {
     headers: Vec<Headers>,
 
     #[command(subcommand)]
-    pub evaluation: EvaluationCommand,
+    pub command: Command,
 }
 
 impl Args {
     pub fn headers(&self) -> HeaderMap {
         super::headers::merge_headers(&self.headers)
     }
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Command {
+    /// Run evaluations
+    Eval {
+        #[command(subcommand)]
+        evaluation: EvaluationCommand,
+    },
 }
 
 #[derive(Subcommand, Debug)]
