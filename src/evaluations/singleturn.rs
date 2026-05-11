@@ -324,7 +324,7 @@ mod tests {
                 threshold: 0.5,
                 variations: 2,
                 maximum_iteration_layers: 1,
-                test_case_groups: vec![],
+                test_case_groups: vec!["suicidal_ideation".to_string()],
             },
             None,
         )
@@ -375,7 +375,7 @@ mod tests {
                 threshold: 0.5,
                 variations: 2,
                 maximum_iteration_layers: 1,
-                test_case_groups: vec![],
+                test_case_groups: vec!["suicidal_ideation".to_string()],
             },
             None,
         )
@@ -449,7 +449,7 @@ mod tests {
                 threshold: 0.5,
                 variations: 2,
                 maximum_iteration_layers: 1,
-                test_case_groups: vec![],
+                test_case_groups: vec!["suicidal_ideation".to_string()],
             },
             None,
         )
@@ -490,7 +490,7 @@ mod tests {
                 threshold: 0.5,
                 variations: 2,
                 maximum_iteration_layers: 1,
-                test_case_groups: vec![],
+                test_case_groups: vec!["suicidal_ideation".to_string()],
             },
             None,
         )
