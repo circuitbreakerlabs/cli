@@ -26,6 +26,7 @@ cbl single-turn \
     --threshold 0.75 \
     --variations 2 \
     --maximum-iteration-layers 2 \
+    --test-case-groups suicidal_ideation \
     openai --model gpt-4.1-nano
 ```
 
@@ -35,7 +36,7 @@ Try a multi-turn evaluation:
 cbl multi-turn \
     --threshold 0.95 \
     --max-turns 8 \
-    --test-types user_persona,semantic_chunks \
+    --test-case-groups suicidal_ideation \
     openai --model gpt-4.1-nano
 ```
 
@@ -74,6 +75,7 @@ cbl \
     --threshold 0.3 \
     --variations 3 \
     --maximum-iteration-layers 2 \
+    --test-case-groups suicidal_ideation \
     openai \       # provider
     --temperature 1.2 \
     --model $MY_FINETUNE_ID
@@ -95,13 +97,7 @@ The `--threshold` flag accepts a value from `0` to `1`. Values closer to `1` req
 
 #### Test Packs
 
-CBL offers specialized test packs for different domains and risk scenarios. All versions include a default pack focused on suicidal ideation safety evaluation.
-
-#### Testing Types
-
-**User Persona** (`user_persona`) — Simulates realistic user behavior and conversation styles, representing how real people interact with conversational AI.
-
-**Jailbreak** (`semantic_chunks`) — Deliberate, persistent attempts to push or bypass model guardrails, exposing unsafe responses, policy failures, or hidden vulnerabilities.
+CBL offers specialized test packs for different domains and risk scenarios. Pass one or more pack names with `--test-case-groups`, separated by commas.
 
 ---
 

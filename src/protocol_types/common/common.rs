@@ -1,26 +1,19 @@
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 
 pub type ConversationId = i32;
 
 /// Test case group identifier
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TestCaseGroup {
-    SuicidalIdeation,
-    #[serde(untagged)]
-    CustomGroup(String),
-}
+pub type TestCaseGroup = String;
 
-impl FromStr for TestCaseGroup {
-    type Err = std::convert::Infallible;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "suicidal_ideation" => Ok(TestCaseGroup::SuicidalIdeation),
-            custom => Ok(TestCaseGroup::CustomGroup(custom.to_string())),
-        }
+pub fn parse_test_case_group(value: &str) -> Result<TestCaseGroup, String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(
+            "invalid test_case_groups: expected a non-empty test case group name".to_string(),
+        );
     }
+
+    Ok(value.to_string())
 }
 
 /// Role of a message participant in the conversation.
@@ -92,9 +85,9 @@ impl From<CompletionResponse> for CompletionResponseEnvelope {
 mod tests {
     use super::{
         CompletionRequestEnvelope, CompletionResponse, CompletionResponseEnvelope, TestCaseGroup,
+        parse_test_case_group,
     };
     use serde_json::json;
-    use std::str::FromStr;
 
     #[test]
     fn completion_response_envelope_serializes_to_protocol_shape() {
@@ -142,11 +135,21 @@ mod tests {
     }
 
     #[test]
-    fn test_case_group_from_str_supports_known_and_custom_values() {
-        let known = TestCaseGroup::from_str("suicidal_ideation").expect("known group should parse");
-        let custom = TestCaseGroup::from_str("custom_group").expect("custom group should parse");
+    fn test_case_group_is_a_string_identifier() {
+        let group: TestCaseGroup = "suicidal_ideation".to_string();
 
-        assert!(matches!(known, TestCaseGroup::SuicidalIdeation));
-        assert!(matches!(custom, TestCaseGroup::CustomGroup(ref value) if value == "custom_group"));
+        assert_eq!(group, "suicidal_ideation");
+    }
+
+    #[test]
+    fn parse_test_case_group_trims_and_rejects_empty_values() {
+        let known = parse_test_case_group(" suicidal_ideation ")
+            .expect("known group with whitespace should parse");
+        let custom = parse_test_case_group(" custom_group ")
+            .expect("custom group with whitespace should parse");
+
+        assert_eq!(known, "suicidal_ideation");
+        assert_eq!(custom, "custom_group");
+        assert!(parse_test_case_group("  ").is_err());
     }
 }
