@@ -143,14 +143,16 @@ mod tests {
         .expect("single-turn args should parse");
 
         #[allow(clippy::match_wildcard_for_single_variants)]
-        match args.evaluation {
-            super::EvaluationCommand::SingleTurn { request, .. } => {
-                assert!((request.threshold - 0.5).abs() < f32::EPSILON);
-                assert_eq!(request.variations, 2);
-                assert_eq!(request.maximum_iteration_layers, 2);
-                assert_eq!(request.test_case_groups, vec!["suicidal_ideation"]);
-            }
-            _ => panic!("expected single-turn command"),
+        match args.command {
+            super::Command::Eval { evaluation } => match evaluation {
+                super::EvaluationCommand::SingleTurn { request, .. } => {
+                    assert!((request.threshold - 0.5).abs() < f32::EPSILON);
+                    assert_eq!(request.variations, 2);
+                    assert_eq!(request.maximum_iteration_layers, 2);
+                    assert_eq!(request.test_case_groups, vec!["suicidal_ideation"]);
+                }
+                _ => panic!("expected single-turn command"),
+            },
         }
     }
 
@@ -215,6 +217,7 @@ mod tests {
             "cbl",
             "--cbl-api-key",
             "cbl-key",
+            "eval",
             "single-turn",
             "--threshold",
             "-0.1",
@@ -373,6 +376,7 @@ mod tests {
             "cbl",
             "--cbl-api-key",
             "cbl-key",
+            "eval",
             "single-turn",
             "--threshold",
             "0.5",
@@ -403,6 +407,7 @@ mod tests {
             "cbl",
             "--cbl-api-key",
             "cbl-key",
+            "eval",
             "multi-turn",
             "--threshold",
             "0.5",
@@ -419,13 +424,15 @@ mod tests {
         .expect("multi-turn args should parse");
 
         #[allow(clippy::match_wildcard_for_single_variants)]
-        match args.evaluation {
-            super::EvaluationCommand::MultiTurn { request, .. } => {
-                assert!((request.threshold - 0.5).abs() < f32::EPSILON);
-                assert_eq!(request.max_turns, 4);
-                assert_eq!(request.test_case_groups, vec!["suicidal_ideation"]);
-            }
-            _ => panic!("expected multi-turn command"),
+        match args.command {
+            super::Command::Eval { evaluation } => match evaluation {
+                super::EvaluationCommand::MultiTurn { request, .. } => {
+                    assert!((request.threshold - 0.5).abs() < f32::EPSILON);
+                    assert_eq!(request.max_turns, 4);
+                    assert_eq!(request.test_case_groups, vec!["suicidal_ideation"]);
+                }
+                _ => panic!("expected multi-turn command"),
+            },
         }
     }
 
@@ -493,6 +500,7 @@ mod tests {
             "cbl",
             "--cbl-api-key",
             "cbl-key",
+            "eval",
             "multi-turn",
             "--threshold",
             "0.5",
@@ -521,6 +529,7 @@ mod tests {
             "cbl",
             "--cbl-api-key",
             "cbl-key",
+            "eval",
             "single-turn",
             "--threshold",
             "0.5",
@@ -570,6 +579,7 @@ mod tests {
             "cbl",
             "--cbl-api-key",
             "cbl-key",
+            "eval",
             "single-turn",
             "--threshold",
             "0.5",
@@ -597,6 +607,7 @@ mod tests {
             "cbl",
             "--cbl-api-key",
             "cbl-key",
+            "eval",
             "multi-turn",
             "--threshold",
             "0.5",
