@@ -149,9 +149,7 @@ mod tests {
         ControlledProvider, ProviderBehavior, recv_text_json, send_json, spawn_websocket_server,
     };
     use crate::protocol_types::common::{ConversationComplete, ConversationError};
-    use crate::protocol_types::multi_turn::{
-        MultiTurnEvaluationStart, MultiTurnRequest, MultiTurnTestType,
-    };
+    use crate::protocol_types::multi_turn::{MultiTurnEvaluationStart, MultiTurnRequest};
     use crate::protocol_types::{self, Role};
     use crate::tui::MultiTurnProgressIndicatorMessage;
     use crate::tui::WaitingFor;
@@ -310,8 +308,7 @@ mod tests {
             MultiTurnRequest {
                 threshold: 0.5,
                 max_turns: 4,
-                test_case_groups: vec![],
-                test_types: vec![MultiTurnTestType::UserPersona],
+                test_case_groups: vec!["suicidal_ideation".to_string()],
             },
             None,
         )
@@ -368,8 +365,7 @@ mod tests {
             MultiTurnRequest {
                 threshold: 0.5,
                 max_turns: 4,
-                test_case_groups: vec![],
-                test_types: vec![MultiTurnTestType::UserPersona],
+                test_case_groups: vec!["suicidal_ideation".to_string()],
             },
             None,
         )

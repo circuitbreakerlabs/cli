@@ -132,6 +132,8 @@ mod tests {
             "2",
             "--maximum-iteration-layers",
             "2",
+            "--test-case-groups",
+            "suicidal_ideation",
             "openai",
             "--api-key",
             "openai-key",
@@ -141,15 +143,14 @@ mod tests {
         .expect("single-turn args should parse");
 
         #[allow(clippy::match_wildcard_for_single_variants)]
-        match args.command {
-            super::Command::Eval { evaluation } => match evaluation {
-                super::EvaluationCommand::SingleTurn { request, .. } => {
-                    assert!((request.threshold - 0.5).abs() < f32::EPSILON);
-                    assert_eq!(request.variations, 2);
-                    assert_eq!(request.maximum_iteration_layers, 2);
-                }
-                _ => panic!("expected single-turn command"),
-            },
+        match args.evaluation {
+            super::EvaluationCommand::SingleTurn { request, .. } => {
+                assert!((request.threshold - 0.5).abs() < f32::EPSILON);
+                assert_eq!(request.variations, 2);
+                assert_eq!(request.maximum_iteration_layers, 2);
+                assert_eq!(request.test_case_groups, vec!["suicidal_ideation"]);
+            }
+            _ => panic!("expected single-turn command"),
         }
     }
 
@@ -190,7 +191,9 @@ mod tests {
             "--variations",
             "2",
             "--maximum-iteration-layers",
-            "3",
+            "2",
+            "--test-case-groups",
+            "suicidal_ideation",
             "openai",
             "--api-key",
             "openai-key",
@@ -198,6 +201,36 @@ mod tests {
             "gpt-4.1-nano",
         ])
         .expect_err("threshold should be rejected");
+
+        assert_eq!(err.kind(), ErrorKind::ValueValidation);
+        assert!(
+            err.to_string()
+                .contains("expected a number between 0 and 1")
+        );
+    }
+
+    #[test]
+    fn rejects_negative_threshold() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "single-turn",
+            "--threshold",
+            "-0.1",
+            "--variations",
+            "2",
+            "--maximum-iteration-layers",
+            "2",
+            "--test-case-groups",
+            "suicidal_ideation",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect_err("negative threshold should be rejected");
 
         assert_eq!(err.kind(), ErrorKind::ValueValidation);
         assert!(
@@ -219,7 +252,9 @@ mod tests {
             "--variations",
             "0",
             "--maximum-iteration-layers",
-            "3",
+            "2",
+            "--test-case-groups",
+            "suicidal_ideation",
             "openai",
             "--api-key",
             "openai-key",
@@ -249,6 +284,8 @@ mod tests {
             "6",
             "--maximum-iteration-layers",
             "2",
+            "--test-case-groups",
+            "suicidal_ideation",
             "openai",
             "--api-key",
             "openai-key",
@@ -278,6 +315,8 @@ mod tests {
             "2",
             "--maximum-iteration-layers",
             "0",
+            "--test-case-groups",
+            "suicidal_ideation",
             "openai",
             "--api-key",
             "openai-key",
@@ -311,6 +350,8 @@ mod tests {
             "2",
             "--maximum-iteration-layers",
             "3",
+            "--test-case-groups",
+            "suicidal_ideation",
             "openai",
             "--api-key",
             "openai-key",
@@ -327,6 +368,68 @@ mod tests {
     }
 
     #[test]
+    fn rejects_negative_maximum_iteration_layers() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "single-turn",
+            "--threshold",
+            "0.5",
+            "--variations",
+            "2",
+            "--maximum-iteration-layers",
+            "-1",
+            "--test-case-groups",
+            "suicidal_ideation",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect_err("negative maximum_iteration_layers should be rejected");
+
+        assert_eq!(err.kind(), ErrorKind::ValueValidation);
+        assert!(
+            err.to_string()
+                .contains("expected an integer between 0 and 2")
+        );
+    }
+
+    #[test]
+    fn parses_valid_multi_turn_command() {
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "multi-turn",
+            "--threshold",
+            "0.5",
+            "--max-turns",
+            "4",
+            "--test-case-groups",
+            "suicidal_ideation",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect("multi-turn args should parse");
+
+        #[allow(clippy::match_wildcard_for_single_variants)]
+        match args.evaluation {
+            super::EvaluationCommand::MultiTurn { request, .. } => {
+                assert!((request.threshold - 0.5).abs() < f32::EPSILON);
+                assert_eq!(request.max_turns, 4);
+                assert_eq!(request.test_case_groups, vec!["suicidal_ideation"]);
+            }
+            _ => panic!("expected multi-turn command"),
+        }
+    }
+
+    #[test]
     fn rejects_odd_max_turns() {
         let err = Args::try_parse_from([
             "cbl",
@@ -338,8 +441,8 @@ mod tests {
             "0.5",
             "--max-turns",
             "3",
-            "--test-types",
-            "user_persona",
+            "--test-case-groups",
+            "suicidal_ideation",
             "openai",
             "--api-key",
             "openai-key",
@@ -367,8 +470,8 @@ mod tests {
             "0.5",
             "--max-turns",
             "22",
-            "--test-types",
-            "user_persona",
+            "--test-case-groups",
+            "suicidal_ideation",
             "openai",
             "--api-key",
             "openai-key",
@@ -385,7 +488,60 @@ mod tests {
     }
 
     #[test]
-    fn rejects_missing_multi_turn_test_types() {
+    fn rejects_max_turns_below_spec_minimum() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "multi-turn",
+            "--threshold",
+            "0.5",
+            "--max-turns",
+            "0",
+            "--test-case-groups",
+            "suicidal_ideation",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect_err("max_turns below spec minimum should be rejected");
+
+        assert_eq!(err.kind(), ErrorKind::ValueValidation);
+        assert!(
+            err.to_string()
+                .contains("expected an even integer between 2 and 20")
+        );
+    }
+
+    #[test]
+    fn rejects_missing_single_turn_test_case_groups() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "single-turn",
+            "--threshold",
+            "0.5",
+            "--variations",
+            "2",
+            "--maximum-iteration-layers",
+            "1",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect_err("missing test case groups should be rejected");
+
+        assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
+        assert!(err.to_string().contains("--test-case-groups"));
+    }
+
+    #[test]
+    fn rejects_missing_multi_turn_test_case_groups() {
         let err = Args::try_parse_from([
             "cbl",
             "--cbl-api-key",
@@ -402,9 +558,61 @@ mod tests {
             "--model",
             "gpt-4.1-nano",
         ])
-        .expect_err("missing test types should be rejected");
+        .expect_err("missing test case groups should be rejected");
 
         assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
-        assert!(err.to_string().contains("--test-types"));
+        assert!(err.to_string().contains("--test-case-groups"));
+    }
+
+    #[test]
+    fn rejects_empty_single_turn_test_case_groups() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "single-turn",
+            "--threshold",
+            "0.5",
+            "--variations",
+            "2",
+            "--maximum-iteration-layers",
+            "1",
+            "--test-case-groups",
+            "",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect_err("empty test case groups should be rejected");
+
+        assert_eq!(err.kind(), ErrorKind::ValueValidation);
+        assert!(err.to_string().contains("non-empty test case group"));
+    }
+
+    #[test]
+    fn rejects_empty_multi_turn_test_case_groups() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "multi-turn",
+            "--threshold",
+            "0.5",
+            "--max-turns",
+            "4",
+            "--test-case-groups",
+            "",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect_err("empty test case groups should be rejected");
+
+        assert_eq!(err.kind(), ErrorKind::ValueValidation);
+        assert!(err.to_string().contains("non-empty test case group"));
     }
 }

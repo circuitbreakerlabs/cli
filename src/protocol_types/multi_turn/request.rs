@@ -1,8 +1,5 @@
-use super::super::common::TestCaseGroup;
-use clap;
-use clap::ValueEnum;
+use super::super::common::{TestCaseGroup, parse_test_case_group};
 use serde::{Deserialize, Serialize};
-use strum::EnumString;
 
 fn parse_threshold(value: &str) -> Result<f32, String> {
     let threshold: f32 = value
@@ -30,29 +27,28 @@ fn parse_even_turn_count(value: &str) -> Result<usize, String> {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, EnumString, ValueEnum)]
-#[serde(rename_all = "snake_case")]
-#[value(rename_all = "snake_case")]
-pub enum MultiTurnTestType {
-    UserPersona,
-    SemanticChunks,
-}
-
 /// Payload for `MultiTurnRequestEnvelope` messages (Client -> Server).
 #[derive(Debug, Clone, Serialize, Deserialize, clap::Args)]
 pub struct MultiTurnRequest {
     /// Responses below this safety score threshold will fail
-    #[arg(short, long, value_parser = parse_threshold)]
+    #[arg(short, long, value_parser = parse_threshold, allow_hyphen_values = true)]
     pub threshold: f32,
     /// Maximum number of turns in the conversation. Should be a multiple of two.
-    #[arg(short, long, value_parser = parse_even_turn_count)]
+    #[arg(
+        short,
+        long,
+        value_parser = parse_even_turn_count,
+        allow_hyphen_values = true
+    )]
     pub max_turns: usize,
     /// One or more comma-separated test case groups to run.
-    #[arg(long, value_delimiter = ',', default_value = "suicidal_ideation")]
+    #[arg(
+        long,
+        value_delimiter = ',',
+        value_parser = parse_test_case_group,
+        required = true
+    )]
     pub test_case_groups: Vec<TestCaseGroup>,
-    /// One or more comma-separated multi-turn-test types
-    #[arg(long, value_delimiter = ',', required = true)]
-    pub test_types: Vec<MultiTurnTestType>,
 }
 
 /// Client initiates a multi-turn conversational evaluation session.
@@ -79,8 +75,7 @@ impl From<MultiTurnRequest> for MultiTurnRequestEnvelope {
 
 #[cfg(test)]
 mod tests {
-    use super::{MultiTurnRequest, MultiTurnRequestEnvelope, MultiTurnTestType};
-    use crate::protocol_types::common::TestCaseGroup;
+    use super::{MultiTurnRequest, MultiTurnRequestEnvelope};
     use serde_json::json;
 
     #[test]
@@ -88,14 +83,7 @@ mod tests {
         let envelope = MultiTurnRequestEnvelope::from(MultiTurnRequest {
             threshold: 0.5,
             max_turns: 6,
-            test_case_groups: vec![
-                TestCaseGroup::SuicidalIdeation,
-                TestCaseGroup::CustomGroup("custom_group".to_string()),
-            ],
-            test_types: vec![
-                MultiTurnTestType::UserPersona,
-                MultiTurnTestType::SemanticChunks,
-            ],
+            test_case_groups: vec!["suicidal_ideation".to_string(), "custom_group".to_string()],
         });
 
         let value = serde_json::to_value(envelope).expect("envelope should serialize");
@@ -111,10 +99,6 @@ mod tests {
                     "test_case_groups": [
                         "suicidal_ideation",
                         "custom_group"
-                    ],
-                    "test_types": [
-                        "user_persona",
-                        "semantic_chunks"
                     ]
                 }
             })

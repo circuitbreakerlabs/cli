@@ -3,7 +3,7 @@ use std::time::Duration;
 use update_informer::{Check, registry};
 
 const GITHUB_RELEASES_URL: &str = "https://github.com/circuitbreakerlabs/cli/releases/latest";
-const GITHUB_RELEASE_CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60 * 24);
+const GITHUB_RELEASE_CHECK_INTERVAL: Duration = Duration::from_hours(24);
 
 pub async fn print_update_warning_if_needed(log_mode: bool) {
     tracing::info!("Checking for update...");
