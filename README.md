@@ -22,7 +22,7 @@
 Try a single-turn evaluation:
 
 ```sh
-cbl single-turn \
+cbl eval single-turn \
     --threshold 0.75 \
     --variations 2 \
     --maximum-iteration-layers 2 \
@@ -33,7 +33,7 @@ cbl single-turn \
 Try a multi-turn evaluation:
 
 ```sh
-cbl multi-turn \
+cbl eval multi-turn \
     --threshold 0.95 \
     --max-turns 8 \
     --test-case-groups suicidal_ideation \
@@ -50,17 +50,17 @@ Click [here](mailto:team@circuitbreakerlabs.ai?subject=Getting%20Set%20Up&body=I
 
 ### Flags and Options
 
-You can see the available options and flags for `cbl` with `cbl help` or for a subcommand with `cbl <subcommand> help`.
+You can see the available options and flags for `cbl` with `cbl help`, for evaluation commands with `cbl eval help`, or for a specific evaluation type with `cbl eval <evaluation_type> help`.
 
 ### Syntax
 
 The syntax for `cbl` is:
 
 ```sh
-cbl --top-level-arg1 <evaluation_type> --evaluation-arg1 <provider> --provider-arg1
+cbl --top-level-arg1 eval <evaluation_type> --evaluation-arg1 <provider> --provider-arg1
 ```
 
-where `<evaluation_type>` and `<provider>` are subcommands.
+where `eval`, `<evaluation_type>`, and `<provider>` are subcommands.
 
 The available evaluation types are `single-turn` and `multi-turn`. The available providers are `ollama`, `openai`, and `custom`.
 
@@ -71,6 +71,7 @@ The following would run a single-turn evaluation against a custom OpenAI finetun
 ```sh
 cbl \
     --output-file result.json \
+    eval \
     single-turn \  # evaluation type
     --threshold 0.3 \
     --variations 3 \

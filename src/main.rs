@@ -48,7 +48,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let headers = cli_args.headers();
 
-    let provider_command = match &cli_args.evaluation {
+    let evaluation = match &cli_args.command {
+        cli::Command::Eval { evaluation } => evaluation,
+    };
+
+    let provider_command = match evaluation {
         cli::EvaluationCommand::SingleTurn { provider, .. }
         | cli::EvaluationCommand::MultiTurn { provider, .. } => provider,
     };
@@ -67,32 +71,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let websocket = websockets::connect(
         &cli_args.cbl_api_base_url,
-        (&cli_args.evaluation).into(),
+        evaluation.into(),
         &cli_args.cbl_api_key,
     )
     .await?;
 
-    match cli_args.evaluation {
-        cli::EvaluationCommand::SingleTurn { request, .. } => {
-            run_single_turn_evaluation(
-                websocket,
-                provider,
-                request,
-                cli_args.log_mode,
-                cli_args.output_file,
-            )
-            .await?;
-        }
-        cli::EvaluationCommand::MultiTurn { request, .. } => {
-            run_multi_turn_evaluation(
-                websocket,
-                provider,
-                request,
-                cli_args.log_mode,
-                cli_args.output_file,
-            )
-            .await?;
-        }
+    match cli_args.command {
+        cli::Command::Eval { evaluation } => match evaluation {
+            cli::EvaluationCommand::SingleTurn { request, .. } => {
+                run_single_turn_evaluation(
+                    websocket,
+                    provider,
+                    request,
+                    cli_args.log_mode,
+                    cli_args.output_file,
+                )
+                .await?;
+            }
+            cli::EvaluationCommand::MultiTurn { request, .. } => {
+                run_multi_turn_evaluation(
+                    websocket,
+                    provider,
+                    request,
+                    cli_args.log_mode,
+                    cli_args.output_file,
+                )
+                .await?;
+            }
+        },
     }
 
     Ok(())
