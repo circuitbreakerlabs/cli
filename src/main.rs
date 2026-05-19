@@ -263,7 +263,11 @@ struct QuotaDisplay {
     content: String,
 }
 
-#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 fn build_quota_table(quota: &MonthlyQuotaResponse) -> String {
     const CONTENT_WIDTH: usize = 37;
 
@@ -442,8 +446,7 @@ async fn run_test_case_groups(
             .collect();
         println!(
             "{}",
-            tabled::Table::new(rows)
-                .with(tabled::settings::Style::modern())
+            tabled::Table::new(rows).with(tabled::settings::Style::modern())
         );
     }
 
