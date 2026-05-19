@@ -73,6 +73,15 @@ impl Args {
     }
 
     pub fn validate(&self) -> Result<(), clap::Error> {
+        if self.command.is_none()
+            && !(self.monthly_quota || self.validate_api_key || self.test_case_groups)
+        {
+            return Err(Self::command().error(
+                clap::error::ErrorKind::MissingSubcommand,
+                "an evaluation subcommand or API query flag is required",
+            ));
+        }
+
         if self.command.is_some()
             && (self.monthly_quota || self.validate_api_key || self.test_case_groups)
         {
@@ -711,6 +720,16 @@ mod tests {
         let err = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "--json"])
             .expect_err("--json alone should be rejected");
         assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn rejects_missing_subcommand_without_query_flag() {
+        let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key"])
+            .expect("parsing should succeed before validation");
+        let err = args
+            .validate()
+            .expect_err("validate() should reject missing subcommand");
+        assert_eq!(err.kind(), ErrorKind::MissingSubcommand);
     }
 
     #[test]
