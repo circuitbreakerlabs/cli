@@ -241,11 +241,11 @@ fn http_base_url(ws_base_url: &str) -> String {
 
 #[derive(serde::Deserialize, serde::Serialize)]
 struct MonthlyQuotaResponse {
-    generated_tests: i64,
-    alloted_test_generations: i64,
+    generated_tests: i32,
+    alloted_test_generations: i32,
 }
 
-fn format_with_commas(n: i64) -> String {
+fn format_with_commas(n: i32) -> String {
     let s = n.to_string();
     let mut result = String::new();
     for (i, c) in s.chars().rev().enumerate() {
@@ -263,18 +263,19 @@ struct QuotaDisplay {
     content: String,
 }
 
+#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn build_quota_table(quota: &MonthlyQuotaResponse) -> String {
     const CONTENT_WIDTH: usize = 37;
 
     let pct = if quota.alloted_test_generations == 0 {
         0.0_f64
     } else {
-        quota.generated_tests as f64 / quota.alloted_test_generations as f64 * 100.0
+        f64::from(quota.generated_tests) / f64::from(quota.alloted_test_generations) * 100.0
     };
 
     let generated_fmt = format_with_commas(quota.generated_tests);
     let limit_fmt = format_with_commas(quota.alloted_test_generations);
-    let pct_label = format!("{:.0}% used", pct);
+    let pct_label = format!("{pct:.0}% used");
 
     let bar_width = CONTENT_WIDTH.saturating_sub(pct_label.len() + 2);
     let filled = ((bar_width as f64 * pct / 100.0).round() as usize).min(bar_width);
@@ -286,11 +287,7 @@ fn build_quota_table(quota: &MonthlyQuotaResponse) -> String {
         "{label}{numbers:>width$}",
         width = CONTENT_WIDTH - label.len()
     );
-    let bar_line = format!(
-        "{}{}  {pct_label}",
-        "█".repeat(filled),
-        "░".repeat(empty)
-    );
+    let bar_line = format!("{}{}  {pct_label}", "█".repeat(filled), "░".repeat(empty));
 
     tabled::Table::new([QuotaDisplay {
         content: format!("{stats_line}\n{bar_line}"),
@@ -373,7 +370,10 @@ async fn run_validate_api_key(
     if json {
         println!("{}", serde_json::to_string_pretty(&data)?);
     } else if log_mode {
-        tracing::info!("API key is {}", if data.valid { "valid" } else { "invalid" });
+        tracing::info!(
+            "API key is {}",
+            if data.valid { "valid" } else { "invalid" }
+        );
     } else {
         let status = if data.valid {
             "✓ Valid".to_string()
@@ -384,7 +384,6 @@ async fn run_validate_api_key(
             "{}",
             tabled::Table::new([ValidateDisplay { status }])
                 .with(tabled::settings::Style::modern())
-                .to_string()
         );
     }
 
@@ -445,7 +444,6 @@ async fn run_test_case_groups(
             "{}",
             tabled::Table::new(rows)
                 .with(tabled::settings::Style::modern())
-                .to_string()
         );
     }
 

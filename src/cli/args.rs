@@ -5,6 +5,7 @@ use clap::{ArgGroup, CommandFactory, Parser, Subcommand, ValueEnum};
 use reqwest::header::HeaderMap;
 use std::path::PathBuf;
 
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Parser, Debug)]
 #[command(
     version = crate::cli::version::VERSION,
@@ -672,8 +673,8 @@ mod tests {
 
     #[test]
     fn parses_monthly_quota_short_flag() {
-        let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "-M"])
-            .expect("-M should parse");
+        let args =
+            Args::try_parse_from(["cbl", "--cbl-api-key", "key", "-M"]).expect("-M should parse");
         assert!(args.monthly_quota);
     }
 
@@ -686,8 +687,8 @@ mod tests {
 
     #[test]
     fn parses_validate_api_key_short_flag() {
-        let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "-A"])
-            .expect("-A should parse");
+        let args =
+            Args::try_parse_from(["cbl", "--cbl-api-key", "key", "-A"]).expect("-A should parse");
         assert!(args.validate_api_key);
     }
 
@@ -700,8 +701,8 @@ mod tests {
 
     #[test]
     fn parses_test_case_groups_short_flag() {
-        let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "-T"])
-            .expect("-T should parse");
+        let args =
+            Args::try_parse_from(["cbl", "--cbl-api-key", "key", "-T"]).expect("-T should parse");
         assert!(args.test_case_groups);
     }
 
@@ -723,27 +724,36 @@ mod tests {
 
     #[test]
     fn accepts_json_with_validate_api_key() {
-        let args =
-            Args::try_parse_from(["cbl", "--cbl-api-key", "key", "--validate-api-key", "--json"])
-                .expect("--validate-api-key --json should parse");
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "--validate-api-key",
+            "--json",
+        ])
+        .expect("--validate-api-key --json should parse");
         assert!(args.validate_api_key);
         assert!(args.json);
     }
 
     #[test]
     fn accepts_json_with_test_case_groups() {
-        let args =
-            Args::try_parse_from(["cbl", "--cbl-api-key", "key", "--test-case-groups", "--json"])
-                .expect("--test-case-groups --json should parse");
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "--test-case-groups",
+            "--json",
+        ])
+        .expect("--test-case-groups --json should parse");
         assert!(args.test_case_groups);
         assert!(args.json);
     }
 
     #[test]
     fn parses_json_short_flag() {
-        let args =
-            Args::try_parse_from(["cbl", "--cbl-api-key", "key", "--monthly-quota", "-J"])
-                .expect("-J should parse");
+        let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "--monthly-quota", "-J"])
+            .expect("-J should parse");
         assert!(args.json);
     }
 
