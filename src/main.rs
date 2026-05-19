@@ -239,6 +239,14 @@ fn http_base_url(ws_base_url: &str) -> String {
     }
 }
 
+fn build_http_url(ws_base_url: &str, endpoint: &str) -> String {
+    format!(
+        "{}/{}",
+        http_base_url(ws_base_url).trim_end_matches('/'),
+        endpoint.trim_start_matches('/')
+    )
+}
+
 #[derive(serde::Deserialize, serde::Serialize)]
 struct MonthlyQuotaResponse {
     generated_tests: i32,
@@ -325,11 +333,7 @@ async fn run_monthly_quota(
     log_mode: bool,
     json: bool,
 ) -> Result<(), HttpApiError> {
-    let url = format!(
-        "{}{}",
-        http_base_url(ws_base_url),
-        consts::endpoints::MONTHLY_QUOTA_ENDPOINT
-    );
+    let url = build_http_url(ws_base_url, consts::endpoints::MONTHLY_QUOTA_ENDPOINT);
     let quota: MonthlyQuotaResponse = http_get_json(&url, api_key).await?;
 
     if json {
@@ -364,11 +368,7 @@ async fn run_validate_api_key(
     log_mode: bool,
     json: bool,
 ) -> Result<(), HttpApiError> {
-    let url = format!(
-        "{}{}",
-        http_base_url(ws_base_url),
-        consts::endpoints::VALIDATE_API_KEY_ENDPOINT
-    );
+    let url = build_http_url(ws_base_url, consts::endpoints::VALIDATE_API_KEY_ENDPOINT);
     let data: ValidateApiKeyResponse = http_get_json(&url, api_key).await?;
 
     if json {
@@ -414,11 +414,7 @@ async fn run_test_case_groups(
     log_mode: bool,
     json: bool,
 ) -> Result<(), HttpApiError> {
-    let url = format!(
-        "{}{}",
-        http_base_url(ws_base_url),
-        consts::endpoints::TEST_CASE_GROUPS_ENDPOINT
-    );
+    let url = build_http_url(ws_base_url, consts::endpoints::TEST_CASE_GROUPS_ENDPOINT);
     let groups: Vec<TestCaseGroupItem> = http_get_json(&url, api_key).await?;
 
     if json {

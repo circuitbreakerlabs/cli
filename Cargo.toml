@@ -29,7 +29,6 @@ reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-feature
 rhai = { version = "1.21", features = ["serde", "sync"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
-strum = { version = "0.27.2", features = ["derive"] }
 tabled = "0.16"
 thiserror = "2.0.18"
 tokio = { version = "1.49.0", features = ["full"] }
