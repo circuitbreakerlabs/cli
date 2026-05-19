@@ -1,7 +1,7 @@
 use super::headers::Headers;
 use crate::protocol_types::{MultiTurnRequest, SingleTurnRequest};
 use crate::response_provider::{CustomProviderConfig, OllamaProviderConfig, OpenAIProviderConfig};
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{ArgGroup, CommandFactory, Parser, Subcommand, ValueEnum};
 use reqwest::header::HeaderMap;
 use std::path::PathBuf;
 
@@ -13,6 +13,10 @@ use std::path::PathBuf;
     long_about = crate::cli::about::LONG_ABOUT,
     arg_required_else_help = true
 )]
+#[command(group(
+    ArgGroup::new("api_queries")
+        .args(["monthly_quota", "validate_api_key", "test_case_groups"])
+))]
 pub struct Args {
     /// Circuit Breaker Labs API key
     #[arg(long, env = "CBL_API_KEY")]
@@ -42,13 +46,42 @@ pub struct Args {
     #[arg(long = "add-header", value_parser = clap::value_parser!(Headers))]
     headers: Vec<Headers>,
 
+    /// Display monthly quota usage
+    #[arg(long = "monthly-quota", short = 'M')]
+    pub monthly_quota: bool,
+
+    /// Validate the API key
+    #[arg(long = "validate-api-key", short = 'A')]
+    pub validate_api_key: bool,
+
+    /// List accessible test case groups
+    #[arg(long = "test-case-groups", short = 'T')]
+    pub test_case_groups: bool,
+
+    /// Output result in JSON format (use with -M, -A, or -T)
+    #[arg(long, short = 'J', requires = "api_queries")]
+    pub json: bool,
+
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
 }
 
 impl Args {
     pub fn headers(&self) -> HeaderMap {
         super::headers::merge_headers(&self.headers)
+    }
+
+    pub fn validate(&self) -> Result<(), clap::Error> {
+        if self.command.is_some()
+            && (self.monthly_quota || self.validate_api_key || self.test_case_groups)
+        {
+            return Err(Self::command().error(
+                clap::error::ErrorKind::ArgumentConflict,
+                "--monthly-quota, --validate-api-key, and --test-case-groups \
+                 cannot be used with an evaluation subcommand",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -144,7 +177,7 @@ mod tests {
 
         #[allow(clippy::match_wildcard_for_single_variants)]
         match args.command {
-            super::Command::Eval { evaluation } => match evaluation {
+            Some(super::Command::Eval { evaluation }) => match evaluation {
                 super::EvaluationCommand::SingleTurn { request, .. } => {
                     assert!((request.threshold - 0.5).abs() < f32::EPSILON);
                     assert_eq!(request.variations, 2);
@@ -153,6 +186,7 @@ mod tests {
                 }
                 _ => panic!("expected single-turn command"),
             },
+            _ => panic!("expected eval command"),
         }
     }
 
@@ -330,12 +364,13 @@ mod tests {
 
         #[allow(clippy::match_wildcard_for_single_variants)]
         match args.command {
-            super::Command::Eval { evaluation } => match evaluation {
+            Some(super::Command::Eval { evaluation }) => match evaluation {
                 super::EvaluationCommand::SingleTurn { request, .. } => {
                     assert_eq!(request.maximum_iteration_layers, 0);
                 }
                 _ => panic!("expected single-turn command"),
             },
+            _ => panic!("expected eval command"),
         }
     }
 
@@ -425,7 +460,7 @@ mod tests {
 
         #[allow(clippy::match_wildcard_for_single_variants)]
         match args.command {
-            super::Command::Eval { evaluation } => match evaluation {
+            Some(super::Command::Eval { evaluation }) => match evaluation {
                 super::EvaluationCommand::MultiTurn { request, .. } => {
                     assert!((request.threshold - 0.5).abs() < f32::EPSILON);
                     assert_eq!(request.max_turns, 4);
@@ -433,6 +468,7 @@ mod tests {
                 }
                 _ => panic!("expected multi-turn command"),
             },
+            _ => panic!("expected eval command"),
         }
     }
 
@@ -625,5 +661,160 @@ mod tests {
 
         assert_eq!(err.kind(), ErrorKind::ValueValidation);
         assert!(err.to_string().contains("non-empty test case group"));
+    }
+
+    #[test]
+    fn parses_monthly_quota_flag() {
+        let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "--monthly-quota"])
+            .expect("--monthly-quota should parse");
+        assert!(args.monthly_quota);
+    }
+
+    #[test]
+    fn parses_monthly_quota_short_flag() {
+        let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "-M"])
+            .expect("-M should parse");
+        assert!(args.monthly_quota);
+    }
+
+    #[test]
+    fn parses_validate_api_key_flag() {
+        let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "--validate-api-key"])
+            .expect("--validate-api-key should parse");
+        assert!(args.validate_api_key);
+    }
+
+    #[test]
+    fn parses_validate_api_key_short_flag() {
+        let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "-A"])
+            .expect("-A should parse");
+        assert!(args.validate_api_key);
+    }
+
+    #[test]
+    fn parses_test_case_groups_flag() {
+        let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "--test-case-groups"])
+            .expect("--test-case-groups should parse");
+        assert!(args.test_case_groups);
+    }
+
+    #[test]
+    fn parses_test_case_groups_short_flag() {
+        let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "-T"])
+            .expect("-T should parse");
+        assert!(args.test_case_groups);
+    }
+
+    #[test]
+    fn rejects_json_without_query_flag() {
+        let err = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "--json"])
+            .expect_err("--json alone should be rejected");
+        assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn accepts_json_with_monthly_quota() {
+        let args =
+            Args::try_parse_from(["cbl", "--cbl-api-key", "key", "--monthly-quota", "--json"])
+                .expect("--monthly-quota --json should parse");
+        assert!(args.monthly_quota);
+        assert!(args.json);
+    }
+
+    #[test]
+    fn accepts_json_with_validate_api_key() {
+        let args =
+            Args::try_parse_from(["cbl", "--cbl-api-key", "key", "--validate-api-key", "--json"])
+                .expect("--validate-api-key --json should parse");
+        assert!(args.validate_api_key);
+        assert!(args.json);
+    }
+
+    #[test]
+    fn accepts_json_with_test_case_groups() {
+        let args =
+            Args::try_parse_from(["cbl", "--cbl-api-key", "key", "--test-case-groups", "--json"])
+                .expect("--test-case-groups --json should parse");
+        assert!(args.test_case_groups);
+        assert!(args.json);
+    }
+
+    #[test]
+    fn parses_json_short_flag() {
+        let args =
+            Args::try_parse_from(["cbl", "--cbl-api-key", "key", "--monthly-quota", "-J"])
+                .expect("-J should parse");
+        assert!(args.json);
+    }
+
+    #[test]
+    fn rejects_two_query_flags() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "--monthly-quota",
+            "--validate-api-key",
+        ])
+        .expect_err("two query flags together should be rejected");
+        assert_eq!(err.kind(), ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn rejects_query_flag_with_single_turn_subcommand() {
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "--monthly-quota",
+            "eval",
+            "single-turn",
+            "--threshold",
+            "0.5",
+            "--variations",
+            "2",
+            "--maximum-iteration-layers",
+            "1",
+            "--test-case-groups",
+            "suicidal_ideation",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect("parsing should succeed before validation");
+        let err = args
+            .validate()
+            .expect_err("validate() should reject query flag with single-turn");
+        assert_eq!(err.kind(), ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn rejects_query_flag_with_multi_turn_subcommand() {
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "--validate-api-key",
+            "eval",
+            "multi-turn",
+            "--threshold",
+            "0.5",
+            "--max-turns",
+            "4",
+            "--test-case-groups",
+            "suicidal_ideation",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect("parsing should succeed before validation");
+        let err = args
+            .validate()
+            .expect_err("validate() should reject query flag with multi-turn");
+        assert_eq!(err.kind(), ErrorKind::ArgumentConflict);
     }
 }
