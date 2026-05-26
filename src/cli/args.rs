@@ -65,6 +65,7 @@ impl Args {
 }
 
 #[derive(Subcommand, Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum Command {
     /// Query the Circuit Breaker Labs API
     Api(ApiCommand),
@@ -83,6 +84,16 @@ pub enum Command {
         .required(true)
 ))]
 pub struct ApiCommand {
+    #[command(flatten)]
+    pub query: ApiQueryCommand,
+
+    /// Output result in JSON format
+    #[arg(long, short = 'J', requires = "api_queries")]
+    pub json: bool,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct ApiQueryCommand {
     /// Display monthly quota usage
     #[arg(long = "monthly-quota", short = 'M')]
     pub monthly_quota: bool,
@@ -94,10 +105,6 @@ pub struct ApiCommand {
     /// List accessible test case groups
     #[arg(long = "test-case-groups", short = 'T')]
     pub test_case_groups: bool,
-
-    /// Output result in JSON format
-    #[arg(long, short = 'J', requires = "api_queries")]
-    pub json: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -674,7 +681,7 @@ mod tests {
         let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "api", "--monthly-quota"])
             .expect("api --monthly-quota should parse");
         match args.command {
-            Some(super::Command::Api(api)) => assert!(api.monthly_quota),
+            Some(super::Command::Api(api)) => assert!(api.query.monthly_quota),
             _ => panic!("expected api command"),
         }
     }
@@ -684,7 +691,7 @@ mod tests {
         let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "api", "-M"])
             .expect("api -M should parse");
         match args.command {
-            Some(super::Command::Api(api)) => assert!(api.monthly_quota),
+            Some(super::Command::Api(api)) => assert!(api.query.monthly_quota),
             _ => panic!("expected api command"),
         }
     }
@@ -695,7 +702,7 @@ mod tests {
             Args::try_parse_from(["cbl", "--cbl-api-key", "key", "api", "--validate-api-key"])
                 .expect("api --validate-api-key should parse");
         match args.command {
-            Some(super::Command::Api(api)) => assert!(api.validate_api_key),
+            Some(super::Command::Api(api)) => assert!(api.query.validate_api_key),
             _ => panic!("expected api command"),
         }
     }
@@ -705,7 +712,7 @@ mod tests {
         let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "api", "-A"])
             .expect("api -A should parse");
         match args.command {
-            Some(super::Command::Api(api)) => assert!(api.validate_api_key),
+            Some(super::Command::Api(api)) => assert!(api.query.validate_api_key),
             _ => panic!("expected api command"),
         }
     }
@@ -716,7 +723,7 @@ mod tests {
             Args::try_parse_from(["cbl", "--cbl-api-key", "key", "api", "--test-case-groups"])
                 .expect("api --test-case-groups should parse");
         match args.command {
-            Some(super::Command::Api(api)) => assert!(api.test_case_groups),
+            Some(super::Command::Api(api)) => assert!(api.query.test_case_groups),
             _ => panic!("expected api command"),
         }
     }
@@ -726,7 +733,7 @@ mod tests {
         let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "api", "-T"])
             .expect("api -T should parse");
         match args.command {
-            Some(super::Command::Api(api)) => assert!(api.test_case_groups),
+            Some(super::Command::Api(api)) => assert!(api.query.test_case_groups),
             _ => panic!("expected api command"),
         }
     }
@@ -768,7 +775,7 @@ mod tests {
         .expect("api --monthly-quota --json should parse");
         match args.command {
             Some(super::Command::Api(api)) => {
-                assert!(api.monthly_quota);
+                assert!(api.query.monthly_quota);
                 assert!(api.json);
             }
             _ => panic!("expected api command"),
@@ -788,7 +795,7 @@ mod tests {
         .expect("api --validate-api-key --json should parse");
         match args.command {
             Some(super::Command::Api(api)) => {
-                assert!(api.validate_api_key);
+                assert!(api.query.validate_api_key);
                 assert!(api.json);
             }
             _ => panic!("expected api command"),
@@ -808,7 +815,7 @@ mod tests {
         .expect("api --test-case-groups --json should parse");
         match args.command {
             Some(super::Command::Api(api)) => {
-                assert!(api.test_case_groups);
+                assert!(api.query.test_case_groups);
                 assert!(api.json);
             }
             _ => panic!("expected api command"),

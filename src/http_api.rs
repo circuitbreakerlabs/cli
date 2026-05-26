@@ -19,15 +19,15 @@ pub async fn handle(
     api_key: &str,
     log_mode: bool,
 ) -> Result<(), HttpApiError> {
-    if command.monthly_quota {
+    if command.query.monthly_quota {
         return run_monthly_quota(ws_base_url, api_key, log_mode, command.json).await;
     }
 
-    if command.validate_api_key {
+    if command.query.validate_api_key {
         return run_validate_api_key(ws_base_url, api_key, log_mode, command.json).await;
     }
 
-    if command.test_case_groups {
+    if command.query.test_case_groups {
         return run_test_case_groups(ws_base_url, api_key, log_mode, command.json).await;
     }
 
