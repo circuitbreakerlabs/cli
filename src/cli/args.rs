@@ -14,10 +14,6 @@ use std::path::PathBuf;
     long_about = crate::cli::about::LONG_ABOUT,
     arg_required_else_help = true
 )]
-#[command(group(
-    ArgGroup::new("api_queries")
-        .args(["monthly_quota", "validate_api_key", "test_case_groups"])
-))]
 pub struct Args {
     /// Circuit Breaker Labs API key
     #[arg(long, env = "CBL_API_KEY")]
@@ -47,6 +43,46 @@ pub struct Args {
     #[arg(long = "add-header", value_parser = clap::value_parser!(Headers))]
     headers: Vec<Headers>,
 
+    #[command(subcommand)]
+    pub command: Option<Command>,
+}
+
+impl Args {
+    pub fn headers(&self) -> HeaderMap {
+        super::headers::merge_headers(&self.headers)
+    }
+
+    pub fn validate(&self) -> Result<(), clap::Error> {
+        if self.command.is_none() {
+            return Err(Self::command().error(
+                clap::error::ErrorKind::MissingSubcommand,
+                "an eval or api subcommand is required",
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Command {
+    /// Query the Circuit Breaker Labs API
+    Api(ApiCommand),
+
+    /// Run evaluations
+    Eval {
+        #[command(subcommand)]
+        evaluation: EvaluationCommand,
+    },
+}
+
+#[derive(clap::Args, Debug)]
+#[command(group(
+    ArgGroup::new("api_queries")
+        .args(["monthly_quota", "validate_api_key", "test_case_groups"])
+        .required(true)
+))]
+pub struct ApiCommand {
     /// Display monthly quota usage
     #[arg(long = "monthly-quota", short = 'M')]
     pub monthly_quota: bool,
@@ -59,49 +95,9 @@ pub struct Args {
     #[arg(long = "test-case-groups", short = 'T')]
     pub test_case_groups: bool,
 
-    /// Output result in JSON format (use with -M, -A, or -T)
+    /// Output result in JSON format
     #[arg(long, short = 'J', requires = "api_queries")]
     pub json: bool,
-
-    #[command(subcommand)]
-    pub command: Option<Command>,
-}
-
-impl Args {
-    pub fn headers(&self) -> HeaderMap {
-        super::headers::merge_headers(&self.headers)
-    }
-
-    pub fn validate(&self) -> Result<(), clap::Error> {
-        if self.command.is_none()
-            && !(self.monthly_quota || self.validate_api_key || self.test_case_groups)
-        {
-            return Err(Self::command().error(
-                clap::error::ErrorKind::MissingSubcommand,
-                "an evaluation subcommand or API query flag is required",
-            ));
-        }
-
-        if self.command.is_some()
-            && (self.monthly_quota || self.validate_api_key || self.test_case_groups)
-        {
-            return Err(Self::command().error(
-                clap::error::ErrorKind::ArgumentConflict,
-                "--monthly-quota, --validate-api-key, and --test-case-groups \
-                 cannot be used with an evaluation subcommand",
-            ));
-        }
-        Ok(())
-    }
-}
-
-#[derive(Subcommand, Debug)]
-pub enum Command {
-    /// Run evaluations
-    Eval {
-        #[command(subcommand)]
-        evaluation: EvaluationCommand,
-    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -674,50 +670,77 @@ mod tests {
     }
 
     #[test]
-    fn parses_monthly_quota_flag() {
-        let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "--monthly-quota"])
-            .expect("--monthly-quota should parse");
-        assert!(args.monthly_quota);
+    fn parses_api_monthly_quota_flag() {
+        let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "api", "--monthly-quota"])
+            .expect("api --monthly-quota should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => assert!(api.monthly_quota),
+            _ => panic!("expected api command"),
+        }
     }
 
     #[test]
-    fn parses_monthly_quota_short_flag() {
+    fn parses_api_monthly_quota_short_flag() {
+        let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "api", "-M"])
+            .expect("api -M should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => assert!(api.monthly_quota),
+            _ => panic!("expected api command"),
+        }
+    }
+
+    #[test]
+    fn parses_api_validate_api_key_flag() {
         let args =
-            Args::try_parse_from(["cbl", "--cbl-api-key", "key", "-M"]).expect("-M should parse");
-        assert!(args.monthly_quota);
+            Args::try_parse_from(["cbl", "--cbl-api-key", "key", "api", "--validate-api-key"])
+                .expect("api --validate-api-key should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => assert!(api.validate_api_key),
+            _ => panic!("expected api command"),
+        }
     }
 
     #[test]
-    fn parses_validate_api_key_flag() {
-        let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "--validate-api-key"])
-            .expect("--validate-api-key should parse");
-        assert!(args.validate_api_key);
+    fn parses_api_validate_api_key_short_flag() {
+        let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "api", "-A"])
+            .expect("api -A should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => assert!(api.validate_api_key),
+            _ => panic!("expected api command"),
+        }
     }
 
     #[test]
-    fn parses_validate_api_key_short_flag() {
+    fn parses_api_test_case_groups_flag() {
         let args =
-            Args::try_parse_from(["cbl", "--cbl-api-key", "key", "-A"]).expect("-A should parse");
-        assert!(args.validate_api_key);
+            Args::try_parse_from(["cbl", "--cbl-api-key", "key", "api", "--test-case-groups"])
+                .expect("api --test-case-groups should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => assert!(api.test_case_groups),
+            _ => panic!("expected api command"),
+        }
     }
 
     #[test]
-    fn parses_test_case_groups_flag() {
-        let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "--test-case-groups"])
-            .expect("--test-case-groups should parse");
-        assert!(args.test_case_groups);
+    fn parses_api_test_case_groups_short_flag() {
+        let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "api", "-T"])
+            .expect("api -T should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => assert!(api.test_case_groups),
+            _ => panic!("expected api command"),
+        }
     }
 
     #[test]
-    fn parses_test_case_groups_short_flag() {
-        let args =
-            Args::try_parse_from(["cbl", "--cbl-api-key", "key", "-T"]).expect("-T should parse");
-        assert!(args.test_case_groups);
+    fn rejects_top_level_api_query_flag() {
+        let err = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "--monthly-quota"])
+            .expect_err("top-level --monthly-quota should be rejected");
+        assert_eq!(err.kind(), ErrorKind::UnknownArgument);
     }
 
     #[test]
     fn rejects_json_without_query_flag() {
-        let err = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "--json"])
+        let err = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "api", "--json"])
             .expect_err("--json alone should be rejected");
         assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
     }
@@ -734,11 +757,22 @@ mod tests {
 
     #[test]
     fn accepts_json_with_monthly_quota() {
-        let args =
-            Args::try_parse_from(["cbl", "--cbl-api-key", "key", "--monthly-quota", "--json"])
-                .expect("--monthly-quota --json should parse");
-        assert!(args.monthly_quota);
-        assert!(args.json);
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "api",
+            "--monthly-quota",
+            "--json",
+        ])
+        .expect("api --monthly-quota --json should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => {
+                assert!(api.monthly_quota);
+                assert!(api.json);
+            }
+            _ => panic!("expected api command"),
+        }
     }
 
     #[test]
@@ -747,12 +781,18 @@ mod tests {
             "cbl",
             "--cbl-api-key",
             "key",
+            "api",
             "--validate-api-key",
             "--json",
         ])
-        .expect("--validate-api-key --json should parse");
-        assert!(args.validate_api_key);
-        assert!(args.json);
+        .expect("api --validate-api-key --json should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => {
+                assert!(api.validate_api_key);
+                assert!(api.json);
+            }
+            _ => panic!("expected api command"),
+        }
     }
 
     #[test]
@@ -761,19 +801,35 @@ mod tests {
             "cbl",
             "--cbl-api-key",
             "key",
+            "api",
             "--test-case-groups",
             "--json",
         ])
-        .expect("--test-case-groups --json should parse");
-        assert!(args.test_case_groups);
-        assert!(args.json);
+        .expect("api --test-case-groups --json should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => {
+                assert!(api.test_case_groups);
+                assert!(api.json);
+            }
+            _ => panic!("expected api command"),
+        }
     }
 
     #[test]
     fn parses_json_short_flag() {
-        let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "--monthly-quota", "-J"])
-            .expect("-J should parse");
-        assert!(args.json);
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "api",
+            "--monthly-quota",
+            "-J",
+        ])
+        .expect("api -J should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => assert!(api.json),
+            _ => panic!("expected api command"),
+        }
     }
 
     #[test]
@@ -782,6 +838,7 @@ mod tests {
             "cbl",
             "--cbl-api-key",
             "key",
+            "api",
             "--monthly-quota",
             "--validate-api-key",
         ])
@@ -790,13 +847,13 @@ mod tests {
     }
 
     #[test]
-    fn rejects_query_flag_with_single_turn_subcommand() {
-        let args = Args::try_parse_from([
+    fn rejects_api_query_flag_with_single_turn_subcommand() {
+        let err = Args::try_parse_from([
             "cbl",
             "--cbl-api-key",
             "key",
-            "--monthly-quota",
             "eval",
+            "--monthly-quota",
             "single-turn",
             "--threshold",
             "0.5",
@@ -812,21 +869,18 @@ mod tests {
             "--model",
             "gpt-4.1-nano",
         ])
-        .expect("parsing should succeed before validation");
-        let err = args
-            .validate()
-            .expect_err("validate() should reject query flag with single-turn");
-        assert_eq!(err.kind(), ErrorKind::ArgumentConflict);
+        .expect_err("eval --monthly-quota should be rejected");
+        assert_eq!(err.kind(), ErrorKind::UnknownArgument);
     }
 
     #[test]
-    fn rejects_query_flag_with_multi_turn_subcommand() {
-        let args = Args::try_parse_from([
+    fn rejects_api_query_flag_with_multi_turn_subcommand() {
+        let err = Args::try_parse_from([
             "cbl",
             "--cbl-api-key",
             "key",
-            "--validate-api-key",
             "eval",
+            "--validate-api-key",
             "multi-turn",
             "--threshold",
             "0.5",
@@ -840,10 +894,7 @@ mod tests {
             "--model",
             "gpt-4.1-nano",
         ])
-        .expect("parsing should succeed before validation");
-        let err = args
-            .validate()
-            .expect_err("validate() should reject query flag with multi-turn");
-        assert_eq!(err.kind(), ErrorKind::ArgumentConflict);
+        .expect_err("eval --validate-api-key should be rejected");
+        assert_eq!(err.kind(), ErrorKind::UnknownArgument);
     }
 }
