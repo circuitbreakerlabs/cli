@@ -1,5 +1,6 @@
 mod cli;
 mod consts;
+mod evaluation_output;
 mod evaluations;
 mod protocol_types;
 mod response_provider;
@@ -13,6 +14,7 @@ use update_check::print_update_warning_if_needed;
 
 use chrono::Local;
 use clap::Parser;
+use evaluation_output::serialize_evaluation_output;
 use protocol_types::{MultiTurnRequest, SingleTurnRequest};
 use ratatui::crossterm::style::{Attribute, Color, SetAttribute, SetForegroundColor};
 use response_provider::{CustomProvider, OllamaProvider, OpenAIProvider, ResponseProvider};
@@ -111,6 +113,7 @@ async fn run_single_turn_evaluation(
     log_mode: bool,
     output_file: Option<PathBuf>,
 ) -> Result<(), RunEvaluationError> {
+    let test_case_groups = request.test_case_groups.clone();
     let result = if log_mode {
         evaluations::singleturn::run_evaluation(websocket, provider, request, None).await?
     } else {
@@ -134,7 +137,7 @@ async fn run_single_turn_evaluation(
         ))
     });
 
-    let json = serde_json::to_string_pretty(&result)?;
+    let json = serialize_evaluation_output(&result, &test_case_groups)?;
     std::fs::write(&filename, json)?;
 
     print_success_message(log_mode, "single", &filename);
@@ -150,6 +153,7 @@ async fn run_multi_turn_evaluation(
     log_mode: bool,
     output_file: Option<PathBuf>,
 ) -> Result<(), RunEvaluationError> {
+    let test_case_groups = request.test_case_groups.clone();
     let result = if log_mode {
         evaluations::multiturn::run_evaluation(websocket, provider, request, None).await?
     } else {
@@ -170,7 +174,7 @@ async fn run_multi_turn_evaluation(
         ))
     });
 
-    let json = serde_json::to_string_pretty(&result)?;
+    let json = serialize_evaluation_output(&result, &test_case_groups)?;
     std::fs::write(&filename, json)?;
 
     print_success_message(log_mode, "multi", &filename);
