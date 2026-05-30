@@ -2,6 +2,7 @@ mod cli;
 mod consts;
 mod evaluation_output;
 mod evaluations;
+mod http_api;
 mod protocol_types;
 mod response_provider;
 mod tui;
@@ -41,6 +42,7 @@ enum RunEvaluationError {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli_args = cli::Args::parse();
+    cli_args.validate().unwrap_or_else(|e| e.exit());
 
     if cli_args.log_mode {
         tracing_subscriber::fmt()
@@ -49,12 +51,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let headers = cli_args.headers();
+    let command = cli_args
+        .command
+        .expect("validated CLI args should include a subcommand");
 
-    let evaluation = match &cli_args.command {
+    let evaluation = match command {
+        cli::Command::Api(api_command) => {
+            http_api::handle(
+                api_command,
+                &cli_args.cbl_api_base_url,
+                &cli_args.cbl_api_key,
+                cli_args.log_mode,
+            )
+            .await?;
+            print_update_warning_if_needed(cli_args.log_mode).await;
+            return Ok(());
+        }
         cli::Command::Eval { evaluation } => evaluation,
     };
 
-    let provider_command = match evaluation {
+    let provider_command = match &evaluation {
         cli::EvaluationCommand::SingleTurn { provider, .. }
         | cli::EvaluationCommand::MultiTurn { provider, .. } => provider,
     };
@@ -73,34 +89,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let websocket = websockets::connect(
         &cli_args.cbl_api_base_url,
-        evaluation.into(),
+        (&evaluation).into(),
         &cli_args.cbl_api_key,
     )
     .await?;
 
-    match cli_args.command {
-        cli::Command::Eval { evaluation } => match evaluation {
-            cli::EvaluationCommand::SingleTurn { request, .. } => {
-                run_single_turn_evaluation(
-                    websocket,
-                    provider,
-                    request,
-                    cli_args.log_mode,
-                    cli_args.output_file,
-                )
-                .await?;
-            }
-            cli::EvaluationCommand::MultiTurn { request, .. } => {
-                run_multi_turn_evaluation(
-                    websocket,
-                    provider,
-                    request,
-                    cli_args.log_mode,
-                    cli_args.output_file,
-                )
-                .await?;
-            }
-        },
+    match evaluation {
+        cli::EvaluationCommand::SingleTurn { request, .. } => {
+            run_single_turn_evaluation(
+                websocket,
+                provider,
+                request,
+                cli_args.log_mode,
+                cli_args.output_file,
+            )
+            .await?;
+        }
+        cli::EvaluationCommand::MultiTurn { request, .. } => {
+            run_multi_turn_evaluation(
+                websocket,
+                provider,
+                request,
+                cli_args.log_mode,
+                cli_args.output_file,
+            )
+            .await?;
+        }
     }
 
     Ok(())

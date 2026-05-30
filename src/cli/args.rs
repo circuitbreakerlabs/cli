@@ -1,10 +1,11 @@
 use super::headers::Headers;
 use crate::protocol_types::{MultiTurnRequest, SingleTurnRequest};
 use crate::response_provider::{CustomProviderConfig, OllamaProviderConfig, OpenAIProviderConfig};
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{ArgGroup, CommandFactory, Parser, Subcommand, ValueEnum};
 use reqwest::header::HeaderMap;
 use std::path::PathBuf;
 
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Parser, Debug)]
 #[command(
     version = crate::cli::version::VERSION,
@@ -43,22 +44,67 @@ pub struct Args {
     headers: Vec<Headers>,
 
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
 }
 
 impl Args {
     pub fn headers(&self) -> HeaderMap {
         super::headers::merge_headers(&self.headers)
     }
+
+    pub fn validate(&self) -> Result<(), clap::Error> {
+        if self.command.is_none() {
+            return Err(Self::command().error(
+                clap::error::ErrorKind::MissingSubcommand,
+                "an eval or api subcommand is required",
+            ));
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Subcommand, Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum Command {
+    /// Query the Circuit Breaker Labs API
+    Api(ApiCommand),
+
     /// Run evaluations
     Eval {
         #[command(subcommand)]
         evaluation: EvaluationCommand,
     },
+}
+
+#[derive(clap::Args, Debug)]
+#[command(group(
+    ArgGroup::new("api_queries")
+        .args(["monthly_quota", "validate_api_key", "test_case_groups"])
+        .required(true)
+))]
+pub struct ApiCommand {
+    #[command(flatten)]
+    pub query: ApiQueryCommand,
+
+    /// Output result in JSON format
+    #[arg(long, short = 'J', requires = "api_queries")]
+    pub json: bool,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct ApiQueryCommand {
+    /// Display monthly quota usage
+    #[arg(long = "monthly-quota", short = 'M')]
+    pub monthly_quota: bool,
+
+    /// Validate the API key
+    #[arg(long = "validate-api-key", short = 'A')]
+    pub validate_api_key: bool,
+
+    /// List accessible test case groups
+    #[arg(long = "test-case-groups", short = 'T')]
+    pub test_case_groups: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -144,7 +190,7 @@ mod tests {
 
         #[allow(clippy::match_wildcard_for_single_variants)]
         match args.command {
-            super::Command::Eval { evaluation } => match evaluation {
+            Some(super::Command::Eval { evaluation }) => match evaluation {
                 super::EvaluationCommand::SingleTurn { request, .. } => {
                     assert!((request.threshold - 0.5).abs() < f32::EPSILON);
                     assert_eq!(request.variations, 2);
@@ -153,6 +199,7 @@ mod tests {
                 }
                 _ => panic!("expected single-turn command"),
             },
+            _ => panic!("expected eval command"),
         }
     }
 
@@ -330,12 +377,13 @@ mod tests {
 
         #[allow(clippy::match_wildcard_for_single_variants)]
         match args.command {
-            super::Command::Eval { evaluation } => match evaluation {
+            Some(super::Command::Eval { evaluation }) => match evaluation {
                 super::EvaluationCommand::SingleTurn { request, .. } => {
                     assert_eq!(request.maximum_iteration_layers, 0);
                 }
                 _ => panic!("expected single-turn command"),
             },
+            _ => panic!("expected eval command"),
         }
     }
 
@@ -425,7 +473,7 @@ mod tests {
 
         #[allow(clippy::match_wildcard_for_single_variants)]
         match args.command {
-            super::Command::Eval { evaluation } => match evaluation {
+            Some(super::Command::Eval { evaluation }) => match evaluation {
                 super::EvaluationCommand::MultiTurn { request, .. } => {
                     assert!((request.threshold - 0.5).abs() < f32::EPSILON);
                     assert_eq!(request.max_turns, 4);
@@ -433,6 +481,7 @@ mod tests {
                 }
                 _ => panic!("expected multi-turn command"),
             },
+            _ => panic!("expected eval command"),
         }
     }
 
@@ -625,5 +674,234 @@ mod tests {
 
         assert_eq!(err.kind(), ErrorKind::ValueValidation);
         assert!(err.to_string().contains("non-empty test case group"));
+    }
+
+    #[test]
+    fn parses_api_monthly_quota_flag() {
+        let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "api", "--monthly-quota"])
+            .expect("api --monthly-quota should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => assert!(api.query.monthly_quota),
+            _ => panic!("expected api command"),
+        }
+    }
+
+    #[test]
+    fn parses_api_monthly_quota_short_flag() {
+        let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "api", "-M"])
+            .expect("api -M should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => assert!(api.query.monthly_quota),
+            _ => panic!("expected api command"),
+        }
+    }
+
+    #[test]
+    fn parses_api_validate_api_key_flag() {
+        let args =
+            Args::try_parse_from(["cbl", "--cbl-api-key", "key", "api", "--validate-api-key"])
+                .expect("api --validate-api-key should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => assert!(api.query.validate_api_key),
+            _ => panic!("expected api command"),
+        }
+    }
+
+    #[test]
+    fn parses_api_validate_api_key_short_flag() {
+        let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "api", "-A"])
+            .expect("api -A should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => assert!(api.query.validate_api_key),
+            _ => panic!("expected api command"),
+        }
+    }
+
+    #[test]
+    fn parses_api_test_case_groups_flag() {
+        let args =
+            Args::try_parse_from(["cbl", "--cbl-api-key", "key", "api", "--test-case-groups"])
+                .expect("api --test-case-groups should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => assert!(api.query.test_case_groups),
+            _ => panic!("expected api command"),
+        }
+    }
+
+    #[test]
+    fn parses_api_test_case_groups_short_flag() {
+        let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "api", "-T"])
+            .expect("api -T should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => assert!(api.query.test_case_groups),
+            _ => panic!("expected api command"),
+        }
+    }
+
+    #[test]
+    fn rejects_top_level_api_query_flag() {
+        let err = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "--monthly-quota"])
+            .expect_err("top-level --monthly-quota should be rejected");
+        assert_eq!(err.kind(), ErrorKind::UnknownArgument);
+    }
+
+    #[test]
+    fn rejects_json_without_query_flag() {
+        let err = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "api", "--json"])
+            .expect_err("--json alone should be rejected");
+        assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn rejects_missing_subcommand_without_query_flag() {
+        let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key"])
+            .expect("parsing should succeed before validation");
+        let err = args
+            .validate()
+            .expect_err("validate() should reject missing subcommand");
+        assert_eq!(err.kind(), ErrorKind::MissingSubcommand);
+    }
+
+    #[test]
+    fn accepts_json_with_monthly_quota() {
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "api",
+            "--monthly-quota",
+            "--json",
+        ])
+        .expect("api --monthly-quota --json should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => {
+                assert!(api.query.monthly_quota);
+                assert!(api.json);
+            }
+            _ => panic!("expected api command"),
+        }
+    }
+
+    #[test]
+    fn accepts_json_with_validate_api_key() {
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "api",
+            "--validate-api-key",
+            "--json",
+        ])
+        .expect("api --validate-api-key --json should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => {
+                assert!(api.query.validate_api_key);
+                assert!(api.json);
+            }
+            _ => panic!("expected api command"),
+        }
+    }
+
+    #[test]
+    fn accepts_json_with_test_case_groups() {
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "api",
+            "--test-case-groups",
+            "--json",
+        ])
+        .expect("api --test-case-groups --json should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => {
+                assert!(api.query.test_case_groups);
+                assert!(api.json);
+            }
+            _ => panic!("expected api command"),
+        }
+    }
+
+    #[test]
+    fn parses_json_short_flag() {
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "api",
+            "--monthly-quota",
+            "-J",
+        ])
+        .expect("api -J should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => assert!(api.json),
+            _ => panic!("expected api command"),
+        }
+    }
+
+    #[test]
+    fn rejects_two_query_flags() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "api",
+            "--monthly-quota",
+            "--validate-api-key",
+        ])
+        .expect_err("two query flags together should be rejected");
+        assert_eq!(err.kind(), ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn rejects_api_query_flag_with_single_turn_subcommand() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "eval",
+            "--monthly-quota",
+            "single-turn",
+            "--threshold",
+            "0.5",
+            "--variations",
+            "2",
+            "--maximum-iteration-layers",
+            "1",
+            "--test-case-groups",
+            "suicidal_ideation",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect_err("eval --monthly-quota should be rejected");
+        assert_eq!(err.kind(), ErrorKind::UnknownArgument);
+    }
+
+    #[test]
+    fn rejects_api_query_flag_with_multi_turn_subcommand() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "eval",
+            "--validate-api-key",
+            "multi-turn",
+            "--threshold",
+            "0.5",
+            "--max-turns",
+            "4",
+            "--test-case-groups",
+            "suicidal_ideation",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect_err("eval --validate-api-key should be rejected");
+        assert_eq!(err.kind(), ErrorKind::UnknownArgument);
     }
 }
