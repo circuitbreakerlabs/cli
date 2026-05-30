@@ -1,6 +1,6 @@
 [package]
 name = "circuit-breaker-labs"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2024"
 build = "build.rs"
 description = "Circuit Breaker Labs command-line interface"
