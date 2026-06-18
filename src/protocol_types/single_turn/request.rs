@@ -66,6 +66,10 @@ pub struct SingleTurnRequest {
         required = true
     )]
     pub test_case_groups: Vec<TestCaseGroup>,
+    /// Target model identifiers for parallel evaluation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[arg(skip)]
+    pub target_models: Vec<String>,
 }
 
 /// Client initiates a single-turn evaluation session.
@@ -102,6 +106,7 @@ mod tests {
             variations: 3,
             maximum_iteration_layers: 2,
             test_case_groups: vec!["suicidal_ideation".to_string(), "custom_group".to_string()],
+            target_models: Vec::new(),
         });
 
         let value = serde_json::to_value(envelope).expect("envelope should serialize");
@@ -121,6 +126,24 @@ mod tests {
                     ]
                 }
             })
+        );
+    }
+
+    #[test]
+    fn single_turn_request_serializes_target_models_when_present() {
+        let envelope = SingleTurnRequestEnvelope::from(SingleTurnRequest {
+            threshold: 0.5,
+            variations: 1,
+            maximum_iteration_layers: 0,
+            test_case_groups: vec!["suicidal_ideation".to_string()],
+            target_models: vec!["model-a".to_string(), "model-b".to_string()],
+        });
+
+        let value = serde_json::to_value(envelope).expect("envelope should serialize");
+
+        assert_eq!(
+            value["data"]["target_models"],
+            json!(["model-a", "model-b"])
         );
     }
 }

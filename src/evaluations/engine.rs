@@ -6,6 +6,7 @@ use crate::websockets::WebSocketConnection;
 
 use futures_util::stream::SplitSink;
 use futures_util::{SinkExt, StreamExt};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
@@ -50,6 +51,52 @@ enum OutboundEvent {
 struct CompletionTaskOutput<ProgressMessage> {
     progress: Vec<ProgressMessage>,
     outbound: OutboundProtocolMessage,
+}
+
+#[derive(Clone)]
+pub struct ResponseProviderRegistry {
+    default: Arc<dyn ResponseProvider>,
+    by_target_model_id: Arc<HashMap<String, Arc<dyn ResponseProvider>>>,
+}
+
+impl ResponseProviderRegistry {
+    pub fn single(provider: Arc<dyn ResponseProvider>) -> Self {
+        Self {
+            default: provider,
+            by_target_model_id: Arc::new(HashMap::new()),
+        }
+    }
+
+    pub fn parallel(providers: HashMap<String, Arc<dyn ResponseProvider>>) -> Self {
+        let default = providers
+            .values()
+            .next()
+            .expect("parallel provider registry should contain at least one provider")
+            .clone();
+
+        Self {
+            default,
+            by_target_model_id: Arc::new(providers),
+        }
+    }
+
+    fn provider_for(
+        &self,
+        target_model_id: Option<&str>,
+    ) -> Result<Arc<dyn ResponseProvider>, crate::response_provider::ProviderError> {
+        let Some(target_model_id) = target_model_id else {
+            return Ok(self.default.clone());
+        };
+
+        self.by_target_model_id
+            .get(target_model_id)
+            .cloned()
+            .ok_or_else(|| {
+                crate::response_provider::ProviderError::Config(format!(
+                    "No response provider configured for target model '{target_model_id}'"
+                ))
+            })
+    }
 }
 
 pub(super) trait EvaluationMode: Clone + Send + Sync + 'static {
@@ -123,15 +170,32 @@ fn websocket_message_from_outbound(event: OutboundEvent) -> Result<Message, serd
 
 async fn execute_completion_request<M: EvaluationMode>(
     request: protocol_types::CompletionRequest,
-    provider: Arc<dyn ResponseProvider>,
+    providers: ResponseProviderRegistry,
     mode: M,
 ) -> CompletionTaskOutput<M::ProgressMessage> {
+    let provider = match providers.provider_for(request.target_model_id.as_deref()) {
+        Ok(provider) => provider,
+        Err(err) => {
+            tracing::error!("Error selecting response provider: {err}");
+            return CompletionTaskOutput {
+                progress: Vec::new(),
+                outbound: OutboundProtocolMessage::CompletionError(
+                    protocol_types::CompletionError {
+                        request_id: request.request_id,
+                        error_reason: (&err).into(),
+                    },
+                ),
+            };
+        }
+    };
+
     match provider.generate_response(&request.messages).await {
         Ok(completion) => CompletionTaskOutput {
             progress: mode.progress_on_completion_success(&request),
             outbound: OutboundProtocolMessage::CompletionResponse(
                 protocol_types::CompletionResponse {
                     request_id: request.request_id,
+                    target_model_id: request.target_model_id,
                     model_response: completion.content,
                 },
             ),
@@ -153,7 +217,7 @@ async fn execute_completion_request<M: EvaluationMode>(
 
 pub(super) async fn run_evaluation<M>(
     websocket_connection: WebSocketConnection,
-    provider: Arc<dyn ResponseProvider>,
+    providers: ResponseProviderRegistry,
     request: M::Request,
     progress_indicator: Option<mpsc::Sender<M::ProgressMessage>>,
     mode: M,
@@ -193,7 +257,7 @@ where
                                 &mut write,
                                 &mode,
                                 text,
-                                provider.clone(),
+                                providers.clone(),
                                 progress_indicator_ref,
                                 &mut completion_tasks,
                             )
@@ -250,7 +314,7 @@ async fn handle_text_message<M>(
     write: &mut SplitSink<WebSocketConnection, Message>,
     mode: &M,
     text: String,
-    provider: Arc<dyn ResponseProvider>,
+    providers: ResponseProviderRegistry,
     progress_indicator: Option<&mpsc::Sender<M::ProgressMessage>>,
     completion_tasks: &mut JoinSet<CompletionTaskOutput<M::ProgressMessage>>,
 ) -> Result<Option<M::FinalResponse>, EvaluationError>
@@ -265,7 +329,7 @@ where
             )
             .await?;
 
-            completion_tasks.spawn(execute_completion_request(request, provider, mode.clone()));
+            completion_tasks.spawn(execute_completion_request(request, providers, mode.clone()));
             Ok(None)
         }
         Ok(ParsedIncoming::FinalResponse(response)) => {
@@ -339,9 +403,9 @@ async fn drain_completion_tasks<ProgressMessage: 'static>(
 mod tests {
     use super::{
         CloseDirective, CompletionTaskOutput, EvaluationMode, OutboundEvent,
-        OutboundProtocolMessage, ParsedIncoming, TransportEvent, classify_transport_message,
-        execute_completion_request, serialize_outbound_protocol_message,
-        websocket_message_from_outbound,
+        OutboundProtocolMessage, ParsedIncoming, ResponseProviderRegistry, TransportEvent,
+        classify_transport_message, execute_completion_request,
+        serialize_outbound_protocol_message, websocket_message_from_outbound,
     };
     use crate::protocol_types::{self, Role};
     use crate::response_provider::{ProviderError, ResponseProvider};
@@ -385,6 +449,7 @@ mod tests {
                 Some("completion") => Ok(ParsedIncoming::CompletionRequest(
                     protocol_types::CompletionRequest {
                         request_id: "req-1".to_string(),
+                        target_model_id: None,
                         conversation_id: 7,
                         messages: vec![protocol_types::Message {
                             role: Role::User,
@@ -452,6 +517,21 @@ mod tests {
         }
     }
 
+    struct StaticProvider(&'static str);
+
+    #[async_trait]
+    impl ResponseProvider for StaticProvider {
+        async fn generate_response(
+            &self,
+            _conversation_history: &[protocol_types::Message],
+        ) -> Result<protocol_types::Message, ProviderError> {
+            Ok(protocol_types::Message {
+                role: Role::Assistant,
+                content: self.0.to_string(),
+            })
+        }
+    }
+
     struct FailingProvider;
 
     #[async_trait]
@@ -487,6 +567,7 @@ mod tests {
         let text = serialize_outbound_protocol_message(
             OutboundProtocolMessage::CompletionResponse(protocol_types::CompletionResponse {
                 request_id: "req-1".to_string(),
+                target_model_id: None,
                 model_response: "safe".to_string(),
             }),
         )
@@ -526,13 +607,14 @@ mod tests {
         let output: CompletionTaskOutput<String> = execute_completion_request(
             protocol_types::CompletionRequest {
                 request_id: "req-1".to_string(),
+                target_model_id: None,
                 conversation_id: 9,
                 messages: vec![protocol_types::Message {
                     role: Role::User,
                     content: "hello".to_string(),
                 }],
             },
-            Arc::new(SuccessProvider),
+            ResponseProviderRegistry::single(Arc::new(SuccessProvider)),
             TestMode,
         )
         .await;
@@ -542,8 +624,48 @@ mod tests {
             output.outbound,
             OutboundProtocolMessage::CompletionResponse(protocol_types::CompletionResponse {
                 request_id,
+                target_model_id,
                 model_response
-            }) if request_id == "req-1" && model_response == "safe reply"
+            }) if request_id == "req-1" && target_model_id.is_none() && model_response == "safe reply"
+        ));
+    }
+
+    #[tokio::test]
+    async fn completion_request_routes_by_target_model_id() {
+        let output: CompletionTaskOutput<String> = execute_completion_request(
+            protocol_types::CompletionRequest {
+                request_id: "req-model".to_string(),
+                target_model_id: Some("model-b".to_string()),
+                conversation_id: 9,
+                messages: vec![protocol_types::Message {
+                    role: Role::User,
+                    content: "hello".to_string(),
+                }],
+            },
+            ResponseProviderRegistry::parallel(std::collections::HashMap::from([
+                (
+                    "model-a".to_string(),
+                    Arc::new(StaticProvider("reply from model a")) as Arc<dyn ResponseProvider>,
+                ),
+                (
+                    "model-b".to_string(),
+                    Arc::new(StaticProvider("reply from model b")) as Arc<dyn ResponseProvider>,
+                ),
+            ])),
+            TestMode,
+        )
+        .await;
+
+        assert_eq!(output.progress, vec!["api".to_string()]);
+        assert!(matches!(
+            output.outbound,
+            OutboundProtocolMessage::CompletionResponse(protocol_types::CompletionResponse {
+                request_id,
+                target_model_id,
+                model_response
+            }) if request_id == "req-model"
+                && target_model_id.as_deref() == Some("model-b")
+                && model_response == "reply from model b"
         ));
     }
 
@@ -552,13 +674,14 @@ mod tests {
         let output: CompletionTaskOutput<String> = execute_completion_request(
             protocol_types::CompletionRequest {
                 request_id: "req-2".to_string(),
+                target_model_id: None,
                 conversation_id: 11,
                 messages: vec![protocol_types::Message {
                     role: Role::User,
                     content: "hello".to_string(),
                 }],
             },
-            Arc::new(FailingProvider),
+            ResponseProviderRegistry::single(Arc::new(FailingProvider)),
             TestMode,
         )
         .await;

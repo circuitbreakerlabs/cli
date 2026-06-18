@@ -1,16 +1,15 @@
 use super::EvaluationError;
-use super::engine::{self, EvaluationMode, ParsedIncoming};
+use super::engine::{self, EvaluationMode, ParsedIncoming, ResponseProviderRegistry};
 use crate::protocol_types::multi_turn::{
     CategorizedMultiTurnMessage, MultiTurnReceivableMessage, MultiTurnRequest,
     MultiTurnRequestEnvelope, MultiTurnResponse, OptionalMultiTurnMessage,
+    ParallelMultiTurnResponse,
 };
 use crate::protocol_types::{self};
-use crate::response_provider::ResponseProvider;
 use crate::tui;
 use crate::tui::MultiTurnProgressIndicatorMessage;
 use crate::websockets::WebSocketConnection;
 
-use std::sync::Arc;
 use tokio::sync::mpsc;
 
 #[derive(Clone, Copy)]
@@ -18,9 +17,15 @@ struct MultiTurnMode {
     max_turns: usize,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub enum MultiTurnFinalResponse {
+    Single(MultiTurnResponse),
+    Parallel(ParallelMultiTurnResponse),
+}
+
 impl EvaluationMode for MultiTurnMode {
     type Request = MultiTurnRequest;
-    type FinalResponse = MultiTurnResponse;
+    type FinalResponse = MultiTurnFinalResponse;
     type OptionalMessage = OptionalMultiTurnMessage;
     type ProgressMessage = MultiTurnProgressIndicatorMessage;
 
@@ -39,7 +44,10 @@ impl EvaluationMode for MultiTurnMode {
                     ParsedIncoming::CompletionRequest(request)
                 }
                 CategorizedMultiTurnMessage::MultiTurnResponse(response) => {
-                    ParsedIncoming::FinalResponse(response)
+                    ParsedIncoming::FinalResponse(MultiTurnFinalResponse::Single(response))
+                }
+                CategorizedMultiTurnMessage::ParallelMultiTurnResponse(response) => {
+                    ParsedIncoming::FinalResponse(MultiTurnFinalResponse::Parallel(response))
                 }
                 CategorizedMultiTurnMessage::OptionalMultiTurnMessage(message) => {
                     ParsedIncoming::OptionalMessage(message)
@@ -124,17 +132,17 @@ impl EvaluationMode for MultiTurnMode {
 
 pub async fn run_evaluation(
     websocket_connection: WebSocketConnection,
-    provider: Arc<dyn ResponseProvider>,
+    providers: ResponseProviderRegistry,
     request: MultiTurnRequest,
     progress_indicator: Option<mpsc::Sender<MultiTurnProgressIndicatorMessage>>,
-) -> Result<MultiTurnResponse, EvaluationError> {
+) -> Result<MultiTurnFinalResponse, EvaluationError> {
     let mode = MultiTurnMode {
         max_turns: request.max_turns,
     };
 
     engine::run_evaluation(
         websocket_connection,
-        provider,
+        providers,
         request,
         progress_indicator,
         mode,
@@ -144,7 +152,11 @@ pub async fn run_evaluation(
 
 #[cfg(test)]
 mod tests {
-    use super::{EvaluationMode, MultiTurnMode, OptionalMultiTurnMessage, run_evaluation};
+    use super::{
+        EvaluationMode, MultiTurnFinalResponse, MultiTurnMode, OptionalMultiTurnMessage,
+        run_evaluation,
+    };
+    use crate::evaluations::ResponseProviderRegistry;
     use crate::evaluations::test_support::{
         ControlledProvider, ProviderBehavior, recv_text_json, send_json, spawn_websocket_server,
     };
@@ -164,6 +176,7 @@ mod tests {
         let mode = MultiTurnMode { max_turns: 4 };
         let request = protocol_types::CompletionRequest {
             request_id: "req-1".to_string(),
+            target_model_id: None,
             conversation_id: 12,
             messages: vec![protocol_types::Message {
                 role: Role::User,
@@ -304,11 +317,12 @@ mod tests {
 
         let response = run_evaluation(
             websocket,
-            provider,
+            ResponseProviderRegistry::single(provider),
             MultiTurnRequest {
                 threshold: 0.5,
                 max_turns: 4,
                 test_case_groups: vec!["suicidal_ideation".to_string()],
+                target_models: Vec::new(),
             },
             None,
         )
@@ -319,9 +333,16 @@ mod tests {
             .await
             .expect("multi-turn test server should finish");
 
-        assert_eq!(response.total_passed, 1);
-        assert_eq!(response.total_failed, 0);
-        assert!(response.failed_results.is_empty());
+        match response {
+            MultiTurnFinalResponse::Single(response) => {
+                assert_eq!(response.total_passed, 1);
+                assert_eq!(response.total_failed, 0);
+                assert!(response.failed_results.is_empty());
+            }
+            other @ MultiTurnFinalResponse::Parallel(_) => {
+                panic!("expected single response, got {other:?}");
+            }
+        }
     }
 
     #[tokio::test]
@@ -361,11 +382,12 @@ mod tests {
 
         let response = run_evaluation(
             websocket,
-            provider,
+            ResponseProviderRegistry::single(provider),
             MultiTurnRequest {
                 threshold: 0.5,
                 max_turns: 4,
                 test_case_groups: vec!["suicidal_ideation".to_string()],
+                target_models: Vec::new(),
             },
             None,
         )
@@ -376,7 +398,14 @@ mod tests {
             .await
             .expect("multi-turn ping server should finish");
 
-        assert_eq!(response.total_passed, 1);
-        assert_eq!(response.total_failed, 0);
+        match response {
+            MultiTurnFinalResponse::Single(response) => {
+                assert_eq!(response.total_passed, 1);
+                assert_eq!(response.total_failed, 0);
+            }
+            other @ MultiTurnFinalResponse::Parallel(_) => {
+                panic!("expected single response, got {other:?}");
+            }
+        }
     }
 }

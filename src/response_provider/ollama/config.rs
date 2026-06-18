@@ -4,9 +4,9 @@ use ollama_rs::models::ModelOptions;
 #[derive(Clone, Debug, clap::Args)]
 #[clap(next_help_heading = "Required Options")]
 pub struct RequiredOllamaArgs {
-    /// Ollama model name
-    #[arg(long)]
-    pub model: String,
+    /// Ollama model name. Can be repeated for parallel evaluation.
+    #[arg(long, required = true)]
+    pub model: Vec<String>,
 }
 
 #[derive(Clone, Debug, clap::Args)]
@@ -101,6 +101,23 @@ pub struct OllamaProviderConfig {
 }
 
 impl OllamaProviderConfig {
+    pub fn model_ids(&self) -> &[String] {
+        &self.required.model
+    }
+
+    pub fn with_model(&self, model: String) -> Self {
+        let mut config = self.clone();
+        config.required.model = vec![model];
+        config
+    }
+
+    pub fn model(&self) -> &str {
+        self.required
+            .model
+            .first()
+            .expect("Ollama provider config should include a model")
+    }
+
     pub fn build_model_options(&self) -> Option<ModelOptions> {
         let mut options = ModelOptions::default();
         let mut has_options = false;
@@ -197,7 +214,7 @@ mod tests {
     fn make_config() -> OllamaProviderConfig {
         OllamaProviderConfig {
             required: RequiredOllamaArgs {
-                model: "llama-test".to_string(),
+                model: vec!["llama-test".to_string()],
             },
             optional: OptionalOllamaArgs {
                 base_url: "http://localhost:11434".to_string(),
@@ -226,7 +243,7 @@ mod tests {
     fn build_model_options_returns_none_when_no_options_are_set() {
         let config = OllamaProviderConfig {
             required: RequiredOllamaArgs {
-                model: "llama-test".to_string(),
+                model: vec!["llama-test".to_string()],
             },
             optional: OptionalOllamaArgs {
                 base_url: "http://localhost:11434".to_string(),

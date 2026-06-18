@@ -5,7 +5,7 @@ mod response;
 use crate::protocol_types::common::{CompletionRequest, ConversationComplete, ConversationError};
 pub use optional::{MultiTurnEvaluationStart, OptionalMultiTurnMessage};
 pub use request::{MultiTurnRequest, MultiTurnRequestEnvelope};
-pub use response::MultiTurnResponse;
+pub use response::{MultiTurnResponse, ParallelMultiTurnResponse};
 use serde::{Deserialize, Serialize, de::Error};
 
 /// Messages that the server may send to the client during multi-turn evaluation (Server -> Client).
@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize, de::Error};
 pub enum MultiTurnReceivableMessage {
     CompletionRequest(super::common::CompletionRequest),
     MultiTurnResponse(MultiTurnResponse),
+    ParallelMultiTurnResponse(ParallelMultiTurnResponse),
     ConversationComplete(ConversationComplete),
     MultiTurnEvaluationStart(MultiTurnEvaluationStart),
     ConversationError(ConversationError),
@@ -22,6 +23,7 @@ pub enum MultiTurnReceivableMessage {
 pub enum CategorizedMultiTurnMessage {
     CompletionRequest(CompletionRequest),
     MultiTurnResponse(MultiTurnResponse),
+    ParallelMultiTurnResponse(ParallelMultiTurnResponse),
     OptionalMultiTurnMessage(OptionalMultiTurnMessage),
 }
 
@@ -48,6 +50,11 @@ impl TryFrom<&[u8]> for MultiTurnReceivableMessage {
             "multi_turn_response" => Ok(MultiTurnReceivableMessage::MultiTurnResponse(
                 serde_json::from_value(data)?,
             )),
+            "parallel_multi_turn_response" => {
+                Ok(MultiTurnReceivableMessage::ParallelMultiTurnResponse(
+                    serde_json::from_value(data)?,
+                ))
+            }
             "conversation_complete" => Ok(MultiTurnReceivableMessage::ConversationComplete(
                 serde_json::from_value(data)?,
             )),
@@ -72,6 +79,9 @@ impl From<MultiTurnReceivableMessage> for CategorizedMultiTurnMessage {
             }
             MultiTurnReceivableMessage::MultiTurnResponse(resp) => {
                 CategorizedMultiTurnMessage::MultiTurnResponse(resp)
+            }
+            MultiTurnReceivableMessage::ParallelMultiTurnResponse(resp) => {
+                CategorizedMultiTurnMessage::ParallelMultiTurnResponse(resp)
             }
             MultiTurnReceivableMessage::ConversationComplete(complete) => {
                 CategorizedMultiTurnMessage::OptionalMultiTurnMessage(
@@ -129,6 +139,32 @@ mod tests {
                 assert_eq!(resp.failed_results.len(), 1);
             }
             other => panic!("expected multi turn response, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_parallel_multi_turn_response_message() {
+        let payload = json!({
+            "type": "parallel_multi_turn_response",
+            "data": {
+                "results": {
+                    "model-a": {
+                        "total_passed": 2,
+                        "total_failed": 0,
+                        "failed_results": []
+                    }
+                }
+            }
+        });
+
+        let message = MultiTurnReceivableMessage::try_from(payload.to_string().as_bytes())
+            .expect("message should parse");
+
+        match message {
+            MultiTurnReceivableMessage::ParallelMultiTurnResponse(resp) => {
+                assert_eq!(resp.results["model-a"].total_passed, 2);
+            }
+            other => panic!("expected parallel multi turn response, got {other:?}"),
         }
     }
 

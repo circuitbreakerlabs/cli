@@ -58,7 +58,7 @@ impl ResponseProvider for OllamaProvider {
             .map(Self::convert_message)
             .collect();
 
-        let mut request = ChatMessageRequest::new(self.config.required.model.clone(), messages);
+        let mut request = ChatMessageRequest::new(self.config.model().to_string(), messages);
 
         if let Some(options) = self.config.build_model_options() {
             request = request.options(options);

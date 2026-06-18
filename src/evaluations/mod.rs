@@ -5,6 +5,7 @@ pub mod singleturn;
 #[cfg(test)]
 mod test_support;
 
+pub use engine::ResponseProviderRegistry;
 pub use err::EvaluationError;
 
 #[derive(Clone, Debug)]

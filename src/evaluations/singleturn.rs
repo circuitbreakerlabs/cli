@@ -1,24 +1,28 @@
 use super::EvaluationError;
-use super::engine::{self, EvaluationMode, ParsedIncoming};
+use super::engine::{self, EvaluationMode, ParsedIncoming, ResponseProviderRegistry};
 use crate::protocol_types::single_turn::{
-    CategorizedSingleTurnMessage, OptionalSingleTurnMessage, SingleTurnReceivableMessage,
-    SingleTurnRequest, SingleTurnRequestEnvelope, SingleTurnResponse,
+    CategorizedSingleTurnMessage, OptionalSingleTurnMessage, ParallelSingleTurnResponse,
+    SingleTurnReceivableMessage, SingleTurnRequest, SingleTurnRequestEnvelope, SingleTurnResponse,
 };
 use crate::protocol_types::{self};
-use crate::response_provider::ResponseProvider;
 use crate::tui::SingleTurnProgressIndicatorMessage;
 use crate::tui::WaitingFor;
 use crate::websockets::WebSocketConnection;
 
-use std::sync::Arc;
 use tokio::sync::mpsc;
 
 #[derive(Clone, Copy)]
 struct SingleTurnMode;
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub enum SingleTurnFinalResponse {
+    Single(SingleTurnResponse),
+    Parallel(ParallelSingleTurnResponse),
+}
+
 impl EvaluationMode for SingleTurnMode {
     type Request = SingleTurnRequest;
-    type FinalResponse = SingleTurnResponse;
+    type FinalResponse = SingleTurnFinalResponse;
     type OptionalMessage = OptionalSingleTurnMessage;
     type ProgressMessage = SingleTurnProgressIndicatorMessage;
 
@@ -37,7 +41,10 @@ impl EvaluationMode for SingleTurnMode {
                     ParsedIncoming::CompletionRequest(request)
                 }
                 CategorizedSingleTurnMessage::SingleTurnResponse(response) => {
-                    ParsedIncoming::FinalResponse(response)
+                    ParsedIncoming::FinalResponse(SingleTurnFinalResponse::Single(response))
+                }
+                CategorizedSingleTurnMessage::ParallelSingleTurnResponse(response) => {
+                    ParsedIncoming::FinalResponse(SingleTurnFinalResponse::Parallel(response))
                 }
                 CategorizedSingleTurnMessage::OptionalSingleTurnMessage(message) => {
                     ParsedIncoming::OptionalMessage(message)
@@ -122,13 +129,13 @@ impl EvaluationMode for SingleTurnMode {
 
 pub async fn run_evaluation(
     websocket_connection: WebSocketConnection,
-    provider: Arc<dyn ResponseProvider>,
+    providers: ResponseProviderRegistry,
     request: SingleTurnRequest,
     progress_indicator: Option<mpsc::Sender<SingleTurnProgressIndicatorMessage>>,
-) -> Result<SingleTurnResponse, EvaluationError> {
+) -> Result<SingleTurnFinalResponse, EvaluationError> {
     engine::run_evaluation(
         websocket_connection,
-        provider,
+        providers,
         request,
         progress_indicator,
         SingleTurnMode,
@@ -138,12 +145,15 @@ pub async fn run_evaluation(
 
 #[cfg(test)]
 mod tests {
-    use super::{EvaluationMode, OptionalSingleTurnMessage, SingleTurnMode, run_evaluation};
-    use crate::evaluations::EvaluationError;
+    use super::{
+        EvaluationMode, OptionalSingleTurnMessage, SingleTurnFinalResponse, SingleTurnMode,
+        run_evaluation,
+    };
     use crate::evaluations::test_support::{
         ControlledProvider, ProviderBehavior, gated_behavior, recv_text_json, send_json,
         spawn_websocket_server,
     };
+    use crate::evaluations::{EvaluationError, ResponseProviderRegistry};
     use crate::protocol_types::common::{ConversationComplete, ConversationError, ServerErrorCode};
     use crate::protocol_types::single_turn::{
         IterationComplete, IterationStart, SingleTurnRequest,
@@ -164,6 +174,7 @@ mod tests {
     fn completion_progress_maps_to_waiting_states() {
         let request = protocol_types::CompletionRequest {
             request_id: "req-1".to_string(),
+            target_model_id: None,
             conversation_id: 42,
             messages: vec![protocol_types::Message {
                 role: Role::User,
@@ -319,12 +330,13 @@ mod tests {
 
         let response = run_evaluation(
             websocket,
-            provider,
+            ResponseProviderRegistry::single(provider),
             SingleTurnRequest {
                 threshold: 0.5,
                 variations: 2,
                 maximum_iteration_layers: 1,
                 test_case_groups: vec!["suicidal_ideation".to_string()],
+                target_models: Vec::new(),
             },
             None,
         )
@@ -335,9 +347,16 @@ mod tests {
             .await
             .expect("single-turn test server should finish");
 
-        assert_eq!(response.total_passed, 2);
-        assert_eq!(response.total_failed, 0);
-        assert!(response.failed_results.is_empty());
+        match response {
+            SingleTurnFinalResponse::Single(response) => {
+                assert_eq!(response.total_passed, 2);
+                assert_eq!(response.total_failed, 0);
+                assert!(response.failed_results.is_empty());
+            }
+            other @ SingleTurnFinalResponse::Parallel(_) => {
+                panic!("expected single response, got {other:?}");
+            }
+        }
     }
 
     #[tokio::test]
@@ -370,12 +389,13 @@ mod tests {
 
         let error = run_evaluation(
             websocket,
-            provider,
+            ResponseProviderRegistry::single(provider),
             SingleTurnRequest {
                 threshold: 0.5,
                 variations: 2,
                 maximum_iteration_layers: 1,
                 test_case_groups: vec!["suicidal_ideation".to_string()],
+                target_models: Vec::new(),
             },
             None,
         )
@@ -444,12 +464,13 @@ mod tests {
 
         let response = run_evaluation(
             websocket,
-            provider,
+            ResponseProviderRegistry::single(provider),
             SingleTurnRequest {
                 threshold: 0.5,
                 variations: 2,
                 maximum_iteration_layers: 1,
                 test_case_groups: vec!["suicidal_ideation".to_string()],
+                target_models: Vec::new(),
             },
             None,
         )
@@ -460,8 +481,15 @@ mod tests {
             .await
             .expect("single-turn completion-error server should finish");
 
-        assert_eq!(response.total_passed, 0);
-        assert_eq!(response.total_failed, 1);
+        match response {
+            SingleTurnFinalResponse::Single(response) => {
+                assert_eq!(response.total_passed, 0);
+                assert_eq!(response.total_failed, 1);
+            }
+            other @ SingleTurnFinalResponse::Parallel(_) => {
+                panic!("expected single response, got {other:?}");
+            }
+        }
     }
 
     #[tokio::test]
@@ -485,12 +513,13 @@ mod tests {
 
         let error = run_evaluation(
             websocket,
-            provider,
+            ResponseProviderRegistry::single(provider),
             SingleTurnRequest {
                 threshold: 0.5,
                 variations: 2,
                 maximum_iteration_layers: 1,
                 test_case_groups: vec!["suicidal_ideation".to_string()],
+                target_models: Vec::new(),
             },
             None,
         )

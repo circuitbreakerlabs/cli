@@ -37,6 +37,9 @@ pub struct Message {
 pub struct CompletionRequest {
     /// Unique identifier for this completion request (UUID recommended)
     pub request_id: String,
+    /// Model identifier that should handle this request in a parallel evaluation
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_model_id: Option<String>,
     /// Identifier for the conversation thread this request belongs to
     pub conversation_id: ConversationId,
     /// Conversation history in standard role/content format
@@ -58,6 +61,9 @@ pub struct CompletionRequestEnvelope {
 pub struct CompletionResponse {
     /// Must match the ID from the corresponding `CompletionRequest`
     pub request_id: String,
+    /// Model identifier that handled this request in a parallel evaluation
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_model_id: Option<String>,
     /// The model's generated response
     pub model_response: String,
 }
@@ -93,6 +99,7 @@ mod tests {
     fn completion_response_envelope_serializes_to_protocol_shape() {
         let envelope = CompletionResponseEnvelope::from(CompletionResponse {
             request_id: "req-123".to_string(),
+            target_model_id: None,
             model_response: "safe reply".to_string(),
         });
 
@@ -129,9 +136,41 @@ mod tests {
 
         assert_eq!(envelope.message_type, "completion_request");
         assert_eq!(envelope.data.request_id, "req-789");
+        assert_eq!(envelope.data.target_model_id, None);
         assert_eq!(envelope.data.conversation_id, 12);
         assert_eq!(envelope.data.messages.len(), 2);
         assert_eq!(envelope.data.messages[0].content, "be safe");
+    }
+
+    #[test]
+    fn completion_request_and_response_preserve_target_model_id() {
+        let request: CompletionRequestEnvelope = serde_json::from_value(json!({
+            "type": "completion_request",
+            "data": {
+                "request_id": "req-model",
+                "target_model_id": "openai/gpt-4.1-nano",
+                "conversation_id": 3,
+                "messages": []
+            }
+        }))
+        .expect("request should deserialize");
+
+        assert_eq!(
+            request.data.target_model_id.as_deref(),
+            Some("openai/gpt-4.1-nano")
+        );
+
+        let response = CompletionResponseEnvelope::from(CompletionResponse {
+            request_id: "req-model".to_string(),
+            target_model_id: Some("openai/gpt-4.1-nano".to_string()),
+            model_response: "safe reply".to_string(),
+        });
+        let value = serde_json::to_value(response).expect("response should serialize");
+
+        assert_eq!(
+            value["data"]["target_model_id"],
+            json!("openai/gpt-4.1-nano")
+        );
     }
 
     #[test]

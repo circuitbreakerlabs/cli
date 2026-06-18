@@ -26,9 +26,9 @@ pub struct RequiredOpenAIArgs {
     pub api_key: String,
 
     #[allow(clippy::doc_markdown)]
-    /// OpenAI model name (e.g., gpt-4o, gpt-4-turbo, gpt-3.5-turbo)
-    #[arg(long)]
-    pub model: String,
+    /// OpenAI model name (e.g., gpt-4o, gpt-4-turbo, gpt-3.5-turbo). Can be repeated for parallel evaluation.
+    #[arg(long, required = true)]
+    pub model: Vec<String>,
 }
 
 #[derive(Clone, Debug, clap::ValueEnum)]
@@ -174,6 +174,23 @@ pub struct OpenAIProviderConfig {
 }
 
 impl OpenAIProviderConfig {
+    pub fn model_ids(&self) -> &[String] {
+        &self.required.model
+    }
+
+    pub fn with_model(&self, model: String) -> Self {
+        let mut config = self.clone();
+        config.required.model = vec![model];
+        config
+    }
+
+    fn model(&self) -> &str {
+        self.required
+            .model
+            .first()
+            .expect("OpenAI provider config should include a model")
+    }
+
     pub fn build_openai_config(&self) -> async_openai::config::OpenAIConfig {
         let mut config =
             async_openai::config::OpenAIConfig::new().with_api_key(&self.required.api_key);
@@ -194,7 +211,7 @@ impl OpenAIProviderConfig {
         messages: Vec<async_openai::types::chat::ChatCompletionRequestMessage>,
     ) -> CreateChatCompletionRequest {
         let mut request = CreateChatCompletionRequest {
-            model: self.required.model.clone(),
+            model: self.model().to_string(),
             messages,
             ..Default::default()
         };
@@ -276,7 +293,7 @@ mod tests {
         OpenAIProviderConfig {
             required: RequiredOpenAIArgs {
                 api_key: "test-key".to_string(),
-                model: "gpt-test".to_string(),
+                model: vec!["gpt-test".to_string()],
             },
             optional: OptionalOpenAIArgs {
                 base_url: "https://example.com/v1".to_string(),

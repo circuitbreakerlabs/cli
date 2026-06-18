@@ -49,6 +49,10 @@ pub struct MultiTurnRequest {
         required = true
     )]
     pub test_case_groups: Vec<TestCaseGroup>,
+    /// Target model identifiers for parallel evaluation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[arg(skip)]
+    pub target_models: Vec<String>,
 }
 
 /// Client initiates a multi-turn conversational evaluation session.
@@ -84,6 +88,7 @@ mod tests {
             threshold: 0.5,
             max_turns: 6,
             test_case_groups: vec!["suicidal_ideation".to_string(), "custom_group".to_string()],
+            target_models: Vec::new(),
         });
 
         let value = serde_json::to_value(envelope).expect("envelope should serialize");
@@ -102,6 +107,23 @@ mod tests {
                     ]
                 }
             })
+        );
+    }
+
+    #[test]
+    fn multi_turn_request_serializes_target_models_when_present() {
+        let envelope = MultiTurnRequestEnvelope::from(MultiTurnRequest {
+            threshold: 0.5,
+            max_turns: 4,
+            test_case_groups: vec!["suicidal_ideation".to_string()],
+            target_models: vec!["model-a".to_string(), "model-b".to_string()],
+        });
+
+        let value = serde_json::to_value(envelope).expect("envelope should serialize");
+
+        assert_eq!(
+            value["data"]["target_models"],
+            json!(["model-a", "model-b"])
         );
     }
 }

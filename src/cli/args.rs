@@ -191,15 +191,65 @@ mod tests {
         #[allow(clippy::match_wildcard_for_single_variants)]
         match args.command {
             Some(super::Command::Eval { evaluation }) => match evaluation {
-                super::EvaluationCommand::SingleTurn { request, .. } => {
+                super::EvaluationCommand::SingleTurn { provider, request } => {
                     assert!((request.threshold - 0.5).abs() < f32::EPSILON);
                     assert_eq!(request.variations, 2);
                     assert_eq!(request.maximum_iteration_layers, 2);
                     assert_eq!(request.test_case_groups, vec!["suicidal_ideation"]);
+                    match provider {
+                        super::ProviderCommand::OpenAI(config) => {
+                            assert_eq!(config.model_ids(), &["gpt-4.1-nano".to_string()]);
+                        }
+                        other => panic!("expected OpenAI provider, got {other:?}"),
+                    }
                 }
                 _ => panic!("expected single-turn command"),
             },
             _ => panic!("expected eval command"),
+        }
+    }
+
+    #[test]
+    fn parses_repeated_openai_models_for_parallel_evaluation() {
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "eval",
+            "single-turn",
+            "--threshold",
+            "0.5",
+            "--variations",
+            "2",
+            "--maximum-iteration-layers",
+            "2",
+            "--test-case-groups",
+            "suicidal_ideation",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+            "--model",
+            "gpt-4.1-mini",
+        ])
+        .expect("parallel single-turn args should parse");
+
+        match args.command {
+            Some(super::Command::Eval {
+                evaluation:
+                    super::EvaluationCommand::SingleTurn {
+                        provider: super::ProviderCommand::OpenAI(config),
+                        request,
+                    },
+            }) => {
+                assert_eq!(
+                    config.model_ids(),
+                    &["gpt-4.1-nano".to_string(), "gpt-4.1-mini".to_string()]
+                );
+                assert!(request.target_models.is_empty());
+            }
+            other => panic!("expected single-turn OpenAI command, got {other:?}"),
         }
     }
 

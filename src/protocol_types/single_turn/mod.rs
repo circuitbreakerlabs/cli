@@ -7,13 +7,14 @@ mod response;
 use super::common::{CompletionRequest, ConversationComplete, ConversationError};
 pub use optional::{IterationComplete, IterationStart, OptionalSingleTurnMessage};
 pub use request::{SingleTurnRequest, SingleTurnRequestEnvelope};
-pub use response::SingleTurnResponse;
+pub use response::{ParallelSingleTurnResponse, SingleTurnResponse};
 
 /// Messages that the server may send to the client during single-turn evaluation (Server -> Client).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SingleTurnReceivableMessage {
     CompletionRequest(CompletionRequest),
     SingleTurnResponse(SingleTurnResponse),
+    ParallelSingleTurnResponse(ParallelSingleTurnResponse),
     IterationStart(IterationStart),
     IterationComplete(IterationComplete),
     ConversationComplete(ConversationComplete),
@@ -24,6 +25,7 @@ pub enum SingleTurnReceivableMessage {
 pub enum CategorizedSingleTurnMessage {
     CompletionRequest(super::common::CompletionRequest),
     SingleTurnResponse(SingleTurnResponse),
+    ParallelSingleTurnResponse(ParallelSingleTurnResponse),
     OptionalSingleTurnMessage(OptionalSingleTurnMessage),
 }
 
@@ -53,6 +55,11 @@ impl TryFrom<&[u8]> for SingleTurnReceivableMessage {
             "single_turn_response" => Ok(SingleTurnReceivableMessage::SingleTurnResponse(
                 serde_json::from_value(data)?,
             )),
+            "parallel_single_turn_response" => {
+                Ok(SingleTurnReceivableMessage::ParallelSingleTurnResponse(
+                    serde_json::from_value(data)?,
+                ))
+            }
             "iteration_complete" => Ok(SingleTurnReceivableMessage::IterationComplete(
                 serde_json::from_value(data)?,
             )),
@@ -77,6 +84,9 @@ impl From<SingleTurnReceivableMessage> for CategorizedSingleTurnMessage {
             }
             SingleTurnReceivableMessage::SingleTurnResponse(resp) => {
                 CategorizedSingleTurnMessage::SingleTurnResponse(resp)
+            }
+            SingleTurnReceivableMessage::ParallelSingleTurnResponse(resp) => {
+                CategorizedSingleTurnMessage::ParallelSingleTurnResponse(resp)
             }
             SingleTurnReceivableMessage::IterationStart(start) => {
                 CategorizedSingleTurnMessage::OptionalSingleTurnMessage(
@@ -132,6 +142,32 @@ mod tests {
                 assert_eq!(req.messages.len(), 1);
             }
             other => panic!("expected completion request, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_parallel_single_turn_response_message() {
+        let payload = json!({
+            "type": "parallel_single_turn_response",
+            "data": {
+                "results": {
+                    "model-a": {
+                        "total_passed": 1,
+                        "total_failed": 0,
+                        "failed_results": []
+                    }
+                }
+            }
+        });
+
+        let message = SingleTurnReceivableMessage::try_from(payload.to_string().as_bytes())
+            .expect("message should parse");
+
+        match message {
+            SingleTurnReceivableMessage::ParallelSingleTurnResponse(resp) => {
+                assert_eq!(resp.results["model-a"].total_passed, 1);
+            }
+            other => panic!("expected parallel single turn response, got {other:?}"),
         }
     }
 

@@ -1,6 +1,7 @@
 use super::super::common::Message;
 use crate::protocol_types::ConversationId;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Details of a failed multi-turn conversation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,9 +35,25 @@ pub struct MultiTurnResponseEnvelope {
     pub data: MultiTurnResponse,
 }
 
+/// Payload for parallel multi-turn evaluation results keyed by target model ID.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParallelMultiTurnResponse {
+    pub results: HashMap<String, MultiTurnResponse>,
+}
+
+/// Server returns final parallel multi-turn evaluation results.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParallelMultiTurnResponseEnvelope {
+    /// Message type
+    #[serde(rename = "type")]
+    pub message_type: String,
+    /// Response payload
+    pub data: ParallelMultiTurnResponse,
+}
+
 #[cfg(test)]
 mod tests {
-    use super::MultiTurnResponseEnvelope;
+    use super::{MultiTurnResponseEnvelope, ParallelMultiTurnResponseEnvelope};
     use serde_json::json;
 
     #[test]
@@ -68,5 +85,33 @@ mod tests {
         assert_eq!(envelope.data.failed_results.len(), 1);
         assert_eq!(envelope.data.failed_results[0].conversation_id, 7);
         assert_eq!(envelope.data.failed_results[0].conversation.len(), 2);
+    }
+
+    #[test]
+    fn parallel_multi_turn_response_envelope_deserializes_from_protocol_shape() {
+        let value = json!({
+            "type": "parallel_multi_turn_response",
+            "data": {
+                "results": {
+                    "model-a": {
+                        "total_passed": 3,
+                        "total_failed": 0,
+                        "failed_results": []
+                    },
+                    "model-b": {
+                        "total_passed": 2,
+                        "total_failed": 1,
+                        "failed_results": []
+                    }
+                }
+            }
+        });
+
+        let envelope: ParallelMultiTurnResponseEnvelope =
+            serde_json::from_value(value).expect("response envelope should deserialize");
+
+        assert_eq!(envelope.message_type, "parallel_multi_turn_response");
+        assert_eq!(envelope.data.results["model-a"].total_passed, 3);
+        assert_eq!(envelope.data.results["model-b"].total_failed, 1);
     }
 }

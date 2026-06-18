@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::protocol_types::ConversationId;
 
@@ -36,9 +37,25 @@ pub struct SingleTurnResponseEnvelope {
     pub data: SingleTurnResponse,
 }
 
+/// Payload for parallel single-turn evaluation results keyed by target model ID.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParallelSingleTurnResponse {
+    pub results: HashMap<String, SingleTurnResponse>,
+}
+
+/// Server returns final parallel single-turn evaluation results.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParallelSingleTurnResponseEnvelope {
+    /// Message type
+    #[serde(rename = "type")]
+    pub message_type: String,
+    /// Response payload
+    pub data: ParallelSingleTurnResponse,
+}
+
 #[cfg(test)]
 mod tests {
-    use super::SingleTurnResponseEnvelope;
+    use super::{ParallelSingleTurnResponseEnvelope, SingleTurnResponseEnvelope};
     use serde_json::json;
 
     #[test]
@@ -73,5 +90,33 @@ mod tests {
             envelope.data.failed_results[0][0].model_response,
             "unsafe reply"
         );
+    }
+
+    #[test]
+    fn parallel_single_turn_response_envelope_deserializes_from_protocol_shape() {
+        let value = json!({
+            "type": "parallel_single_turn_response",
+            "data": {
+                "results": {
+                    "model-a": {
+                        "total_passed": 5,
+                        "total_failed": 0,
+                        "failed_results": []
+                    },
+                    "model-b": {
+                        "total_passed": 4,
+                        "total_failed": 1,
+                        "failed_results": []
+                    }
+                }
+            }
+        });
+
+        let envelope: ParallelSingleTurnResponseEnvelope =
+            serde_json::from_value(value).expect("response envelope should deserialize");
+
+        assert_eq!(envelope.message_type, "parallel_single_turn_response");
+        assert_eq!(envelope.data.results["model-a"].total_passed, 5);
+        assert_eq!(envelope.data.results["model-b"].total_failed, 1);
     }
 }
