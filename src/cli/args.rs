@@ -80,7 +80,13 @@ pub enum Command {
 #[derive(clap::Args, Debug)]
 #[command(group(
     ArgGroup::new("api_queries")
-        .args(["monthly_quota", "validate_api_key", "test_case_groups"])
+        .args([
+            "monthly_quota",
+            "validate_api_key",
+            "test_case_groups",
+            "single_turn_evaluations",
+            "multi_turn_evaluations",
+        ])
         .required(true)
 ))]
 pub struct ApiCommand {
@@ -93,6 +99,7 @@ pub struct ApiCommand {
 }
 
 #[derive(clap::Args, Debug)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ApiQueryCommand {
     /// Display monthly quota usage
     #[arg(long = "monthly-quota", short = 'M')]
@@ -105,6 +112,22 @@ pub struct ApiQueryCommand {
     /// List accessible test case groups
     #[arg(long = "test-case-groups", short = 'T')]
     pub test_case_groups: bool,
+
+    /// List historic single-turn evaluation results
+    #[arg(long = "single-turn-evaluations")]
+    pub single_turn_evaluations: bool,
+
+    /// List historic multi-turn evaluation results
+    #[arg(long = "multi-turn-evaluations")]
+    pub multi_turn_evaluations: bool,
+
+    /// Maximum number of historic evaluation results to return
+    #[arg(long, value_parser = clap::value_parser!(u16).range(1..=100))]
+    pub limit: Option<u16>,
+
+    /// Number of historic evaluation results to skip
+    #[arg(long)]
+    pub offset: Option<u32>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -739,6 +762,91 @@ mod tests {
     }
 
     #[test]
+    fn parses_api_single_turn_evaluations_flag() {
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "api",
+            "--single-turn-evaluations",
+        ])
+        .expect("api --single-turn-evaluations should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => assert!(api.query.single_turn_evaluations),
+            _ => panic!("expected api command"),
+        }
+    }
+
+    #[test]
+    fn parses_api_multi_turn_evaluations_flag() {
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "api",
+            "--multi-turn-evaluations",
+        ])
+        .expect("api --multi-turn-evaluations should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => assert!(api.query.multi_turn_evaluations),
+            _ => panic!("expected api command"),
+        }
+    }
+
+    #[test]
+    fn parses_api_evaluations_pagination() {
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "api",
+            "--single-turn-evaluations",
+            "--limit",
+            "25",
+            "--offset",
+            "50",
+        ])
+        .expect("api evaluation pagination should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => {
+                assert_eq!(api.query.limit, Some(25));
+                assert_eq!(api.query.offset, Some(50));
+            }
+            _ => panic!("expected api command"),
+        }
+    }
+
+    #[test]
+    fn rejects_zero_api_evaluations_limit() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "api",
+            "--single-turn-evaluations",
+            "--limit",
+            "0",
+        ])
+        .expect_err("zero limit should be rejected");
+        assert_eq!(err.kind(), ErrorKind::ValueValidation);
+    }
+
+    #[test]
+    fn rejects_api_evaluations_limit_above_one_hundred() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "api",
+            "--single-turn-evaluations",
+            "--limit",
+            "101",
+        ])
+        .expect_err("limit above 100 should be rejected");
+        assert_eq!(err.kind(), ErrorKind::ValueValidation);
+    }
+
+    #[test]
     fn rejects_top_level_api_query_flag() {
         let err = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "--monthly-quota"])
             .expect_err("top-level --monthly-quota should be rejected");
@@ -823,6 +931,46 @@ mod tests {
     }
 
     #[test]
+    fn accepts_json_with_single_turn_evaluations() {
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "api",
+            "--single-turn-evaluations",
+            "--json",
+        ])
+        .expect("api --single-turn-evaluations --json should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => {
+                assert!(api.query.single_turn_evaluations);
+                assert!(api.json);
+            }
+            _ => panic!("expected api command"),
+        }
+    }
+
+    #[test]
+    fn accepts_json_with_multi_turn_evaluations() {
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "api",
+            "--multi-turn-evaluations",
+            "--json",
+        ])
+        .expect("api --multi-turn-evaluations --json should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => {
+                assert!(api.query.multi_turn_evaluations);
+                assert!(api.json);
+            }
+            _ => panic!("expected api command"),
+        }
+    }
+
+    #[test]
     fn parses_json_short_flag() {
         let args = Args::try_parse_from([
             "cbl",
@@ -850,6 +998,20 @@ mod tests {
             "--validate-api-key",
         ])
         .expect_err("two query flags together should be rejected");
+        assert_eq!(err.kind(), ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn rejects_evaluations_query_flag_conflict() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "api",
+            "--monthly-quota",
+            "--single-turn-evaluations",
+        ])
+        .expect_err("evaluation query flag should conflict with other query flags");
         assert_eq!(err.kind(), ErrorKind::ArgumentConflict);
     }
 
