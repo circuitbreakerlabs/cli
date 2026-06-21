@@ -15,8 +15,8 @@ use update_check::print_update_warning_if_needed;
 
 use chrono::Local;
 use clap::Parser;
-use evaluation_output::serialize_evaluation_output;
-use protocol_types::{MultiTurnRequest, SingleTurnRequest};
+use evaluation_output::{serialize_evaluation_output, serialize_rerun_evaluation_output};
+use protocol_types::{MultiTurnEvaluationRequest, SingleTurnEvaluationRequest};
 use ratatui::crossterm::style::{Attribute, Color, SetAttribute, SetForegroundColor};
 use response_provider::{CustomProvider, OllamaProvider, OpenAIProvider, ResponseProvider};
 use tui::{
@@ -99,7 +99,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             run_single_turn_evaluation(
                 websocket,
                 provider,
-                request,
+                request.into(),
                 cli_args.log_mode,
                 cli_args.output_file,
             )
@@ -109,7 +109,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             run_multi_turn_evaluation(
                 websocket,
                 provider,
-                request,
+                request.into(),
                 cli_args.log_mode,
                 cli_args.output_file,
             )
@@ -123,19 +123,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn run_single_turn_evaluation(
     websocket: WebSocketConnection,
     provider: Arc<dyn ResponseProvider>,
-    request: SingleTurnRequest,
+    request: SingleTurnEvaluationRequest,
     log_mode: bool,
     output_file: Option<PathBuf>,
 ) -> Result<(), RunEvaluationError> {
-    let test_case_groups = request.test_case_groups.clone();
+    let test_case_groups = request.test_case_groups().map(<[_]>::to_vec);
+    let test_result_id = request.test_result_id();
+    let maximum_iteration_layers = request.maximum_iteration_layers();
     let result = if log_mode {
         evaluations::singleturn::run_evaluation(websocket, provider, request, None).await?
     } else {
         let (tx, rx) = tokio::sync::mpsc::channel::<SingleTurnProgressIndicatorMessage>(128);
-        let render_handle = tokio::spawn(singleturn::render_task(
-            rx,
-            request.maximum_iteration_layers,
-        ));
+        let render_handle = tokio::spawn(singleturn::render_task(rx, maximum_iteration_layers));
 
         let result =
             evaluations::singleturn::run_evaluation(websocket, provider, request, Some(tx)).await?;
@@ -151,7 +150,14 @@ async fn run_single_turn_evaluation(
         ))
     });
 
-    let json = serialize_evaluation_output(&result, &test_case_groups)?;
+    let json = if let Some(test_result_id) = test_result_id {
+        serialize_rerun_evaluation_output(&result, test_result_id)?
+    } else {
+        serialize_evaluation_output(
+            &result,
+            &test_case_groups.expect("standard evaluation includes test case groups"),
+        )?
+    };
     std::fs::write(&filename, json)?;
 
     print_success_message(log_mode, "single", &filename);
@@ -163,11 +169,12 @@ async fn run_single_turn_evaluation(
 async fn run_multi_turn_evaluation(
     websocket: WebSocketConnection,
     provider: Arc<dyn ResponseProvider>,
-    request: MultiTurnRequest,
+    request: MultiTurnEvaluationRequest,
     log_mode: bool,
     output_file: Option<PathBuf>,
 ) -> Result<(), RunEvaluationError> {
-    let test_case_groups = request.test_case_groups.clone();
+    let test_case_groups = request.test_case_groups().map(<[_]>::to_vec);
+    let test_result_id = request.test_result_id();
     let result = if log_mode {
         evaluations::multiturn::run_evaluation(websocket, provider, request, None).await?
     } else {
@@ -188,7 +195,14 @@ async fn run_multi_turn_evaluation(
         ))
     });
 
-    let json = serialize_evaluation_output(&result, &test_case_groups)?;
+    let json = if let Some(test_result_id) = test_result_id {
+        serialize_rerun_evaluation_output(&result, test_result_id)?
+    } else {
+        serialize_evaluation_output(
+            &result,
+            &test_case_groups.expect("standard evaluation includes test case groups"),
+        )?
+    };
     std::fs::write(&filename, json)?;
 
     print_success_message(log_mode, "multi", &filename);

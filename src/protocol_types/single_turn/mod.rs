@@ -6,7 +6,12 @@ mod response;
 
 use super::common::{CompletionRequest, ConversationComplete, ConversationError};
 pub use optional::{IterationComplete, IterationStart, OptionalSingleTurnMessage};
-pub use request::{SingleTurnRequest, SingleTurnRequestEnvelope};
+pub use request::{
+    SingleTurnEvalRequest, SingleTurnEvaluationRequest, SingleTurnRequestEnvelope,
+    SingleTurnRerunRequestEnvelope,
+};
+#[cfg(test)]
+pub use request::{SingleTurnRequest, SingleTurnRerunRequest};
 pub use response::SingleTurnResponse;
 
 /// Messages that the server may send to the client during single-turn evaluation (Server -> Client).

@@ -5,6 +5,8 @@ use crate::protocol_types::ConversationId;
 /// Details of a failed single-turn test case.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FailedSingleTurnResult {
+    pub test_result_id: Option<i64>,
+    pub test_case_id: Option<i64>,
     /// The prompt that was tested
     pub user_input: String,
     /// Unique identifier for this conversation across this request
@@ -24,6 +26,19 @@ pub struct SingleTurnResponse {
     pub total_failed: i32,
     /// Details of each failed test case per iteration layer
     pub failed_results: Vec<Vec<FailedSingleTurnResult>>,
+    #[serde(default)]
+    pub results_by_iteration: Vec<Vec<SingleTurnEvaluationResult>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SingleTurnEvaluationResult {
+    pub test_result_id: i64,
+    pub test_case_id: Option<i64>,
+    pub user_input: String,
+    pub conversation_id: ConversationId,
+    pub model_response: String,
+    pub safe_response_score: f64,
+    pub passed: bool,
 }
 
 /// Server returns final single-turn evaluation results.
@@ -51,6 +66,8 @@ mod tests {
                 "failed_results": [
                     [
                         {
+                            "test_result_id": 42,
+                            "test_case_id": 7,
                             "user_input": "unsafe prompt",
                             "conversation_id": 2,
                             "model_response": "unsafe reply",
@@ -68,6 +85,8 @@ mod tests {
         assert_eq!(envelope.data.total_passed, 5);
         assert_eq!(envelope.data.total_failed, 1);
         assert_eq!(envelope.data.failed_results.len(), 1);
+        assert_eq!(envelope.data.failed_results[0][0].test_result_id, Some(42));
+        assert_eq!(envelope.data.failed_results[0][0].test_case_id, Some(7));
         assert_eq!(envelope.data.failed_results[0][0].conversation_id, 2);
         assert_eq!(
             envelope.data.failed_results[0][0].model_response,

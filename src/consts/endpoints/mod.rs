@@ -15,6 +15,36 @@ pub use validate_api_key::VALIDATE_API_KEY_ENDPOINT;
 pub fn endpoint_from_evaluation_type(eval: &crate::evaluations::EvaluationType) -> &str {
     match eval {
         crate::evaluations::EvaluationType::SingleTurn => singleturn::SINGLE_TURN_ENDPOINT,
+        crate::evaluations::EvaluationType::SingleTurnRerun => {
+            singleturn::SINGLE_TURN_RERUN_ENDPOINT
+        }
         crate::evaluations::EvaluationType::MultiTurn => multiturn::MULTI_TURN_ENDPOINT,
+        crate::evaluations::EvaluationType::MultiTurnRerun => multiturn::MULTI_TURN_RERUN_ENDPOINT,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::endpoint_from_evaluation_type;
+    use crate::evaluations::EvaluationType;
+
+    #[test]
+    fn evaluation_type_selects_standard_and_rerun_endpoints() {
+        assert_eq!(
+            endpoint_from_evaluation_type(&EvaluationType::SingleTurn),
+            "/ws/singleturn_evaluation"
+        );
+        assert_eq!(
+            endpoint_from_evaluation_type(&EvaluationType::SingleTurnRerun),
+            "/ws/singleturn_rerun_evaluation"
+        );
+        assert_eq!(
+            endpoint_from_evaluation_type(&EvaluationType::MultiTurn),
+            "/ws/multiturn_evaluation"
+        );
+        assert_eq!(
+            endpoint_from_evaluation_type(&EvaluationType::MultiTurnRerun),
+            "/ws/multiturn_rerun_evaluation"
+        );
     }
 }
