@@ -12,6 +12,15 @@ pub enum HttpApiError {
     #[error("JSON serialization error: {0}")]
     Serialize(#[from] serde_json::Error),
 
+    #[error("JSON decode error from {url}: {source}; response body length={body_len}; preview={body_preview:?}")]
+    Decode {
+        url: String,
+        #[source]
+        source: serde_json::Error,
+        body_len: usize,
+        body_preview: String,
+    },
+
     #[error("URL parse error: {0}")]
     Url(#[from] url::ParseError),
 }
@@ -175,7 +184,18 @@ async fn http_get_json<T: serde::de::DeserializeOwned>(
         return Err(HttpApiError::Status(status, body));
     }
 
-    Ok(response.json::<T>().await?)
+    let body = response.text().await?;
+    serde_json::from_str::<T>(&body).map_err(|source| HttpApiError::Decode {
+        url: url.to_string(),
+        body_len: body.len(),
+        body_preview: response_body_preview(&body),
+        source,
+    })
+}
+
+fn response_body_preview(body: &str) -> String {
+    const MAX_PREVIEW_CHARS: usize = 512;
+    body.chars().take(MAX_PREVIEW_CHARS).collect()
 }
 
 async fn run_monthly_quota(
@@ -309,7 +329,34 @@ struct HistoricEvaluationSummary {
     passed: Option<bool>,
     score: Option<f64>,
     model_response: Option<String>,
+    #[serde(deserialize_with = "deserialize_utc_datetime")]
     created_at: chrono::DateTime<chrono::Utc>,
+}
+
+fn deserialize_utc_datetime<'de, D>(
+    deserializer: D,
+) -> Result<chrono::DateTime<chrono::Utc>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error as _;
+
+    let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+    chrono::DateTime::parse_from_rfc3339(&value)
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+        .or_else(|_| {
+            chrono::NaiveDateTime::parse_from_str(&value, "%Y-%m-%dT%H:%M:%S%.f")
+                .map(|dt| dt.and_utc())
+        })
+        .or_else(|_| {
+            chrono::NaiveDateTime::parse_from_str(&value, "%Y-%m-%d %H:%M:%S%.f")
+                .map(|dt| dt.and_utc())
+        })
+        .map_err(|_| {
+            D::Error::custom(format!(
+                "invalid created_at '{value}': expected RFC3339 or YYYY-MM-DDTHH:MM:SS[.fraction]"
+            ))
+        })
 }
 
 #[derive(tabled::Tabled)]
@@ -499,5 +546,27 @@ mod tests {
         assert!(table.contains("0.123"));
         assert!(table.contains("hello"));
         assert!(table.contains('-'));
+    }
+
+    #[test]
+    fn historic_evaluation_summary_accepts_naive_created_at_timestamp() {
+        let value = serde_json::json!({
+            "test_result_id": 6,
+            "evaluation_id": 4,
+            "test_case_id": 3,
+            "initial_user_input": "hello",
+            "passed": false,
+            "score": 0.498,
+            "model_response": "response",
+            "created_at": "2026-06-22T17:02:36.928154"
+        });
+
+        let result: HistoricEvaluationSummary =
+            serde_json::from_value(value).expect("naive timestamp should deserialize as UTC");
+
+        assert_eq!(
+            result.created_at.to_rfc3339(),
+            "2026-06-22T17:02:36.928154+00:00"
+        );
     }
 }
