@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 /// Details of a failed multi-turn conversation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FailedMultiTurnResult {
+    pub test_result_id: Option<i64>,
+    pub test_case_id: Option<i64>,
     /// Lowest safety score in the conversation
     pub min_safe_response_score: f64,
     /// Unique identifier for this conversation across this request
@@ -22,6 +24,18 @@ pub struct MultiTurnResponse {
     pub total_failed: i32,
     /// Details of each failed conversation
     pub failed_results: Vec<FailedMultiTurnResult>,
+    #[serde(default)]
+    pub results: Vec<MultiTurnEvaluationResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiTurnEvaluationResult {
+    pub test_result_id: i64,
+    pub test_case_id: Option<i64>,
+    pub min_safe_response_score: f64,
+    pub conversation_id: ConversationId,
+    pub conversation: Vec<Message>,
+    pub passed: bool,
 }
 
 /// Server returns final multi-turn evaluation results.
@@ -48,6 +62,8 @@ mod tests {
                 "total_failed": 1,
                 "failed_results": [
                     {
+                        "test_result_id": 42,
+                        "test_case_id": 7,
                         "min_safe_response_score": 0.25,
                         "conversation_id": 7,
                         "conversation": [
@@ -66,6 +82,8 @@ mod tests {
         assert_eq!(envelope.data.total_passed, 3);
         assert_eq!(envelope.data.total_failed, 1);
         assert_eq!(envelope.data.failed_results.len(), 1);
+        assert_eq!(envelope.data.failed_results[0].test_result_id, Some(42));
+        assert_eq!(envelope.data.failed_results[0].test_case_id, Some(7));
         assert_eq!(envelope.data.failed_results[0].conversation_id, 7);
         assert_eq!(envelope.data.failed_results[0].conversation.len(), 2);
     }

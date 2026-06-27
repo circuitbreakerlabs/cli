@@ -1,8 +1,9 @@
 use super::EvaluationError;
 use super::engine::{self, EvaluationMode, ParsedIncoming};
 use crate::protocol_types::multi_turn::{
-    CategorizedMultiTurnMessage, MultiTurnReceivableMessage, MultiTurnRequest,
-    MultiTurnRequestEnvelope, MultiTurnResponse, OptionalMultiTurnMessage,
+    CategorizedMultiTurnMessage, MultiTurnEvaluationRequest, MultiTurnReceivableMessage,
+    MultiTurnRequestEnvelope, MultiTurnRerunRequestEnvelope, MultiTurnResponse,
+    OptionalMultiTurnMessage,
 };
 use crate::protocol_types::{self};
 use crate::response_provider::ResponseProvider;
@@ -19,13 +20,20 @@ struct MultiTurnMode {
 }
 
 impl EvaluationMode for MultiTurnMode {
-    type Request = MultiTurnRequest;
+    type Request = MultiTurnEvaluationRequest;
     type FinalResponse = MultiTurnResponse;
     type OptionalMessage = OptionalMultiTurnMessage;
     type ProgressMessage = MultiTurnProgressIndicatorMessage;
 
     fn serialize_request(&self, request: &Self::Request) -> Result<String, serde_json::Error> {
-        serde_json::to_string(&MultiTurnRequestEnvelope::from(request.clone()))
+        match request {
+            MultiTurnEvaluationRequest::Standard(request) => {
+                serde_json::to_string(&MultiTurnRequestEnvelope::from(request.clone()))
+            }
+            MultiTurnEvaluationRequest::Rerun(request) => {
+                serde_json::to_string(&MultiTurnRerunRequestEnvelope::from(request.clone()))
+            }
+        }
     }
 
     fn parse_text(
@@ -125,11 +133,11 @@ impl EvaluationMode for MultiTurnMode {
 pub async fn run_evaluation(
     websocket_connection: WebSocketConnection,
     provider: Arc<dyn ResponseProvider>,
-    request: MultiTurnRequest,
+    request: MultiTurnEvaluationRequest,
     progress_indicator: Option<mpsc::Sender<MultiTurnProgressIndicatorMessage>>,
 ) -> Result<MultiTurnResponse, EvaluationError> {
     let mode = MultiTurnMode {
-        max_turns: request.max_turns,
+        max_turns: request.max_turns(),
     };
 
     engine::run_evaluation(
@@ -149,7 +157,10 @@ mod tests {
         ControlledProvider, ProviderBehavior, recv_text_json, send_json, spawn_websocket_server,
     };
     use crate::protocol_types::common::{ConversationComplete, ConversationError};
-    use crate::protocol_types::multi_turn::{MultiTurnEvaluationStart, MultiTurnRequest};
+    use crate::protocol_types::multi_turn::{
+        MultiTurnEvaluationRequest, MultiTurnEvaluationStart, MultiTurnRequest,
+        MultiTurnRerunRequest,
+    };
     use crate::protocol_types::{self, Role};
     use crate::tui::MultiTurnProgressIndicatorMessage;
     use crate::tui::WaitingFor;
@@ -305,11 +316,11 @@ mod tests {
         let response = run_evaluation(
             websocket,
             provider,
-            MultiTurnRequest {
+            MultiTurnEvaluationRequest::Standard(MultiTurnRequest {
                 threshold: 0.5,
                 max_turns: 4,
                 test_case_groups: vec!["suicidal_ideation".to_string()],
-            },
+            }),
             None,
         )
         .await
@@ -322,6 +333,53 @@ mod tests {
         assert_eq!(response.total_passed, 1);
         assert_eq!(response.total_failed, 0);
         assert!(response.failed_results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn run_evaluation_sends_multi_turn_rerun_request() {
+        let provider = Arc::new(ControlledProvider::new(HashMap::new()));
+        let (websocket, server_handle) = spawn_websocket_server(|server_websocket| async move {
+            let (mut write, mut read) = server_websocket.split();
+
+            let initial_request = recv_text_json(&mut read).await;
+            assert_eq!(initial_request["type"], "multi_turn_rerun_request");
+            assert_eq!(initial_request["data"]["test_result_id"], 42);
+            assert_eq!(initial_request["data"]["max_turns"], 4);
+
+            send_json(
+                &mut write,
+                json!({
+                    "type": "multi_turn_response",
+                    "data": {
+                        "total_passed": 1,
+                        "total_failed": 0,
+                        "failed_results": []
+                    }
+                }),
+            )
+            .await;
+        })
+        .await;
+
+        let response = run_evaluation(
+            websocket,
+            provider,
+            MultiTurnEvaluationRequest::Rerun(MultiTurnRerunRequest {
+                test_result_id: 42,
+                threshold: 0.5,
+                max_turns: 4,
+            }),
+            None,
+        )
+        .await
+        .expect("multi-turn rerun evaluation should succeed");
+
+        server_handle
+            .await
+            .expect("multi-turn rerun server should finish");
+
+        assert_eq!(response.total_passed, 1);
+        assert_eq!(response.total_failed, 0);
     }
 
     #[tokio::test]
@@ -362,11 +420,11 @@ mod tests {
         let response = run_evaluation(
             websocket,
             provider,
-            MultiTurnRequest {
+            MultiTurnEvaluationRequest::Standard(MultiTurnRequest {
                 threshold: 0.5,
                 max_turns: 4,
                 test_case_groups: vec!["suicidal_ideation".to_string()],
-            },
+            }),
             None,
         )
         .await

@@ -3,4 +3,7 @@ mod args;
 mod headers;
 mod version;
 
-pub use args::{ApiCommand, Args, Command, EvaluationCommand, ProviderCommand};
+pub use args::{
+    ApiCommand, ApiEvaluationsCommand, ApiSubcommand, Args, Command, EvaluationCommand,
+    ProviderCommand, ReRunEvaluationCommand,
+};

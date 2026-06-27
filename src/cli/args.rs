@@ -1,5 +1,8 @@
 use super::headers::Headers;
-use crate::protocol_types::{MultiTurnRequest, SingleTurnRequest};
+use crate::protocol_types::{
+    MultiTurnEvalRequest, MultiTurnRerunEvalRequest, SingleTurnEvalRequest,
+    SingleTurnRerunEvalRequest,
+};
 use crate::response_provider::{CustomProviderConfig, OllamaProviderConfig, OpenAIProviderConfig};
 use clap::{ArgGroup, CommandFactory, Parser, Subcommand, ValueEnum};
 use reqwest::header::HeaderMap;
@@ -60,6 +63,10 @@ impl Args {
             ));
         }
 
+        if let Some(Command::Api(api)) = &self.command {
+            api.validate()?;
+        }
+
         Ok(())
     }
 }
@@ -78,21 +85,46 @@ pub enum Command {
 }
 
 #[derive(clap::Args, Debug)]
-#[command(group(
-    ArgGroup::new("api_queries")
-        .args(["monthly_quota", "validate_api_key", "test_case_groups"])
-        .required(true)
-))]
 pub struct ApiCommand {
     #[command(flatten)]
     pub query: ApiQueryCommand,
 
+    #[command(subcommand)]
+    pub command: Option<ApiSubcommand>,
+
     /// Output result in JSON format
-    #[arg(long, short = 'J', requires = "api_queries")]
+    #[arg(long, short = 'J', global = true)]
     pub json: bool,
 }
 
+impl ApiCommand {
+    fn validate(&self) -> Result<(), clap::Error> {
+        let query_count = [
+            self.query.monthly_quota,
+            self.query.validate_api_key,
+            self.query.test_case_groups,
+        ]
+        .into_iter()
+        .filter(|selected| *selected)
+        .count();
+        let action_count = query_count + usize::from(self.command.is_some());
+
+        match action_count {
+            0 => Err(Args::command().error(
+                clap::error::ErrorKind::MissingRequiredArgument,
+                "an API query flag or subcommand is required",
+            )),
+            1 => Ok(()),
+            _ => Err(Args::command().error(
+                clap::error::ErrorKind::ArgumentConflict,
+                "only one API query flag or subcommand can be used",
+            )),
+        }
+    }
+}
+
 #[derive(clap::Args, Debug)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ApiQueryCommand {
     /// Display monthly quota usage
     #[arg(long = "monthly-quota", short = 'M')]
@@ -108,13 +140,43 @@ pub struct ApiQueryCommand {
 }
 
 #[derive(Subcommand, Debug)]
+pub enum ApiSubcommand {
+    /// List historic evaluation results
+    Evaluations(ApiEvaluationsCommand),
+}
+
+#[derive(clap::Args, Debug)]
+#[command(group(
+    ArgGroup::new("evaluation_type")
+        .args(["single_turn", "multi_turn"])
+        .required(true)
+))]
+pub struct ApiEvaluationsCommand {
+    /// List historic single-turn evaluation results
+    #[arg(long = "single-turn")]
+    pub single_turn: bool,
+
+    /// List historic multi-turn evaluation results
+    #[arg(long = "multi-turn")]
+    pub multi_turn: bool,
+
+    /// Maximum number of historic evaluation results to return
+    #[arg(long, value_parser = clap::value_parser!(u16).range(1..=100))]
+    pub limit: Option<u16>,
+
+    /// Number of historic evaluation results to skip
+    #[arg(long)]
+    pub offset: Option<u32>,
+}
+
+#[derive(Subcommand, Debug)]
 pub enum EvaluationCommand {
     /// Run single-turn evaluation
     SingleTurn {
         #[command(subcommand)]
         provider: ProviderCommand,
         #[command(flatten)]
-        request: SingleTurnRequest,
+        request: SingleTurnEvalRequest,
     },
 
     /// Run multi-turn evaluation
@@ -122,7 +184,32 @@ pub enum EvaluationCommand {
         #[command(subcommand)]
         provider: ProviderCommand,
         #[command(flatten)]
-        request: MultiTurnRequest,
+        request: MultiTurnEvalRequest,
+    },
+
+    /// Re-run a historic evaluation result
+    ReRun {
+        #[command(subcommand)]
+        rerun: ReRunEvaluationCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ReRunEvaluationCommand {
+    /// Re-run a historic single-turn evaluation result
+    SingleTurn {
+        #[command(subcommand)]
+        provider: ProviderCommand,
+        #[command(flatten)]
+        request: SingleTurnRerunEvalRequest,
+    },
+
+    /// Re-run a historic multi-turn evaluation result
+    MultiTurn {
+        #[command(subcommand)]
+        provider: ProviderCommand,
+        #[command(flatten)]
+        request: MultiTurnRerunEvalRequest,
     },
 }
 
@@ -197,7 +284,10 @@ mod tests {
                     assert_eq!(request.maximum_iteration_layers, 2);
                     assert_eq!(request.test_case_groups, vec!["suicidal_ideation"]);
                 }
-                _ => panic!("expected single-turn command"),
+                super::EvaluationCommand::MultiTurn { .. } => {
+                    panic!("expected single-turn command")
+                }
+                super::EvaluationCommand::ReRun { .. } => panic!("expected single-turn command"),
             },
             _ => panic!("expected eval command"),
         }
@@ -381,7 +471,10 @@ mod tests {
                 super::EvaluationCommand::SingleTurn { request, .. } => {
                     assert_eq!(request.maximum_iteration_layers, 0);
                 }
-                _ => panic!("expected single-turn command"),
+                super::EvaluationCommand::MultiTurn { .. } => {
+                    panic!("expected single-turn command")
+                }
+                super::EvaluationCommand::ReRun { .. } => panic!("expected single-turn command"),
             },
             _ => panic!("expected eval command"),
         }
@@ -479,7 +572,10 @@ mod tests {
                     assert_eq!(request.max_turns, 4);
                     assert_eq!(request.test_case_groups, vec!["suicidal_ideation"]);
                 }
-                _ => panic!("expected multi-turn command"),
+                super::EvaluationCommand::SingleTurn { .. } => {
+                    panic!("expected multi-turn command")
+                }
+                super::EvaluationCommand::ReRun { .. } => panic!("expected multi-turn command"),
             },
             _ => panic!("expected eval command"),
         }
@@ -595,7 +691,136 @@ mod tests {
         .expect_err("missing test case groups should be rejected");
 
         assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
-        assert!(err.to_string().contains("--test-case-groups"));
+    }
+
+    #[test]
+    fn parses_valid_single_turn_rerun_command() {
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "eval",
+            "re-run",
+            "single-turn",
+            "--threshold",
+            "0.5",
+            "--variations",
+            "2",
+            "--maximum-iteration-layers",
+            "1",
+            "--test-result-id",
+            "42",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect("single-turn rerun args should parse");
+
+        match args.command {
+            Some(super::Command::Eval { evaluation }) => match evaluation {
+                super::EvaluationCommand::ReRun { rerun } => match rerun {
+                    super::ReRunEvaluationCommand::SingleTurn { request, .. } => {
+                        assert_eq!(request.test_result_id, 42);
+                        assert!((request.threshold - 0.5).abs() < f32::EPSILON);
+                        assert_eq!(request.variations, 2);
+                        assert_eq!(request.maximum_iteration_layers, 1);
+                    }
+                    super::ReRunEvaluationCommand::MultiTurn { .. } => {
+                        panic!("expected single-turn rerun command")
+                    }
+                },
+                super::EvaluationCommand::SingleTurn { .. }
+                | super::EvaluationCommand::MultiTurn { .. } => panic!("expected rerun command"),
+            },
+            _ => panic!("expected eval command"),
+        }
+    }
+
+    #[test]
+    fn rejects_single_turn_test_result_id_outside_rerun_subcommand() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "eval",
+            "single-turn",
+            "--threshold",
+            "0.5",
+            "--variations",
+            "2",
+            "--maximum-iteration-layers",
+            "1",
+            "--test-case-groups",
+            "suicidal_ideation",
+            "--test-result-id",
+            "42",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect_err("standard single-turn should not accept test_result_id");
+
+        assert_eq!(err.kind(), ErrorKind::UnknownArgument);
+    }
+
+    #[test]
+    fn rejects_non_positive_single_turn_test_result_id() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "eval",
+            "re-run",
+            "single-turn",
+            "--threshold",
+            "0.5",
+            "--variations",
+            "2",
+            "--maximum-iteration-layers",
+            "1",
+            "--test-result-id",
+            "0",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect_err("test_result_id should be rejected");
+
+        assert_eq!(err.kind(), ErrorKind::ValueValidation);
+        assert!(err.to_string().contains("expected an integer >= 1"));
+    }
+
+    #[test]
+    fn rejects_non_positive_multi_turn_test_result_id() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "eval",
+            "re-run",
+            "multi-turn",
+            "--threshold",
+            "0.5",
+            "--max-turns",
+            "4",
+            "--test-result-id",
+            "0",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect_err("test_result_id should be rejected");
+
+        assert_eq!(err.kind(), ErrorKind::ValueValidation);
+        assert!(err.to_string().contains("expected an integer >= 1"));
     }
 
     #[test]
@@ -605,6 +830,7 @@ mod tests {
             "--cbl-api-key",
             "cbl-key",
             "eval",
+            "re-run",
             "multi-turn",
             "--threshold",
             "0.5",
@@ -619,7 +845,75 @@ mod tests {
         .expect_err("missing test case groups should be rejected");
 
         assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
-        assert!(err.to_string().contains("--test-case-groups"));
+    }
+
+    #[test]
+    fn parses_valid_multi_turn_rerun_command() {
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "eval",
+            "re-run",
+            "multi-turn",
+            "--threshold",
+            "0.5",
+            "--max-turns",
+            "4",
+            "--test-result-id",
+            "42",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect("multi-turn rerun args should parse");
+
+        match args.command {
+            Some(super::Command::Eval { evaluation }) => match evaluation {
+                super::EvaluationCommand::ReRun { rerun } => match rerun {
+                    super::ReRunEvaluationCommand::MultiTurn { request, .. } => {
+                        assert_eq!(request.test_result_id, 42);
+                        assert!((request.threshold - 0.5).abs() < f32::EPSILON);
+                        assert_eq!(request.max_turns, 4);
+                    }
+                    super::ReRunEvaluationCommand::SingleTurn { .. } => {
+                        panic!("expected multi-turn rerun command")
+                    }
+                },
+                super::EvaluationCommand::SingleTurn { .. }
+                | super::EvaluationCommand::MultiTurn { .. } => panic!("expected rerun command"),
+            },
+            _ => panic!("expected eval command"),
+        }
+    }
+
+    #[test]
+    fn rejects_multi_turn_test_result_id_outside_rerun_subcommand() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "eval",
+            "multi-turn",
+            "--threshold",
+            "0.5",
+            "--max-turns",
+            "4",
+            "--test-case-groups",
+            "suicidal_ideation",
+            "--test-result-id",
+            "42",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect_err("standard multi-turn should not accept test_result_id");
+
+        assert_eq!(err.kind(), ErrorKind::UnknownArgument);
     }
 
     #[test]
@@ -739,6 +1033,133 @@ mod tests {
     }
 
     #[test]
+    fn parses_api_single_turn_evaluations_subcommand() {
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "api",
+            "evaluations",
+            "--single-turn",
+        ])
+        .expect("api evaluations --single-turn should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => match api.command {
+                Some(super::ApiSubcommand::Evaluations(evaluations)) => {
+                    assert!(evaluations.single_turn);
+                    assert!(!evaluations.multi_turn);
+                }
+                _ => panic!("expected api evaluations command"),
+            },
+            _ => panic!("expected api command"),
+        }
+    }
+
+    #[test]
+    fn parses_api_multi_turn_evaluations_subcommand() {
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "api",
+            "evaluations",
+            "--multi-turn",
+        ])
+        .expect("api evaluations --multi-turn should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => match api.command {
+                Some(super::ApiSubcommand::Evaluations(evaluations)) => {
+                    assert!(!evaluations.single_turn);
+                    assert!(evaluations.multi_turn);
+                }
+                _ => panic!("expected api evaluations command"),
+            },
+            _ => panic!("expected api command"),
+        }
+    }
+
+    #[test]
+    fn parses_api_evaluations_pagination() {
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "api",
+            "evaluations",
+            "--multi-turn",
+            "--limit",
+            "25",
+            "--offset",
+            "50",
+        ])
+        .expect("api evaluation pagination should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => match api.command {
+                Some(super::ApiSubcommand::Evaluations(evaluations)) => {
+                    assert_eq!(evaluations.limit, Some(25));
+                    assert_eq!(evaluations.offset, Some(50));
+                }
+                _ => panic!("expected api evaluations command"),
+            },
+            _ => panic!("expected api command"),
+        }
+    }
+
+    #[test]
+    fn rejects_zero_api_evaluations_limit() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "api",
+            "evaluations",
+            "--single-turn",
+            "--limit",
+            "0",
+        ])
+        .expect_err("zero limit should be rejected");
+        assert_eq!(err.kind(), ErrorKind::ValueValidation);
+    }
+
+    #[test]
+    fn rejects_api_evaluations_limit_above_one_hundred() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "api",
+            "evaluations",
+            "--single-turn",
+            "--limit",
+            "101",
+        ])
+        .expect_err("limit above 100 should be rejected");
+        assert_eq!(err.kind(), ErrorKind::ValueValidation);
+    }
+
+    #[test]
+    fn rejects_api_evaluations_without_type() {
+        let err = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "api", "evaluations"])
+            .expect_err("evaluation type should be required");
+        assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn rejects_api_evaluations_with_two_types() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "api",
+            "evaluations",
+            "--single-turn",
+            "--multi-turn",
+        ])
+        .expect_err("evaluation types should conflict");
+        assert_eq!(err.kind(), ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
     fn rejects_top_level_api_query_flag() {
         let err = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "--monthly-quota"])
             .expect_err("top-level --monthly-quota should be rejected");
@@ -747,7 +1168,10 @@ mod tests {
 
     #[test]
     fn rejects_json_without_query_flag() {
-        let err = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "api", "--json"])
+        let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "api", "--json"])
+            .expect("--json alone parses before validation");
+        let err = args
+            .validate()
             .expect_err("--json alone should be rejected");
         assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
     }
@@ -823,6 +1247,54 @@ mod tests {
     }
 
     #[test]
+    fn accepts_json_with_single_turn_evaluations() {
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "api",
+            "evaluations",
+            "--single-turn",
+            "--json",
+        ])
+        .expect("api evaluations --single-turn --json should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => {
+                assert!(matches!(
+                    api.command,
+                    Some(super::ApiSubcommand::Evaluations(_))
+                ));
+                assert!(api.json);
+            }
+            _ => panic!("expected api command"),
+        }
+    }
+
+    #[test]
+    fn accepts_json_with_multi_turn_evaluations() {
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "api",
+            "evaluations",
+            "--multi-turn",
+            "--json",
+        ])
+        .expect("api evaluations --multi-turn --json should parse");
+        match args.command {
+            Some(super::Command::Api(api)) => {
+                assert!(matches!(
+                    api.command,
+                    Some(super::ApiSubcommand::Evaluations(_))
+                ));
+                assert!(api.json);
+            }
+            _ => panic!("expected api command"),
+        }
+    }
+
+    #[test]
     fn parses_json_short_flag() {
         let args = Args::try_parse_from([
             "cbl",
@@ -841,7 +1313,7 @@ mod tests {
 
     #[test]
     fn rejects_two_query_flags() {
-        let err = Args::try_parse_from([
+        let args = Args::try_parse_from([
             "cbl",
             "--cbl-api-key",
             "key",
@@ -849,7 +1321,28 @@ mod tests {
             "--monthly-quota",
             "--validate-api-key",
         ])
-        .expect_err("two query flags together should be rejected");
+        .expect("API query flag conflict parses before validation");
+        let err = args
+            .validate()
+            .expect_err("two query flags together should be rejected");
+        assert_eq!(err.kind(), ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn rejects_evaluations_query_flag_conflict() {
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "key",
+            "api",
+            "--monthly-quota",
+            "evaluations",
+            "--single-turn",
+        ])
+        .expect("API action conflict parses before validation");
+        let err = args
+            .validate()
+            .expect_err("evaluation subcommand should conflict with other query flags");
         assert_eq!(err.kind(), ErrorKind::ArgumentConflict);
     }
 

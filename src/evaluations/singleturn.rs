@@ -1,8 +1,9 @@
 use super::EvaluationError;
 use super::engine::{self, EvaluationMode, ParsedIncoming};
 use crate::protocol_types::single_turn::{
-    CategorizedSingleTurnMessage, OptionalSingleTurnMessage, SingleTurnReceivableMessage,
-    SingleTurnRequest, SingleTurnRequestEnvelope, SingleTurnResponse,
+    CategorizedSingleTurnMessage, OptionalSingleTurnMessage, SingleTurnEvaluationRequest,
+    SingleTurnReceivableMessage, SingleTurnRequestEnvelope, SingleTurnRerunRequestEnvelope,
+    SingleTurnResponse,
 };
 use crate::protocol_types::{self};
 use crate::response_provider::ResponseProvider;
@@ -17,13 +18,20 @@ use tokio::sync::mpsc;
 struct SingleTurnMode;
 
 impl EvaluationMode for SingleTurnMode {
-    type Request = SingleTurnRequest;
+    type Request = SingleTurnEvaluationRequest;
     type FinalResponse = SingleTurnResponse;
     type OptionalMessage = OptionalSingleTurnMessage;
     type ProgressMessage = SingleTurnProgressIndicatorMessage;
 
     fn serialize_request(&self, request: &Self::Request) -> Result<String, serde_json::Error> {
-        serde_json::to_string(&SingleTurnRequestEnvelope::from(request.clone()))
+        match request {
+            SingleTurnEvaluationRequest::Standard(request) => {
+                serde_json::to_string(&SingleTurnRequestEnvelope::from(request.clone()))
+            }
+            SingleTurnEvaluationRequest::Rerun(request) => {
+                serde_json::to_string(&SingleTurnRerunRequestEnvelope::from(request.clone()))
+            }
+        }
     }
 
     fn parse_text(
@@ -123,7 +131,7 @@ impl EvaluationMode for SingleTurnMode {
 pub async fn run_evaluation(
     websocket_connection: WebSocketConnection,
     provider: Arc<dyn ResponseProvider>,
-    request: SingleTurnRequest,
+    request: SingleTurnEvaluationRequest,
     progress_indicator: Option<mpsc::Sender<SingleTurnProgressIndicatorMessage>>,
 ) -> Result<SingleTurnResponse, EvaluationError> {
     engine::run_evaluation(
@@ -146,7 +154,8 @@ mod tests {
     };
     use crate::protocol_types::common::{ConversationComplete, ConversationError, ServerErrorCode};
     use crate::protocol_types::single_turn::{
-        IterationComplete, IterationStart, SingleTurnRequest,
+        IterationComplete, IterationStart, SingleTurnEvaluationRequest, SingleTurnRequest,
+        SingleTurnRerunRequest,
     };
     use crate::protocol_types::{self, Role};
     use crate::response_provider::ProviderError;
@@ -320,12 +329,12 @@ mod tests {
         let response = run_evaluation(
             websocket,
             provider,
-            SingleTurnRequest {
+            SingleTurnEvaluationRequest::Standard(SingleTurnRequest {
                 threshold: 0.5,
                 variations: 2,
                 maximum_iteration_layers: 1,
                 test_case_groups: vec!["suicidal_ideation".to_string()],
-            },
+            }),
             None,
         )
         .await
@@ -338,6 +347,54 @@ mod tests {
         assert_eq!(response.total_passed, 2);
         assert_eq!(response.total_failed, 0);
         assert!(response.failed_results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn run_evaluation_sends_single_turn_rerun_request() {
+        let provider = Arc::new(ControlledProvider::new(HashMap::new()));
+        let (websocket, server_handle) = spawn_websocket_server(|server_websocket| async move {
+            let (mut write, mut read) = server_websocket.split();
+
+            let initial_request = recv_text_json(&mut read).await;
+            assert_eq!(initial_request["type"], "single_turn_rerun_request");
+            assert_eq!(initial_request["data"]["test_result_id"], 42);
+            assert_eq!(initial_request["data"]["threshold"], 0.5);
+
+            send_json(
+                &mut write,
+                json!({
+                    "type": "single_turn_response",
+                    "data": {
+                        "total_passed": 1,
+                        "total_failed": 0,
+                        "failed_results": []
+                    }
+                }),
+            )
+            .await;
+        })
+        .await;
+
+        let response = run_evaluation(
+            websocket,
+            provider,
+            SingleTurnEvaluationRequest::Rerun(SingleTurnRerunRequest {
+                test_result_id: 42,
+                threshold: 0.5,
+                variations: 2,
+                maximum_iteration_layers: 1,
+            }),
+            None,
+        )
+        .await
+        .expect("single-turn rerun evaluation should succeed");
+
+        server_handle
+            .await
+            .expect("single-turn rerun server should finish");
+
+        assert_eq!(response.total_passed, 1);
+        assert_eq!(response.total_failed, 0);
     }
 
     #[tokio::test]
@@ -371,12 +428,12 @@ mod tests {
         let error = run_evaluation(
             websocket,
             provider,
-            SingleTurnRequest {
+            SingleTurnEvaluationRequest::Standard(SingleTurnRequest {
                 threshold: 0.5,
                 variations: 2,
                 maximum_iteration_layers: 1,
                 test_case_groups: vec!["suicidal_ideation".to_string()],
-            },
+            }),
             None,
         )
         .await
@@ -445,12 +502,12 @@ mod tests {
         let response = run_evaluation(
             websocket,
             provider,
-            SingleTurnRequest {
+            SingleTurnEvaluationRequest::Standard(SingleTurnRequest {
                 threshold: 0.5,
                 variations: 2,
                 maximum_iteration_layers: 1,
                 test_case_groups: vec!["suicidal_ideation".to_string()],
-            },
+            }),
             None,
         )
         .await
@@ -486,12 +543,12 @@ mod tests {
         let error = run_evaluation(
             websocket,
             provider,
-            SingleTurnRequest {
+            SingleTurnEvaluationRequest::Standard(SingleTurnRequest {
                 threshold: 0.5,
                 variations: 2,
                 maximum_iteration_layers: 1,
                 test_case_groups: vec!["suicidal_ideation".to_string()],
-            },
+            }),
             None,
         )
         .await

@@ -1,6 +1,8 @@
 use crate::{cli, consts};
 use thiserror::Error;
 
+mod evaluations;
+
 #[derive(Error, Debug)]
 pub enum HttpApiError {
     #[error("HTTP request error: {0}")]
@@ -11,6 +13,9 @@ pub enum HttpApiError {
 
     #[error("JSON serialization error: {0}")]
     Serialize(#[from] serde_json::Error),
+
+    #[error("URL parse error: {0}")]
+    Url(#[from] url::ParseError),
 }
 
 pub async fn handle(
@@ -31,7 +36,18 @@ pub async fn handle(
         return run_test_case_groups(ws_base_url, api_key, log_mode, command.json).await;
     }
 
-    unreachable!("clap requires one API query flag");
+    if let Some(cli::ApiSubcommand::Evaluations(evaluation_command)) = &command.command {
+        return evaluations::run(
+            evaluation_command,
+            ws_base_url,
+            api_key,
+            log_mode,
+            command.json,
+        )
+        .await;
+    }
+
+    unreachable!("validated CLI args require one API action");
 }
 
 fn http_base_url(ws_base_url: &str) -> String {
@@ -50,6 +66,21 @@ fn build_http_url(ws_base_url: &str, endpoint: &str) -> String {
         http_base_url(ws_base_url).trim_end_matches('/'),
         endpoint.trim_start_matches('/')
     )
+}
+
+pub(super) fn build_http_url_with_pagination(
+    ws_base_url: &str,
+    endpoint: &str,
+    limit: Option<u16>,
+    offset: Option<u32>,
+) -> Result<String, HttpApiError> {
+    let mut url = url::Url::parse(&build_http_url(ws_base_url, endpoint))?;
+    {
+        let mut pairs = url.query_pairs_mut();
+        pairs.append_pair("limit", &limit.unwrap_or(50).to_string());
+        pairs.append_pair("offset", &offset.unwrap_or(0).to_string());
+    }
+    Ok(url.to_string())
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -113,7 +144,7 @@ fn build_quota_table(quota: &MonthlyQuotaResponse) -> String {
     .to_string()
 }
 
-async fn http_get_json<T: serde::de::DeserializeOwned>(
+pub(super) async fn http_get_json<T: serde::de::DeserializeOwned>(
     url: &str,
     api_key: &str,
 ) -> Result<T, HttpApiError> {
