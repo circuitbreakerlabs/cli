@@ -1,4 +1,6 @@
-use super::super::common::{TestCaseGroup, parse_test_case_group};
+use super::super::common::{
+    TestCaseGroup, TestResultIds, parse_test_case_group, parse_test_result_ids,
+};
 use serde::{Deserialize, Serialize};
 
 pub(crate) fn parse_threshold(value: &str) -> Result<f32, String> {
@@ -23,19 +25,6 @@ pub(crate) fn parse_even_turn_count(value: &str) -> Result<usize, String> {
     } else {
         Err(format!(
             "invalid max_turns '{value}': expected an even integer between 2 and 20",
-        ))
-    }
-}
-
-pub(crate) fn parse_test_result_id(value: &str) -> Result<i64, String> {
-    let parsed: i64 = value
-        .parse()
-        .map_err(|_| format!("invalid test_result_id '{value}': expected an integer >= 1"))?;
-    if parsed >= 1 {
-        Ok(parsed)
-    } else {
-        Err(format!(
-            "invalid test_result_id '{value}': expected an integer >= 1",
         ))
     }
 }
@@ -71,9 +60,9 @@ pub struct MultiTurnRerunEvalRequest {
         allow_hyphen_values = true
     )]
     pub max_turns: usize,
-    /// Historic test result ID to re-run
-    #[arg(long, value_parser = parse_test_result_id)]
-    pub test_result_id: i64,
+    /// Comma-separated historic test result IDs to re-run
+    #[arg(long, value_parser = parse_test_result_ids, allow_hyphen_values = true)]
+    pub test_result_ids: TestResultIds,
 }
 
 /// Payload for `MultiTurnRequestEnvelope` messages (Client -> Server).
@@ -89,7 +78,7 @@ pub struct MultiTurnRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MultiTurnRerunRequest {
-    pub test_result_id: i64,
+    pub test_result_ids: Vec<i64>,
     pub threshold: f32,
     pub max_turns: usize,
 }
@@ -115,10 +104,10 @@ impl MultiTurnEvaluationRequest {
         }
     }
 
-    pub fn test_result_id(&self) -> Option<i64> {
+    pub fn test_result_ids(&self) -> Option<&[i64]> {
         match self {
             MultiTurnEvaluationRequest::Standard(_) => None,
-            MultiTurnEvaluationRequest::Rerun(request) => Some(request.test_result_id),
+            MultiTurnEvaluationRequest::Rerun(request) => Some(&request.test_result_ids),
         }
     }
 }
@@ -136,7 +125,7 @@ impl From<MultiTurnEvalRequest> for MultiTurnEvaluationRequest {
 impl From<MultiTurnRerunEvalRequest> for MultiTurnEvaluationRequest {
     fn from(request: MultiTurnRerunEvalRequest) -> Self {
         MultiTurnEvaluationRequest::Rerun(MultiTurnRerunRequest {
-            test_result_id: request.test_result_id,
+            test_result_ids: request.test_result_ids.into(),
             threshold: request.threshold,
             max_turns: request.max_turns,
         })
@@ -221,7 +210,7 @@ mod tests {
     #[test]
     fn multi_turn_rerun_request_envelope_serializes_to_protocol_shape() {
         let envelope = MultiTurnRerunRequestEnvelope::from(MultiTurnRerunRequest {
-            test_result_id: 42,
+            test_result_ids: vec![42, 43],
             threshold: 0.5,
             max_turns: 6,
         });
@@ -234,7 +223,7 @@ mod tests {
                 "version": crate::consts::version::PROTOCOL_VERSION,
                 "type": "multi_turn_rerun_request",
                 "data": {
-                    "test_result_id": 42,
+                    "test_result_ids": [42, 43],
                     "threshold": 0.5,
                     "max_turns": 6
                 }

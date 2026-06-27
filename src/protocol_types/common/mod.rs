@@ -5,7 +5,7 @@ mod optional;
 
 pub use common::{
     CompletionRequest, CompletionResponse, CompletionResponseEnvelope, ConversationId, Message,
-    Role, TestCaseGroup, parse_test_case_group,
+    Role, TestCaseGroup, TestResultIds, parse_test_case_group, parse_test_result_ids,
 };
 pub use errors::{CompletionError, CompletionErrorEnvelope, ServerErrorCode};
 pub use optional::{ConversationComplete, ConversationError};

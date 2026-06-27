@@ -1,9 +1,25 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 pub type ConversationId = i32;
 
 /// Test case group identifier
 pub type TestCaseGroup = String;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TestResultIds(Vec<i64>);
+
+impl TestResultIds {
+    pub fn as_slice(&self) -> &[i64] {
+        &self.0
+    }
+}
+
+impl Into<Vec<i64>> for TestResultIds {
+    fn into(self) -> Vec<i64> {
+        self.0
+    }
+}
 
 pub fn parse_test_case_group(value: &str) -> Result<TestCaseGroup, String> {
     let value = value.trim();
@@ -14,6 +30,48 @@ pub fn parse_test_case_group(value: &str) -> Result<TestCaseGroup, String> {
     }
 
     Ok(value.to_string())
+}
+
+pub fn parse_test_result_ids(value: &str) -> Result<TestResultIds, String> {
+    let mut ids = Vec::new();
+    let mut seen = HashSet::new();
+
+    for raw_id in value.split(',') {
+        let trimmed = raw_id.trim();
+        if trimmed.is_empty() {
+            return Err(format!(
+                "invalid test_result_ids '{value}': expected comma-separated integers >= 1 without duplicates",
+            ));
+        }
+
+        let parsed: i64 = trimmed.parse().map_err(|_| {
+            format!(
+                "invalid test_result_ids '{value}': expected comma-separated integers >= 1 without duplicates",
+            )
+        })?;
+
+        if parsed < 1 {
+            return Err(format!(
+                "invalid test_result_ids '{value}': expected comma-separated integers >= 1 without duplicates",
+            ));
+        }
+
+        if !seen.insert(parsed) {
+            return Err(format!(
+                "invalid test_result_ids '{value}': expected comma-separated integers >= 1 without duplicates",
+            ));
+        }
+
+        ids.push(parsed);
+    }
+
+    if ids.is_empty() {
+        return Err(format!(
+            "invalid test_result_ids '{value}': expected comma-separated integers >= 1 without duplicates",
+        ));
+    }
+
+    Ok(TestResultIds(ids))
 }
 
 /// Role of a message participant in the conversation.
@@ -85,7 +143,7 @@ impl From<CompletionResponse> for CompletionResponseEnvelope {
 mod tests {
     use super::{
         CompletionRequestEnvelope, CompletionResponse, CompletionResponseEnvelope, TestCaseGroup,
-        parse_test_case_group,
+        TestResultIds, parse_test_case_group, parse_test_result_ids,
     };
     use serde_json::json;
 
@@ -151,5 +209,23 @@ mod tests {
         assert_eq!(known, "suicidal_ideation");
         assert_eq!(custom, "custom_group");
         assert!(parse_test_case_group("  ").is_err());
+    }
+
+    #[test]
+    fn comma_separated_test_result_ids_parse_in_order() {
+        assert_eq!(
+            parse_test_result_ids("42, 43,44").expect("test result IDs should parse"),
+            TestResultIds(vec![42, 43, 44])
+        );
+    }
+
+    #[test]
+    fn invalid_test_result_ids_are_rejected() {
+        for value in ["", "0", "-1", "abc", "1,,2", "1,1"] {
+            let error =
+                parse_test_result_ids(value).expect_err("invalid test result IDs should fail");
+            assert!(error.contains("test_result_ids"));
+            assert!(error.contains("comma-separated integers >= 1"));
+        }
     }
 }
