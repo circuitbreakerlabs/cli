@@ -357,7 +357,7 @@ mod tests {
 
             let initial_request = recv_text_json(&mut read).await;
             assert_eq!(initial_request["type"], "single_turn_rerun_request");
-            assert_eq!(initial_request["data"]["test_result_id"], 42);
+            assert_eq!(initial_request["data"]["test_result_ids"], json!([42, 43]));
             assert_eq!(initial_request["data"]["threshold"], 0.5);
 
             send_json(
@@ -379,7 +379,7 @@ mod tests {
             websocket,
             provider,
             SingleTurnEvaluationRequest::Rerun(SingleTurnRerunRequest {
-                test_result_id: 42,
+                test_result_ids: vec![42, 43],
                 threshold: 0.5,
                 variations: 2,
                 maximum_iteration_layers: 1,

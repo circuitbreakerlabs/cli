@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use super::super::common::{TestCaseGroup, parse_test_case_group};
+use super::super::common::{
+    TestCaseGroup, TestResultIds, parse_test_case_group, parse_test_result_ids,
+};
 
 pub(crate) fn parse_threshold(value: &str) -> Result<f32, String> {
     let threshold: f32 = value
@@ -37,19 +39,6 @@ pub(crate) fn parse_maximum_iteration_layers(value: &str) -> Result<i32, String>
     } else {
         Err(format!(
             "invalid maximum_iteration_layers '{value}': expected an integer between 0 and 2",
-        ))
-    }
-}
-
-pub(crate) fn parse_test_result_id(value: &str) -> Result<i64, String> {
-    let parsed: i64 = value
-        .parse()
-        .map_err(|_| format!("invalid test_result_id '{value}': expected an integer >= 1"))?;
-    if parsed >= 1 {
-        Ok(parsed)
-    } else {
-        Err(format!(
-            "invalid test_result_id '{value}': expected an integer >= 1",
         ))
     }
 }
@@ -91,9 +80,9 @@ pub struct SingleTurnRerunEvalRequest {
         allow_hyphen_values = true
     )]
     pub maximum_iteration_layers: i32,
-    /// Historic test result ID to re-run
-    #[arg(long, value_parser = parse_test_result_id)]
-    pub test_result_id: i64,
+    /// Comma-separated historic test result IDs to re-run
+    #[arg(long, value_parser = parse_test_result_ids, allow_hyphen_values = true)]
+    pub test_result_ids: TestResultIds,
 }
 
 /// Payload for `SingleTurnRequestEnvelope` messages (Client -> Server).
@@ -111,7 +100,7 @@ pub struct SingleTurnRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SingleTurnRerunRequest {
-    pub test_result_id: i64,
+    pub test_result_ids: Vec<i64>,
     pub threshold: f32,
     pub variations: i32,
     pub maximum_iteration_layers: i32,
@@ -138,10 +127,10 @@ impl SingleTurnEvaluationRequest {
         }
     }
 
-    pub fn test_result_id(&self) -> Option<i64> {
+    pub fn test_result_ids(&self) -> Option<&[i64]> {
         match self {
             SingleTurnEvaluationRequest::Standard(_) => None,
-            SingleTurnEvaluationRequest::Rerun(request) => Some(request.test_result_id),
+            SingleTurnEvaluationRequest::Rerun(request) => Some(&request.test_result_ids),
         }
     }
 }
@@ -160,7 +149,7 @@ impl From<SingleTurnEvalRequest> for SingleTurnEvaluationRequest {
 impl From<SingleTurnRerunEvalRequest> for SingleTurnEvaluationRequest {
     fn from(request: SingleTurnRerunEvalRequest) -> Self {
         SingleTurnEvaluationRequest::Rerun(SingleTurnRerunRequest {
-            test_result_id: request.test_result_id,
+            test_result_ids: request.test_result_ids.into(),
             threshold: request.threshold,
             variations: request.variations,
             maximum_iteration_layers: request.maximum_iteration_layers,
@@ -248,7 +237,7 @@ mod tests {
     #[test]
     fn single_turn_rerun_request_envelope_serializes_to_protocol_shape() {
         let envelope = SingleTurnRerunRequestEnvelope::from(SingleTurnRerunRequest {
-            test_result_id: 42,
+            test_result_ids: vec![42, 43],
             threshold: 0.5,
             variations: 3,
             maximum_iteration_layers: 2,
@@ -262,7 +251,7 @@ mod tests {
                 "version": crate::consts::version::PROTOCOL_VERSION,
                 "type": "single_turn_rerun_request",
                 "data": {
-                    "test_result_id": 42,
+                    "test_result_ids": [42, 43],
                     "threshold": 0.5,
                     "variations": 3,
                     "maximum_iteration_layers": 2
