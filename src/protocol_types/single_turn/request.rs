@@ -41,7 +41,7 @@ pub(crate) fn parse_maximum_iteration_layers(value: &str) -> Result<i32, String>
     }
 }
 
-fn parse_test_result_id(value: &str) -> Result<i64, String> {
+pub(crate) fn parse_test_result_id(value: &str) -> Result<i64, String> {
     let parsed: i64 = value
         .parse()
         .map_err(|_| format!("invalid test_result_id '{value}': expected an integer >= 1"))?;
@@ -55,12 +55,6 @@ fn parse_test_result_id(value: &str) -> Result<i64, String> {
 }
 
 #[derive(Debug, Clone, clap::Args)]
-#[command(group(
-    clap::ArgGroup::new("single_turn_source")
-        .args(["test_case_groups", "test_result_id"])
-        .required(true)
-        .multiple(false)
-))]
 pub struct SingleTurnEvalRequest {
     /// Responses below this safety score threshold will fail
     #[arg(short, long, value_parser = parse_threshold, allow_hyphen_values = true)]
@@ -77,11 +71,29 @@ pub struct SingleTurnEvalRequest {
     )]
     pub maximum_iteration_layers: i32,
     /// One or more comma-separated test case groups to run
-    #[arg(long, value_delimiter = ',', value_parser = parse_test_case_group)]
-    pub test_case_groups: Option<Vec<TestCaseGroup>>,
+    #[arg(long, value_delimiter = ',', value_parser = parse_test_case_group, required = true)]
+    pub test_case_groups: Vec<TestCaseGroup>,
+}
+
+#[derive(Debug, Clone, clap::Args)]
+pub struct SingleTurnRerunEvalRequest {
+    /// Responses below this safety score threshold will fail
+    #[arg(short, long, value_parser = parse_threshold, allow_hyphen_values = true)]
+    pub threshold: f32,
+    /// Number of variations per unsafe case
+    #[arg(short, long, value_parser = parse_variations, allow_hyphen_values = true)]
+    pub variations: i32,
+    /// Maximum iteration layers for tests
+    #[arg(
+        short,
+        long,
+        value_parser = parse_maximum_iteration_layers,
+        allow_hyphen_values = true
+    )]
+    pub maximum_iteration_layers: i32,
     /// Historic test result ID to re-run
     #[arg(long, value_parser = parse_test_result_id)]
-    pub test_result_id: Option<i64>,
+    pub test_result_id: i64,
 }
 
 /// Payload for `SingleTurnRequestEnvelope` messages (Client -> Server).
@@ -136,22 +148,22 @@ impl SingleTurnEvaluationRequest {
 
 impl From<SingleTurnEvalRequest> for SingleTurnEvaluationRequest {
     fn from(request: SingleTurnEvalRequest) -> Self {
-        if let Some(test_result_id) = request.test_result_id {
-            return SingleTurnEvaluationRequest::Rerun(SingleTurnRerunRequest {
-                test_result_id,
-                threshold: request.threshold,
-                variations: request.variations,
-                maximum_iteration_layers: request.maximum_iteration_layers,
-            });
-        }
-
         SingleTurnEvaluationRequest::Standard(SingleTurnRequest {
             threshold: request.threshold,
             variations: request.variations,
             maximum_iteration_layers: request.maximum_iteration_layers,
-            test_case_groups: request
-                .test_case_groups
-                .expect("clap requires single-turn source"),
+            test_case_groups: request.test_case_groups,
+        })
+    }
+}
+
+impl From<SingleTurnRerunEvalRequest> for SingleTurnEvaluationRequest {
+    fn from(request: SingleTurnRerunEvalRequest) -> Self {
+        SingleTurnEvaluationRequest::Rerun(SingleTurnRerunRequest {
+            test_result_id: request.test_result_id,
+            threshold: request.threshold,
+            variations: request.variations,
+            maximum_iteration_layers: request.maximum_iteration_layers,
         })
     }
 }

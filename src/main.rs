@@ -73,6 +73,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let provider_command = match &evaluation {
         cli::EvaluationCommand::SingleTurn { provider, .. }
         | cli::EvaluationCommand::MultiTurn { provider, .. } => provider,
+        cli::EvaluationCommand::ReRun { rerun } => match rerun {
+            cli::ReRunEvaluationCommand::SingleTurn { provider, .. }
+            | cli::ReRunEvaluationCommand::MultiTurn { provider, .. } => provider,
+        },
     };
 
     let provider = match provider_command {
@@ -115,6 +119,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             )
             .await?;
         }
+        cli::EvaluationCommand::ReRun { rerun } => match rerun {
+            cli::ReRunEvaluationCommand::SingleTurn { request, .. } => {
+                run_single_turn_evaluation(
+                    websocket,
+                    provider,
+                    request.into(),
+                    cli_args.log_mode,
+                    cli_args.output_file,
+                )
+                .await?;
+            }
+            cli::ReRunEvaluationCommand::MultiTurn { request, .. } => {
+                run_multi_turn_evaluation(
+                    websocket,
+                    provider,
+                    request.into(),
+                    cli_args.log_mode,
+                    cli_args.output_file,
+                )
+                .await?;
+            }
+        },
     }
 
     Ok(())

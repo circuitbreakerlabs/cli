@@ -8,7 +8,7 @@ use super::common::{CompletionRequest, ConversationComplete, ConversationError};
 pub use optional::{IterationComplete, IterationStart, OptionalSingleTurnMessage};
 pub use request::{
     SingleTurnEvalRequest, SingleTurnEvaluationRequest, SingleTurnRequestEnvelope,
-    SingleTurnRerunRequestEnvelope,
+    SingleTurnRerunEvalRequest, SingleTurnRerunRequestEnvelope,
 };
 #[cfg(test)]
 pub use request::{SingleTurnRequest, SingleTurnRerunRequest};

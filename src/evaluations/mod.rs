@@ -18,20 +18,16 @@ pub enum EvaluationType {
 impl From<&crate::cli::EvaluationCommand> for EvaluationType {
     fn from(cmd: &crate::cli::EvaluationCommand) -> Self {
         match cmd {
-            crate::cli::EvaluationCommand::SingleTurn { request, .. } => {
-                if request.test_result_id.is_some() {
+            crate::cli::EvaluationCommand::SingleTurn { .. } => EvaluationType::SingleTurn,
+            crate::cli::EvaluationCommand::MultiTurn { .. } => EvaluationType::MultiTurn,
+            crate::cli::EvaluationCommand::ReRun { rerun } => match rerun {
+                crate::cli::ReRunEvaluationCommand::SingleTurn { .. } => {
                     EvaluationType::SingleTurnRerun
-                } else {
-                    EvaluationType::SingleTurn
                 }
-            }
-            crate::cli::EvaluationCommand::MultiTurn { request, .. } => {
-                if request.test_result_id.is_some() {
+                crate::cli::ReRunEvaluationCommand::MultiTurn { .. } => {
                     EvaluationType::MultiTurnRerun
-                } else {
-                    EvaluationType::MultiTurn
                 }
-            }
+            },
         }
     }
 }

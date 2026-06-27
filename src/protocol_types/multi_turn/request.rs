@@ -27,7 +27,7 @@ pub(crate) fn parse_even_turn_count(value: &str) -> Result<usize, String> {
     }
 }
 
-fn parse_test_result_id(value: &str) -> Result<i64, String> {
+pub(crate) fn parse_test_result_id(value: &str) -> Result<i64, String> {
     let parsed: i64 = value
         .parse()
         .map_err(|_| format!("invalid test_result_id '{value}': expected an integer >= 1"))?;
@@ -41,12 +41,6 @@ fn parse_test_result_id(value: &str) -> Result<i64, String> {
 }
 
 #[derive(Debug, Clone, clap::Args)]
-#[command(group(
-    clap::ArgGroup::new("multi_turn_source")
-        .args(["test_case_groups", "test_result_id"])
-        .required(true)
-        .multiple(false)
-))]
 pub struct MultiTurnEvalRequest {
     /// Responses below this safety score threshold will fail
     #[arg(short, long, value_parser = parse_threshold, allow_hyphen_values = true)]
@@ -60,11 +54,26 @@ pub struct MultiTurnEvalRequest {
     )]
     pub max_turns: usize,
     /// One or more comma-separated test case groups to run.
-    #[arg(long, value_delimiter = ',', value_parser = parse_test_case_group)]
-    pub test_case_groups: Option<Vec<TestCaseGroup>>,
+    #[arg(long, value_delimiter = ',', value_parser = parse_test_case_group, required = true)]
+    pub test_case_groups: Vec<TestCaseGroup>,
+}
+
+#[derive(Debug, Clone, clap::Args)]
+pub struct MultiTurnRerunEvalRequest {
+    /// Responses below this safety score threshold will fail
+    #[arg(short, long, value_parser = parse_threshold, allow_hyphen_values = true)]
+    pub threshold: f32,
+    /// Maximum number of turns in the conversation. Should be a multiple of two.
+    #[arg(
+        short,
+        long,
+        value_parser = parse_even_turn_count,
+        allow_hyphen_values = true
+    )]
+    pub max_turns: usize,
     /// Historic test result ID to re-run
     #[arg(long, value_parser = parse_test_result_id)]
-    pub test_result_id: Option<i64>,
+    pub test_result_id: i64,
 }
 
 /// Payload for `MultiTurnRequestEnvelope` messages (Client -> Server).
@@ -116,20 +125,20 @@ impl MultiTurnEvaluationRequest {
 
 impl From<MultiTurnEvalRequest> for MultiTurnEvaluationRequest {
     fn from(request: MultiTurnEvalRequest) -> Self {
-        if let Some(test_result_id) = request.test_result_id {
-            return MultiTurnEvaluationRequest::Rerun(MultiTurnRerunRequest {
-                test_result_id,
-                threshold: request.threshold,
-                max_turns: request.max_turns,
-            });
-        }
-
         MultiTurnEvaluationRequest::Standard(MultiTurnRequest {
             threshold: request.threshold,
             max_turns: request.max_turns,
-            test_case_groups: request
-                .test_case_groups
-                .expect("clap requires multi-turn source"),
+            test_case_groups: request.test_case_groups,
+        })
+    }
+}
+
+impl From<MultiTurnRerunEvalRequest> for MultiTurnEvaluationRequest {
+    fn from(request: MultiTurnRerunEvalRequest) -> Self {
+        MultiTurnEvaluationRequest::Rerun(MultiTurnRerunRequest {
+            test_result_id: request.test_result_id,
+            threshold: request.threshold,
+            max_turns: request.max_turns,
         })
     }
 }

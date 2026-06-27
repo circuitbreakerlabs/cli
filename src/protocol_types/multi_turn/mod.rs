@@ -6,7 +6,7 @@ use crate::protocol_types::common::{CompletionRequest, ConversationComplete, Con
 pub use optional::{MultiTurnEvaluationStart, OptionalMultiTurnMessage};
 pub use request::{
     MultiTurnEvalRequest, MultiTurnEvaluationRequest, MultiTurnRequestEnvelope,
-    MultiTurnRerunRequestEnvelope,
+    MultiTurnRerunEvalRequest, MultiTurnRerunRequestEnvelope,
 };
 #[cfg(test)]
 pub use request::{MultiTurnRequest, MultiTurnRerunRequest};

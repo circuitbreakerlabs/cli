@@ -1,5 +1,8 @@
 use super::headers::Headers;
-use crate::protocol_types::{MultiTurnEvalRequest, SingleTurnEvalRequest};
+use crate::protocol_types::{
+    MultiTurnEvalRequest, MultiTurnRerunEvalRequest, SingleTurnEvalRequest,
+    SingleTurnRerunEvalRequest,
+};
 use crate::response_provider::{CustomProviderConfig, OllamaProviderConfig, OpenAIProviderConfig};
 use clap::{ArgGroup, CommandFactory, Parser, Subcommand, ValueEnum};
 use reqwest::header::HeaderMap;
@@ -183,6 +186,31 @@ pub enum EvaluationCommand {
         #[command(flatten)]
         request: MultiTurnEvalRequest,
     },
+
+    /// Re-run a historic evaluation result
+    ReRun {
+        #[command(subcommand)]
+        rerun: ReRunEvaluationCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ReRunEvaluationCommand {
+    /// Re-run a historic single-turn evaluation result
+    SingleTurn {
+        #[command(subcommand)]
+        provider: ProviderCommand,
+        #[command(flatten)]
+        request: SingleTurnRerunEvalRequest,
+    },
+
+    /// Re-run a historic multi-turn evaluation result
+    MultiTurn {
+        #[command(subcommand)]
+        provider: ProviderCommand,
+        #[command(flatten)]
+        request: MultiTurnRerunEvalRequest,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -254,14 +282,12 @@ mod tests {
                     assert!((request.threshold - 0.5).abs() < f32::EPSILON);
                     assert_eq!(request.variations, 2);
                     assert_eq!(request.maximum_iteration_layers, 2);
-                    assert_eq!(
-                        request.test_case_groups,
-                        Some(vec!["suicidal_ideation".to_string()])
-                    );
+                    assert_eq!(request.test_case_groups, vec!["suicidal_ideation"]);
                 }
                 super::EvaluationCommand::MultiTurn { .. } => {
                     panic!("expected single-turn command")
                 }
+                super::EvaluationCommand::ReRun { .. } => panic!("expected single-turn command"),
             },
             _ => panic!("expected eval command"),
         }
@@ -448,6 +474,7 @@ mod tests {
                 super::EvaluationCommand::MultiTurn { .. } => {
                     panic!("expected single-turn command")
                 }
+                super::EvaluationCommand::ReRun { .. } => panic!("expected single-turn command"),
             },
             _ => panic!("expected eval command"),
         }
@@ -543,14 +570,12 @@ mod tests {
                 super::EvaluationCommand::MultiTurn { request, .. } => {
                     assert!((request.threshold - 0.5).abs() < f32::EPSILON);
                     assert_eq!(request.max_turns, 4);
-                    assert_eq!(
-                        request.test_case_groups,
-                        Some(vec!["suicidal_ideation".to_string()])
-                    );
+                    assert_eq!(request.test_case_groups, vec!["suicidal_ideation"]);
                 }
                 super::EvaluationCommand::SingleTurn { .. } => {
                     panic!("expected multi-turn command")
                 }
+                super::EvaluationCommand::ReRun { .. } => panic!("expected multi-turn command"),
             },
             _ => panic!("expected eval command"),
         }
@@ -666,7 +691,6 @@ mod tests {
         .expect_err("missing test case groups should be rejected");
 
         assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
-        assert!(err.to_string().contains("--test-case-groups"));
     }
 
     #[test]
@@ -676,6 +700,7 @@ mod tests {
             "--cbl-api-key",
             "cbl-key",
             "eval",
+            "re-run",
             "single-turn",
             "--threshold",
             "0.5",
@@ -695,20 +720,26 @@ mod tests {
 
         match args.command {
             Some(super::Command::Eval { evaluation }) => match evaluation {
-                super::EvaluationCommand::SingleTurn { request, .. } => {
-                    assert_eq!(request.test_result_id, Some(42));
-                    assert!(request.test_case_groups.is_none());
-                }
-                super::EvaluationCommand::MultiTurn { .. } => {
-                    panic!("expected single-turn command")
-                }
+                super::EvaluationCommand::ReRun { rerun } => match rerun {
+                    super::ReRunEvaluationCommand::SingleTurn { request, .. } => {
+                        assert_eq!(request.test_result_id, 42);
+                        assert!((request.threshold - 0.5).abs() < f32::EPSILON);
+                        assert_eq!(request.variations, 2);
+                        assert_eq!(request.maximum_iteration_layers, 1);
+                    }
+                    super::ReRunEvaluationCommand::MultiTurn { .. } => {
+                        panic!("expected single-turn rerun command")
+                    }
+                },
+                super::EvaluationCommand::SingleTurn { .. }
+                | super::EvaluationCommand::MultiTurn { .. } => panic!("expected rerun command"),
             },
             _ => panic!("expected eval command"),
         }
     }
 
     #[test]
-    fn rejects_single_turn_with_test_case_groups_and_test_result_id() {
+    fn rejects_single_turn_test_result_id_outside_rerun_subcommand() {
         let err = Args::try_parse_from([
             "cbl",
             "--cbl-api-key",
@@ -731,9 +762,9 @@ mod tests {
             "--model",
             "gpt-4.1-nano",
         ])
-        .expect_err("single-turn source flags should conflict");
+        .expect_err("standard single-turn should not accept test_result_id");
 
-        assert_eq!(err.kind(), ErrorKind::ArgumentConflict);
+        assert_eq!(err.kind(), ErrorKind::UnknownArgument);
     }
 
     #[test]
@@ -743,6 +774,7 @@ mod tests {
             "--cbl-api-key",
             "cbl-key",
             "eval",
+            "re-run",
             "single-turn",
             "--threshold",
             "0.5",
@@ -765,12 +797,40 @@ mod tests {
     }
 
     #[test]
+    fn rejects_non_positive_multi_turn_test_result_id() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "eval",
+            "re-run",
+            "multi-turn",
+            "--threshold",
+            "0.5",
+            "--max-turns",
+            "4",
+            "--test-result-id",
+            "0",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect_err("test_result_id should be rejected");
+
+        assert_eq!(err.kind(), ErrorKind::ValueValidation);
+        assert!(err.to_string().contains("expected an integer >= 1"));
+    }
+
+    #[test]
     fn rejects_missing_multi_turn_test_case_groups() {
         let err = Args::try_parse_from([
             "cbl",
             "--cbl-api-key",
             "cbl-key",
             "eval",
+            "re-run",
             "multi-turn",
             "--threshold",
             "0.5",
@@ -785,7 +845,6 @@ mod tests {
         .expect_err("missing test case groups should be rejected");
 
         assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
-        assert!(err.to_string().contains("--test-case-groups"));
     }
 
     #[test]
@@ -795,6 +854,7 @@ mod tests {
             "--cbl-api-key",
             "cbl-key",
             "eval",
+            "re-run",
             "multi-turn",
             "--threshold",
             "0.5",
@@ -812,20 +872,25 @@ mod tests {
 
         match args.command {
             Some(super::Command::Eval { evaluation }) => match evaluation {
-                super::EvaluationCommand::MultiTurn { request, .. } => {
-                    assert_eq!(request.test_result_id, Some(42));
-                    assert!(request.test_case_groups.is_none());
-                }
-                super::EvaluationCommand::SingleTurn { .. } => {
-                    panic!("expected multi-turn command")
-                }
+                super::EvaluationCommand::ReRun { rerun } => match rerun {
+                    super::ReRunEvaluationCommand::MultiTurn { request, .. } => {
+                        assert_eq!(request.test_result_id, 42);
+                        assert!((request.threshold - 0.5).abs() < f32::EPSILON);
+                        assert_eq!(request.max_turns, 4);
+                    }
+                    super::ReRunEvaluationCommand::SingleTurn { .. } => {
+                        panic!("expected multi-turn rerun command")
+                    }
+                },
+                super::EvaluationCommand::SingleTurn { .. }
+                | super::EvaluationCommand::MultiTurn { .. } => panic!("expected rerun command"),
             },
             _ => panic!("expected eval command"),
         }
     }
 
     #[test]
-    fn rejects_multi_turn_with_test_case_groups_and_test_result_id() {
+    fn rejects_multi_turn_test_result_id_outside_rerun_subcommand() {
         let err = Args::try_parse_from([
             "cbl",
             "--cbl-api-key",
@@ -846,9 +911,9 @@ mod tests {
             "--model",
             "gpt-4.1-nano",
         ])
-        .expect_err("multi-turn source flags should conflict");
+        .expect_err("standard multi-turn should not accept test_result_id");
 
-        assert_eq!(err.kind(), ErrorKind::ArgumentConflict);
+        assert_eq!(err.kind(), ErrorKind::UnknownArgument);
     }
 
     #[test]

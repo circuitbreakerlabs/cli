@@ -5,5 +5,5 @@ mod version;
 
 pub use args::{
     ApiCommand, ApiEvaluationsCommand, ApiSubcommand, Args, Command, EvaluationCommand,
-    ProviderCommand,
+    ProviderCommand, ReRunEvaluationCommand,
 };
