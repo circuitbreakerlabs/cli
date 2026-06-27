@@ -708,8 +708,8 @@ mod tests {
             "2",
             "--maximum-iteration-layers",
             "1",
-            "--test-result-id",
-            "42",
+            "--test-result-ids",
+            "42,43",
             "openai",
             "--api-key",
             "openai-key",
@@ -722,7 +722,7 @@ mod tests {
             Some(super::Command::Eval { evaluation }) => match evaluation {
                 super::EvaluationCommand::ReRun { rerun } => match rerun {
                     super::ReRunEvaluationCommand::SingleTurn { request, .. } => {
-                        assert_eq!(request.test_result_id, 42);
+                        assert_eq!(request.test_result_ids.as_slice(), &[42, 43]);
                         assert!((request.threshold - 0.5).abs() < f32::EPSILON);
                         assert_eq!(request.variations, 2);
                         assert_eq!(request.maximum_iteration_layers, 1);
@@ -739,7 +739,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_single_turn_test_result_id_outside_rerun_subcommand() {
+    fn rejects_single_turn_test_result_ids_outside_rerun_subcommand() {
         let err = Args::try_parse_from([
             "cbl",
             "--cbl-api-key",
@@ -754,7 +754,7 @@ mod tests {
             "1",
             "--test-case-groups",
             "suicidal_ideation",
-            "--test-result-id",
+            "--test-result-ids",
             "42",
             "openai",
             "--api-key",
@@ -762,65 +762,44 @@ mod tests {
             "--model",
             "gpt-4.1-nano",
         ])
-        .expect_err("standard single-turn should not accept test_result_id");
+        .expect_err("standard single-turn should not accept test_result_ids");
 
         assert_eq!(err.kind(), ErrorKind::UnknownArgument);
     }
 
     #[test]
-    fn rejects_non_positive_single_turn_test_result_id() {
-        let err = Args::try_parse_from([
-            "cbl",
-            "--cbl-api-key",
-            "cbl-key",
-            "eval",
-            "re-run",
-            "single-turn",
-            "--threshold",
-            "0.5",
-            "--variations",
-            "2",
-            "--maximum-iteration-layers",
-            "1",
-            "--test-result-id",
-            "0",
-            "openai",
-            "--api-key",
-            "openai-key",
-            "--model",
-            "gpt-4.1-nano",
-        ])
-        .expect_err("test_result_id should be rejected");
+    fn rejects_invalid_single_turn_test_result_ids() {
+        for value in ["0", "-1", "abc", "1,,2", "1,1"] {
+            let err = Args::try_parse_from([
+                "cbl",
+                "--cbl-api-key",
+                "cbl-key",
+                "eval",
+                "re-run",
+                "single-turn",
+                "--threshold",
+                "0.5",
+                "--variations",
+                "2",
+                "--maximum-iteration-layers",
+                "1",
+                "--test-result-ids",
+                value,
+                "openai",
+                "--api-key",
+                "openai-key",
+                "--model",
+                "gpt-4.1-nano",
+            ])
+            .expect_err("test_result_ids should be rejected");
 
-        assert_eq!(err.kind(), ErrorKind::ValueValidation);
-        assert!(err.to_string().contains("expected an integer >= 1"));
-    }
-
-    #[test]
-    fn rejects_non_positive_multi_turn_test_result_id() {
-        let err = Args::try_parse_from([
-            "cbl",
-            "--cbl-api-key",
-            "cbl-key",
-            "eval",
-            "re-run",
-            "multi-turn",
-            "--threshold",
-            "0.5",
-            "--max-turns",
-            "4",
-            "--test-result-id",
-            "0",
-            "openai",
-            "--api-key",
-            "openai-key",
-            "--model",
-            "gpt-4.1-nano",
-        ])
-        .expect_err("test_result_id should be rejected");
-
-        assert_eq!(err.kind(), ErrorKind::ValueValidation);
-        assert!(err.to_string().contains("expected an integer >= 1"));
+            assert_eq!(err.kind(), ErrorKind::ValueValidation);
+            assert!(err.to_string().contains("test_result_ids"));
+            assert!(
+                err.to_string()
+                    .contains("expected comma-separated integers >= 1")
+            );
+        }
     }
 
     #[test]
@@ -860,8 +839,8 @@ mod tests {
             "0.5",
             "--max-turns",
             "4",
-            "--test-result-id",
-            "42",
+            "--test-result-ids",
+            "42,43",
             "openai",
             "--api-key",
             "openai-key",
@@ -874,7 +853,7 @@ mod tests {
             Some(super::Command::Eval { evaluation }) => match evaluation {
                 super::EvaluationCommand::ReRun { rerun } => match rerun {
                     super::ReRunEvaluationCommand::MultiTurn { request, .. } => {
-                        assert_eq!(request.test_result_id, 42);
+                        assert_eq!(request.test_result_ids.as_slice(), &[42, 43]);
                         assert!((request.threshold - 0.5).abs() < f32::EPSILON);
                         assert_eq!(request.max_turns, 4);
                     }
@@ -890,7 +869,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_multi_turn_test_result_id_outside_rerun_subcommand() {
+    fn rejects_multi_turn_test_result_ids_outside_rerun_subcommand() {
         let err = Args::try_parse_from([
             "cbl",
             "--cbl-api-key",
@@ -903,7 +882,7 @@ mod tests {
             "4",
             "--test-case-groups",
             "suicidal_ideation",
-            "--test-result-id",
+            "--test-result-ids",
             "42",
             "openai",
             "--api-key",
@@ -911,9 +890,42 @@ mod tests {
             "--model",
             "gpt-4.1-nano",
         ])
-        .expect_err("standard multi-turn should not accept test_result_id");
+        .expect_err("standard multi-turn should not accept test_result_ids");
 
         assert_eq!(err.kind(), ErrorKind::UnknownArgument);
+    }
+
+    #[test]
+    fn rejects_invalid_multi_turn_test_result_ids() {
+        for value in ["0", "-1", "abc", "1,,2", "1,1"] {
+            let err = Args::try_parse_from([
+                "cbl",
+                "--cbl-api-key",
+                "cbl-key",
+                "eval",
+                "re-run",
+                "multi-turn",
+                "--threshold",
+                "0.5",
+                "--max-turns",
+                "4",
+                "--test-result-ids",
+                value,
+                "openai",
+                "--api-key",
+                "openai-key",
+                "--model",
+                "gpt-4.1-nano",
+            ])
+            .expect_err("test_result_ids should be rejected");
+
+            assert_eq!(err.kind(), ErrorKind::ValueValidation);
+            assert!(err.to_string().contains("test_result_ids"));
+            assert!(
+                err.to_string()
+                    .contains("expected comma-separated integers >= 1")
+            );
+        }
     }
 
     #[test]
