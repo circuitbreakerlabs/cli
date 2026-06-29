@@ -1,5 +1,6 @@
 use super::super::common::{
-    TestCaseGroup, TestResultIds, parse_test_case_group, parse_test_result_ids,
+    EvaluationId, RerunSelector, TestCaseGroup, TestResultIds, parse_evaluation_id,
+    parse_test_case_group, parse_test_result_ids,
 };
 use serde::{Deserialize, Serialize};
 
@@ -48,6 +49,12 @@ pub struct MultiTurnEvalRequest {
 }
 
 #[derive(Debug, Clone, clap::Args)]
+#[command(group(
+    clap::ArgGroup::new("rerun_selector")
+        .required(true)
+        .multiple(false)
+        .args(["test_result_ids", "evaluation_id"])
+))]
 pub struct MultiTurnRerunEvalRequest {
     /// Responses below this safety score threshold will fail
     #[arg(short, long, value_parser = parse_threshold, allow_hyphen_values = true)]
@@ -61,8 +68,16 @@ pub struct MultiTurnRerunEvalRequest {
     )]
     pub max_turns: usize,
     /// Comma-separated historic test result IDs to re-run
-    #[arg(long, value_parser = parse_test_result_ids, allow_hyphen_values = true)]
-    pub test_result_ids: TestResultIds,
+    #[arg(
+        long = "test-result-ids",
+        alias = "test-result-id",
+        value_parser = parse_test_result_ids,
+        allow_hyphen_values = true
+    )]
+    pub test_result_ids: Option<TestResultIds>,
+    /// Historic evaluation ID whose stored results should be re-run
+    #[arg(long, value_parser = parse_evaluation_id, allow_hyphen_values = true)]
+    pub evaluation_id: Option<EvaluationId>,
 }
 
 /// Payload for `MultiTurnRequestEnvelope` messages (Client -> Server).
@@ -78,7 +93,8 @@ pub struct MultiTurnRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MultiTurnRerunRequest {
-    pub test_result_ids: Vec<i64>,
+    #[serde(flatten)]
+    pub selector: RerunSelector,
     pub threshold: f32,
     pub max_turns: usize,
 }
@@ -107,7 +123,17 @@ impl MultiTurnEvaluationRequest {
     pub fn test_result_ids(&self) -> Option<&[i64]> {
         match self {
             MultiTurnEvaluationRequest::Standard(_) => None,
-            MultiTurnEvaluationRequest::Rerun(request) => Some(&request.test_result_ids),
+            MultiTurnEvaluationRequest::Rerun(request) => match &request.selector {
+                RerunSelector::TestResultIds { test_result_ids } => Some(test_result_ids),
+                RerunSelector::EvaluationId { .. } => None,
+            },
+        }
+    }
+
+    pub fn rerun_selector(&self) -> Option<RerunSelector> {
+        match self {
+            MultiTurnEvaluationRequest::Standard(_) => None,
+            MultiTurnEvaluationRequest::Rerun(request) => Some(request.selector.clone()),
         }
     }
 }
@@ -125,7 +151,7 @@ impl From<MultiTurnEvalRequest> for MultiTurnEvaluationRequest {
 impl From<MultiTurnRerunEvalRequest> for MultiTurnEvaluationRequest {
     fn from(request: MultiTurnRerunEvalRequest) -> Self {
         MultiTurnEvaluationRequest::Rerun(MultiTurnRerunRequest {
-            test_result_ids: request.test_result_ids.into(),
+            selector: RerunSelector::from_parts(request.test_result_ids, request.evaluation_id),
             threshold: request.threshold,
             max_turns: request.max_turns,
         })
@@ -210,7 +236,9 @@ mod tests {
     #[test]
     fn multi_turn_rerun_request_envelope_serializes_to_protocol_shape() {
         let envelope = MultiTurnRerunRequestEnvelope::from(MultiTurnRerunRequest {
-            test_result_ids: vec![42, 43],
+            selector: crate::protocol_types::common::RerunSelector::TestResultIds {
+                test_result_ids: vec![42, 43],
+            },
             threshold: 0.5,
             max_turns: 6,
         });
@@ -224,6 +252,32 @@ mod tests {
                 "type": "multi_turn_rerun_request",
                 "data": {
                     "test_result_ids": [42, 43],
+                    "threshold": 0.5,
+                    "max_turns": 6
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn multi_turn_rerun_request_envelope_serializes_evaluation_id() {
+        let envelope = MultiTurnRerunRequestEnvelope::from(MultiTurnRerunRequest {
+            selector: crate::protocol_types::common::RerunSelector::EvaluationId {
+                evaluation_id: 123,
+            },
+            threshold: 0.5,
+            max_turns: 6,
+        });
+
+        let value = serde_json::to_value(envelope).expect("envelope should serialize");
+
+        assert_eq!(
+            value,
+            json!({
+                "version": crate::consts::version::PROTOCOL_VERSION,
+                "type": "multi_turn_rerun_request",
+                "data": {
+                    "evaluation_id": 123,
                     "threshold": 0.5,
                     "max_turns": 6
                 }

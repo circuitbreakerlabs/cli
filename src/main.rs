@@ -154,7 +154,7 @@ async fn run_single_turn_evaluation(
     output_file: Option<PathBuf>,
 ) -> Result<(), RunEvaluationError> {
     let test_case_groups = request.test_case_groups().map(<[_]>::to_vec);
-    let test_result_ids = request.test_result_ids().map(<[_]>::to_vec);
+    let rerun_selector = request.rerun_selector();
     let maximum_iteration_layers = request.maximum_iteration_layers();
     let result = if log_mode {
         evaluations::singleturn::run_evaluation(websocket, provider, request, None).await?
@@ -176,8 +176,8 @@ async fn run_single_turn_evaluation(
         ))
     });
 
-    let json = if let Some(test_result_ids) = test_result_ids {
-        serialize_rerun_evaluation_output(&result, &test_result_ids)?
+    let json = if let Some(rerun_selector) = rerun_selector {
+        serialize_rerun_evaluation_output(&result, &rerun_selector)?
     } else {
         serialize_evaluation_output(
             &result,
@@ -200,7 +200,7 @@ async fn run_multi_turn_evaluation(
     output_file: Option<PathBuf>,
 ) -> Result<(), RunEvaluationError> {
     let test_case_groups = request.test_case_groups().map(<[_]>::to_vec);
-    let test_result_ids = request.test_result_ids().map(<[_]>::to_vec);
+    let rerun_selector = request.rerun_selector();
     let result = if log_mode {
         evaluations::multiturn::run_evaluation(websocket, provider, request, None).await?
     } else {
@@ -221,8 +221,8 @@ async fn run_multi_turn_evaluation(
         ))
     });
 
-    let json = if let Some(test_result_ids) = test_result_ids {
-        serialize_rerun_evaluation_output(&result, &test_result_ids)?
+    let json = if let Some(rerun_selector) = rerun_selector {
+        serialize_rerun_evaluation_output(&result, &rerun_selector)?
     } else {
         serialize_evaluation_output(
             &result,

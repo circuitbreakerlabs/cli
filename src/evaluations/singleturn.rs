@@ -316,6 +316,7 @@ mod tests {
                     json!({
                         "type": "single_turn_response",
                         "data": {
+                            "evaluation_id": 11,
                             "total_passed": 2,
                             "total_failed": 0,
                             "failed_results": []
@@ -346,6 +347,7 @@ mod tests {
 
         assert_eq!(response.total_passed, 2);
         assert_eq!(response.total_failed, 0);
+        assert_eq!(response.evaluation_id, 11);
         assert!(response.failed_results.is_empty());
     }
 
@@ -365,6 +367,7 @@ mod tests {
                 json!({
                     "type": "single_turn_response",
                     "data": {
+                        "evaluation_id": 12,
                         "total_passed": 1,
                         "total_failed": 0,
                         "failed_results": []
@@ -379,7 +382,9 @@ mod tests {
             websocket,
             provider,
             SingleTurnEvaluationRequest::Rerun(SingleTurnRerunRequest {
-                test_result_ids: vec![42, 43],
+                selector: crate::protocol_types::common::RerunSelector::TestResultIds {
+                    test_result_ids: vec![42, 43],
+                },
                 threshold: 0.5,
                 variations: 2,
                 maximum_iteration_layers: 1,
@@ -395,6 +400,7 @@ mod tests {
 
         assert_eq!(response.total_passed, 1);
         assert_eq!(response.total_failed, 0);
+        assert_eq!(response.evaluation_id, 12);
     }
 
     #[tokio::test]
@@ -489,6 +495,7 @@ mod tests {
                 json!({
                     "type": "single_turn_response",
                     "data": {
+                        "evaluation_id": 13,
                         "total_passed": 0,
                         "total_failed": 1,
                         "failed_results": []
@@ -519,6 +526,7 @@ mod tests {
 
         assert_eq!(response.total_passed, 0);
         assert_eq!(response.total_failed, 1);
+        assert_eq!(response.evaluation_id, 13);
     }
 
     #[tokio::test]

@@ -722,7 +722,15 @@ mod tests {
             Some(super::Command::Eval { evaluation }) => match evaluation {
                 super::EvaluationCommand::ReRun { rerun } => match rerun {
                     super::ReRunEvaluationCommand::SingleTurn { request, .. } => {
-                        assert_eq!(request.test_result_ids.as_slice(), &[42, 43]);
+                        assert_eq!(
+                            request
+                                .test_result_ids
+                                .as_ref()
+                                .expect("test result IDs should be set")
+                                .as_slice(),
+                            &[42, 43],
+                        );
+                        assert_eq!(request.evaluation_id, None);
                         assert!((request.threshold - 0.5).abs() < f32::EPSILON);
                         assert_eq!(request.variations, 2);
                         assert_eq!(request.maximum_iteration_layers, 1);
@@ -803,7 +811,106 @@ mod tests {
     }
 
     #[test]
-    fn rejects_missing_multi_turn_test_case_groups() {
+    fn parses_valid_single_turn_rerun_command_with_evaluation_id() {
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "eval",
+            "re-run",
+            "single-turn",
+            "--threshold",
+            "0.5",
+            "--variations",
+            "2",
+            "--maximum-iteration-layers",
+            "1",
+            "--evaluation-id",
+            "123",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect("single-turn rerun args should parse");
+
+        match args.command {
+            Some(super::Command::Eval { evaluation }) => match evaluation {
+                super::EvaluationCommand::ReRun { rerun } => match rerun {
+                    super::ReRunEvaluationCommand::SingleTurn { request, .. } => {
+                        assert!(request.test_result_ids.is_none());
+                        assert_eq!(request.evaluation_id, Some(123));
+                    }
+                    super::ReRunEvaluationCommand::MultiTurn { .. } => {
+                        panic!("expected single-turn rerun command")
+                    }
+                },
+                super::EvaluationCommand::SingleTurn { .. }
+                | super::EvaluationCommand::MultiTurn { .. } => panic!("expected rerun command"),
+            },
+            _ => panic!("expected eval command"),
+        }
+    }
+
+    #[test]
+    fn rejects_single_turn_rerun_without_selector() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "eval",
+            "re-run",
+            "single-turn",
+            "--threshold",
+            "0.5",
+            "--variations",
+            "2",
+            "--maximum-iteration-layers",
+            "1",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect_err("missing rerun selector should be rejected");
+
+        assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn rejects_single_turn_rerun_with_multiple_selectors() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "eval",
+            "re-run",
+            "single-turn",
+            "--threshold",
+            "0.5",
+            "--variations",
+            "2",
+            "--maximum-iteration-layers",
+            "1",
+            "--test-result-ids",
+            "42",
+            "--evaluation-id",
+            "123",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect_err("multiple rerun selectors should be rejected");
+
+        assert_eq!(err.kind(), ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn rejects_multi_turn_rerun_without_selector() {
         let err = Args::try_parse_from([
             "cbl",
             "--cbl-api-key",
@@ -821,7 +928,7 @@ mod tests {
             "--model",
             "gpt-4.1-nano",
         ])
-        .expect_err("missing test case groups should be rejected");
+        .expect_err("missing rerun selector should be rejected");
 
         assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
     }
@@ -853,7 +960,15 @@ mod tests {
             Some(super::Command::Eval { evaluation }) => match evaluation {
                 super::EvaluationCommand::ReRun { rerun } => match rerun {
                     super::ReRunEvaluationCommand::MultiTurn { request, .. } => {
-                        assert_eq!(request.test_result_ids.as_slice(), &[42, 43]);
+                        assert_eq!(
+                            request
+                                .test_result_ids
+                                .as_ref()
+                                .expect("test result IDs should be set")
+                                .as_slice(),
+                            &[42, 43],
+                        );
+                        assert_eq!(request.evaluation_id, None);
                         assert!((request.threshold - 0.5).abs() < f32::EPSILON);
                         assert_eq!(request.max_turns, 4);
                     }
@@ -866,6 +981,75 @@ mod tests {
             },
             _ => panic!("expected eval command"),
         }
+    }
+
+    #[test]
+    fn parses_valid_multi_turn_rerun_command_with_evaluation_id() {
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "eval",
+            "re-run",
+            "multi-turn",
+            "--threshold",
+            "0.5",
+            "--max-turns",
+            "4",
+            "--evaluation-id",
+            "123",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect("multi-turn rerun args should parse");
+
+        match args.command {
+            Some(super::Command::Eval { evaluation }) => match evaluation {
+                super::EvaluationCommand::ReRun { rerun } => match rerun {
+                    super::ReRunEvaluationCommand::MultiTurn { request, .. } => {
+                        assert!(request.test_result_ids.is_none());
+                        assert_eq!(request.evaluation_id, Some(123));
+                    }
+                    super::ReRunEvaluationCommand::SingleTurn { .. } => {
+                        panic!("expected multi-turn rerun command")
+                    }
+                },
+                super::EvaluationCommand::SingleTurn { .. }
+                | super::EvaluationCommand::MultiTurn { .. } => panic!("expected rerun command"),
+            },
+            _ => panic!("expected eval command"),
+        }
+    }
+
+    #[test]
+    fn rejects_multi_turn_rerun_with_multiple_selectors() {
+        let err = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "eval",
+            "re-run",
+            "multi-turn",
+            "--threshold",
+            "0.5",
+            "--max-turns",
+            "4",
+            "--test-result-ids",
+            "42",
+            "--evaluation-id",
+            "123",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect_err("multiple rerun selectors should be rejected");
+
+        assert_eq!(err.kind(), ErrorKind::ArgumentConflict);
     }
 
     #[test]
