@@ -303,6 +303,7 @@ mod tests {
                 json!({
                     "type": "multi_turn_response",
                     "data": {
+                        "evaluation_id": 21,
                         "total_passed": 1,
                         "total_failed": 0,
                         "failed_results": []
@@ -332,6 +333,7 @@ mod tests {
 
         assert_eq!(response.total_passed, 1);
         assert_eq!(response.total_failed, 0);
+        assert_eq!(response.evaluation_id, 21);
         assert!(response.failed_results.is_empty());
     }
 
@@ -351,6 +353,7 @@ mod tests {
                 json!({
                     "type": "multi_turn_response",
                     "data": {
+                        "evaluation_id": 22,
                         "total_passed": 1,
                         "total_failed": 0,
                         "failed_results": []
@@ -380,6 +383,7 @@ mod tests {
 
         assert_eq!(response.total_passed, 1);
         assert_eq!(response.total_failed, 0);
+        assert_eq!(response.evaluation_id, 22);
     }
 
     #[tokio::test]
@@ -407,6 +411,7 @@ mod tests {
                 json!({
                     "type": "multi_turn_response",
                     "data": {
+                        "evaluation_id": 23,
                         "total_passed": 1,
                         "total_failed": 0,
                         "failed_results": []
@@ -436,5 +441,6 @@ mod tests {
 
         assert_eq!(response.total_passed, 1);
         assert_eq!(response.total_failed, 0);
+        assert_eq!(response.evaluation_id, 23);
     }
 }

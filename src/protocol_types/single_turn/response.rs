@@ -20,6 +20,8 @@ pub struct FailedSingleTurnResult {
 /// Payload for `SingleTurnResponseEnvelope` messages (Server -> Client).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SingleTurnResponse {
+    /// Persisted evaluation run ID.
+    pub evaluation_id: i64,
     /// Number of test cases that passed
     pub total_passed: i32,
     /// Number of test cases that failed
@@ -61,6 +63,7 @@ mod tests {
         let value = json!({
             "type": "single_turn_response",
             "data": {
+                "evaluation_id": 101,
                 "total_passed": 5,
                 "total_failed": 1,
                 "failed_results": [
@@ -82,6 +85,7 @@ mod tests {
             serde_json::from_value(value).expect("response envelope should deserialize");
 
         assert_eq!(envelope.message_type, "single_turn_response");
+        assert_eq!(envelope.data.evaluation_id, 101);
         assert_eq!(envelope.data.total_passed, 5);
         assert_eq!(envelope.data.total_failed, 1);
         assert_eq!(envelope.data.failed_results.len(), 1);

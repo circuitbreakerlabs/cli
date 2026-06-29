@@ -109,6 +109,7 @@ mod tests {
         let payload = json!({
             "type": "multi_turn_response",
             "data": {
+                "evaluation_id": 202,
                 "total_passed": 2,
                 "total_failed": 1,
                 "failed_results": [
@@ -129,6 +130,7 @@ mod tests {
 
         match message {
             MultiTurnReceivableMessage::MultiTurnResponse(resp) => {
+                assert_eq!(resp.evaluation_id, 202);
                 assert_eq!(resp.total_passed, 2);
                 assert_eq!(resp.total_failed, 1);
                 assert_eq!(resp.failed_results.len(), 1);
