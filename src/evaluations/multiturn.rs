@@ -368,7 +368,9 @@ mod tests {
             websocket,
             provider,
             MultiTurnEvaluationRequest::Rerun(MultiTurnRerunRequest {
-                test_result_ids: vec![42, 43],
+                selector: crate::protocol_types::common::RerunSelector::TestResultIds {
+                    test_result_ids: vec![42, 43],
+                },
                 threshold: 0.5,
                 max_turns: 4,
             }),

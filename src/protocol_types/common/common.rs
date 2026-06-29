@@ -6,6 +6,8 @@ pub type ConversationId = i32;
 /// Test case group identifier
 pub type TestCaseGroup = String;
 
+pub type EvaluationId = i64;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TestResultIds(Vec<i64>);
 
@@ -21,6 +23,28 @@ impl Into<Vec<i64>> for TestResultIds {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum RerunSelector {
+    TestResultIds { test_result_ids: Vec<i64> },
+    EvaluationId { evaluation_id: EvaluationId },
+}
+
+impl RerunSelector {
+    pub fn from_parts(
+        test_result_ids: Option<TestResultIds>,
+        evaluation_id: Option<EvaluationId>,
+    ) -> Self {
+        match (test_result_ids, evaluation_id) {
+            (Some(test_result_ids), None) => RerunSelector::TestResultIds {
+                test_result_ids: test_result_ids.into(),
+            },
+            (None, Some(evaluation_id)) => RerunSelector::EvaluationId { evaluation_id },
+            _ => unreachable!("clap requires exactly one rerun selector"),
+        }
+    }
+}
+
 pub fn parse_test_case_group(value: &str) -> Result<TestCaseGroup, String> {
     let value = value.trim();
     if value.is_empty() {
@@ -30,6 +54,18 @@ pub fn parse_test_case_group(value: &str) -> Result<TestCaseGroup, String> {
     }
 
     Ok(value.to_string())
+}
+
+pub fn parse_evaluation_id(value: &str) -> Result<EvaluationId, String> {
+    let parsed: EvaluationId = value
+        .parse()
+        .map_err(|_| format!("invalid evaluation_id '{value}': expected an integer >= 1"))?;
+    if parsed < 1 {
+        return Err(format!(
+            "invalid evaluation_id '{value}': expected an integer >= 1",
+        ));
+    }
+    Ok(parsed)
 }
 
 pub fn parse_test_result_ids(value: &str) -> Result<TestResultIds, String> {
@@ -143,7 +179,7 @@ impl From<CompletionResponse> for CompletionResponseEnvelope {
 mod tests {
     use super::{
         CompletionRequestEnvelope, CompletionResponse, CompletionResponseEnvelope, TestCaseGroup,
-        TestResultIds, parse_test_case_group, parse_test_result_ids,
+        TestResultIds, parse_evaluation_id, parse_test_case_group, parse_test_result_ids,
     };
     use serde_json::json;
 
@@ -226,6 +262,15 @@ mod tests {
                 parse_test_result_ids(value).expect_err("invalid test result IDs should fail");
             assert!(error.contains("test_result_ids"));
             assert!(error.contains("comma-separated integers >= 1"));
+        }
+    }
+
+    #[test]
+    fn invalid_evaluation_ids_are_rejected() {
+        for value in ["", "0", "-1", "abc"] {
+            let error = parse_evaluation_id(value).expect_err("invalid evaluation ID should fail");
+            assert!(error.contains("evaluation_id"));
+            assert!(error.contains("integer >= 1"));
         }
     }
 }

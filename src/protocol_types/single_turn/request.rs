@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::super::common::{
-    TestCaseGroup, TestResultIds, parse_test_case_group, parse_test_result_ids,
+    EvaluationId, RerunSelector, TestCaseGroup, TestResultIds, parse_evaluation_id,
+    parse_test_case_group, parse_test_result_ids,
 };
 
 pub(crate) fn parse_threshold(value: &str) -> Result<f32, String> {
@@ -65,6 +66,12 @@ pub struct SingleTurnEvalRequest {
 }
 
 #[derive(Debug, Clone, clap::Args)]
+#[command(group(
+    clap::ArgGroup::new("rerun_selector")
+        .required(true)
+        .multiple(false)
+        .args(["test_result_ids", "evaluation_id"])
+))]
 pub struct SingleTurnRerunEvalRequest {
     /// Responses below this safety score threshold will fail
     #[arg(short, long, value_parser = parse_threshold, allow_hyphen_values = true)]
@@ -81,8 +88,16 @@ pub struct SingleTurnRerunEvalRequest {
     )]
     pub maximum_iteration_layers: i32,
     /// Comma-separated historic test result IDs to re-run
-    #[arg(long, value_parser = parse_test_result_ids, allow_hyphen_values = true)]
-    pub test_result_ids: TestResultIds,
+    #[arg(
+        long = "test-result-ids",
+        alias = "test-result-id",
+        value_parser = parse_test_result_ids,
+        allow_hyphen_values = true
+    )]
+    pub test_result_ids: Option<TestResultIds>,
+    /// Historic evaluation ID whose stored results should be re-run
+    #[arg(long, value_parser = parse_evaluation_id, allow_hyphen_values = true)]
+    pub evaluation_id: Option<EvaluationId>,
 }
 
 /// Payload for `SingleTurnRequestEnvelope` messages (Client -> Server).
@@ -100,7 +115,8 @@ pub struct SingleTurnRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SingleTurnRerunRequest {
-    pub test_result_ids: Vec<i64>,
+    #[serde(flatten)]
+    pub selector: RerunSelector,
     pub threshold: f32,
     pub variations: i32,
     pub maximum_iteration_layers: i32,
@@ -130,7 +146,17 @@ impl SingleTurnEvaluationRequest {
     pub fn test_result_ids(&self) -> Option<&[i64]> {
         match self {
             SingleTurnEvaluationRequest::Standard(_) => None,
-            SingleTurnEvaluationRequest::Rerun(request) => Some(&request.test_result_ids),
+            SingleTurnEvaluationRequest::Rerun(request) => match &request.selector {
+                RerunSelector::TestResultIds { test_result_ids } => Some(test_result_ids),
+                RerunSelector::EvaluationId { .. } => None,
+            },
+        }
+    }
+
+    pub fn rerun_selector(&self) -> Option<RerunSelector> {
+        match self {
+            SingleTurnEvaluationRequest::Standard(_) => None,
+            SingleTurnEvaluationRequest::Rerun(request) => Some(request.selector.clone()),
         }
     }
 }
@@ -149,7 +175,7 @@ impl From<SingleTurnEvalRequest> for SingleTurnEvaluationRequest {
 impl From<SingleTurnRerunEvalRequest> for SingleTurnEvaluationRequest {
     fn from(request: SingleTurnRerunEvalRequest) -> Self {
         SingleTurnEvaluationRequest::Rerun(SingleTurnRerunRequest {
-            test_result_ids: request.test_result_ids.into(),
+            selector: RerunSelector::from_parts(request.test_result_ids, request.evaluation_id),
             threshold: request.threshold,
             variations: request.variations,
             maximum_iteration_layers: request.maximum_iteration_layers,
@@ -237,7 +263,9 @@ mod tests {
     #[test]
     fn single_turn_rerun_request_envelope_serializes_to_protocol_shape() {
         let envelope = SingleTurnRerunRequestEnvelope::from(SingleTurnRerunRequest {
-            test_result_ids: vec![42, 43],
+            selector: crate::protocol_types::common::RerunSelector::TestResultIds {
+                test_result_ids: vec![42, 43],
+            },
             threshold: 0.5,
             variations: 3,
             maximum_iteration_layers: 2,
@@ -252,6 +280,34 @@ mod tests {
                 "type": "single_turn_rerun_request",
                 "data": {
                     "test_result_ids": [42, 43],
+                    "threshold": 0.5,
+                    "variations": 3,
+                    "maximum_iteration_layers": 2
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn single_turn_rerun_request_envelope_serializes_evaluation_id() {
+        let envelope = SingleTurnRerunRequestEnvelope::from(SingleTurnRerunRequest {
+            selector: crate::protocol_types::common::RerunSelector::EvaluationId {
+                evaluation_id: 123,
+            },
+            threshold: 0.5,
+            variations: 3,
+            maximum_iteration_layers: 2,
+        });
+
+        let value = serde_json::to_value(envelope).expect("envelope should serialize");
+
+        assert_eq!(
+            value,
+            json!({
+                "version": crate::consts::version::PROTOCOL_VERSION,
+                "type": "single_turn_rerun_request",
+                "data": {
+                    "evaluation_id": 123,
                     "threshold": 0.5,
                     "variations": 3,
                     "maximum_iteration_layers": 2

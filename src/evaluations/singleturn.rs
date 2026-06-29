@@ -382,7 +382,9 @@ mod tests {
             websocket,
             provider,
             SingleTurnEvaluationRequest::Rerun(SingleTurnRerunRequest {
-                test_result_ids: vec![42, 43],
+                selector: crate::protocol_types::common::RerunSelector::TestResultIds {
+                    test_result_ids: vec![42, 43],
+                },
                 threshold: 0.5,
                 variations: 2,
                 maximum_iteration_layers: 1,
