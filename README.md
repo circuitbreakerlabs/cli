@@ -1,10 +1,10 @@
 # Circuit Breaker Labs Command-Line Interface
 
 <p align="center" width="100%">
-  <img src="./assets/demo.gif" alt="TUI Demo" width="60%">
+  <img src="./assets/demo.gif" alt="Single-turn and multi-turn evaluation demo" width="60%">
 </p>
 <p align="center">
-  <i>Recorded with <a href="https://github.com/charmbracelet/vhs">vhs</i>💙</a>
+  <i>Recorded with <a href="https://github.com/charmbracelet/vhs">vhs</a></i>
 </p>
 
 ## Quickstart
