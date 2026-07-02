@@ -606,7 +606,7 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::ValueValidation);
         assert!(
             err.to_string()
-                .contains("expected an even integer between 2 and 20")
+                .contains("expected an even integer between 2 and 100")
         );
     }
 
@@ -621,7 +621,7 @@ mod tests {
             "--threshold",
             "0.5",
             "--max-turns",
-            "22",
+            "102",
             "--test-case-groups",
             "suicidal_ideation",
             "openai",
@@ -635,7 +635,7 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::ValueValidation);
         assert!(
             err.to_string()
-                .contains("expected an even integer between 2 and 20")
+                .contains("expected an even integer between 2 and 100")
         );
     }
 
@@ -664,7 +664,7 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::ValueValidation);
         assert!(
             err.to_string()
-                .contains("expected an even integer between 2 and 20")
+                .contains("expected an even integer between 2 and 100")
         );
     }
 

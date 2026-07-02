@@ -94,7 +94,7 @@ The `--threshold` flag accepts a value from `0` to `1`. Values closer to `1` req
 
 #### Maximum Turns
 
-`--max-turns` must be an even number because each turn pairs one user message with one model response. The upper limit depends on your system configuration. [Contact us](mailto:team@circuitbreakerlabs.ai) if you need a higher limit for your environment.
+`--max-turns` must be an even number because each turn pairs one user message with one model response. The CLI currently accepts values from `2` to `100`.
 
 #### Test Packs
 
