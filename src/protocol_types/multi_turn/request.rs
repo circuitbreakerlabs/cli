@@ -19,13 +19,13 @@ pub(crate) fn parse_threshold(value: &str) -> Result<f32, String> {
 
 pub(crate) fn parse_even_turn_count(value: &str) -> Result<usize, String> {
     let turns: usize = value.parse().map_err(|_| {
-        format!("invalid max_turns '{value}': expected an even integer between 2 and 20")
+        format!("invalid max_turns '{value}': expected an even integer between 2 and 100")
     })?;
-    if (2..=20).contains(&turns) && turns.is_multiple_of(2) {
+    if (2..=100).contains(&turns) && turns.is_multiple_of(2) {
         Ok(turns)
     } else {
         Err(format!(
-            "invalid max_turns '{value}': expected an even integer between 2 and 20",
+            "invalid max_turns '{value}': expected an even integer between 2 and 100",
         ))
     }
 }

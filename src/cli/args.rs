@@ -606,8 +606,45 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::ValueValidation);
         assert!(
             err.to_string()
-                .contains("expected an even integer between 2 and 20")
+                .contains("expected an even integer between 2 and 100")
         );
+    }
+
+    #[test]
+    fn accepts_max_turns_at_spec_maximum() {
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "eval",
+            "multi-turn",
+            "--threshold",
+            "0.5",
+            "--max-turns",
+            "100",
+            "--test-case-groups",
+            "suicidal_ideation",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "gpt-4.1-nano",
+        ])
+        .expect("max_turns at spec maximum should be accepted");
+
+        #[allow(clippy::match_wildcard_for_single_variants)]
+        match args.command {
+            Some(super::Command::Eval { evaluation }) => match evaluation {
+                super::EvaluationCommand::MultiTurn { request, .. } => {
+                    assert_eq!(request.max_turns, 100);
+                }
+                super::EvaluationCommand::SingleTurn { .. } => {
+                    panic!("expected multi-turn command")
+                }
+                super::EvaluationCommand::ReRun { .. } => panic!("expected multi-turn command"),
+            },
+            _ => panic!("expected multi-turn eval command"),
+        }
     }
 
     #[test]
@@ -621,7 +658,7 @@ mod tests {
             "--threshold",
             "0.5",
             "--max-turns",
-            "22",
+            "102",
             "--test-case-groups",
             "suicidal_ideation",
             "openai",
@@ -635,7 +672,7 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::ValueValidation);
         assert!(
             err.to_string()
-                .contains("expected an even integer between 2 and 20")
+                .contains("expected an even integer between 2 and 100")
         );
     }
 
@@ -664,7 +701,7 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::ValueValidation);
         assert!(
             err.to_string()
-                .contains("expected an even integer between 2 and 20")
+                .contains("expected an even integer between 2 and 100")
         );
     }
 
