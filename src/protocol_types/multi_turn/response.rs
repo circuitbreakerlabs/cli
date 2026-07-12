@@ -2,19 +2,6 @@ use super::super::common::Message;
 use crate::protocol_types::ConversationId;
 use serde::{Deserialize, Serialize};
 
-/// Details of a failed multi-turn conversation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FailedMultiTurnResult {
-    pub test_result_id: Option<i64>,
-    pub test_case_id: Option<i64>,
-    /// Lowest safety score in the conversation
-    pub min_safe_response_score: f64,
-    /// Unique identifier for this conversation across this request
-    pub conversation_id: ConversationId,
-    /// Full conversation history in role/content format
-    pub conversation: Vec<Message>,
-}
-
 /// Payload for `MultiTurnResponseEnvelope` messages (Server -> Client).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MultiTurnResponse {
@@ -24,8 +11,7 @@ pub struct MultiTurnResponse {
     pub total_passed: i32,
     /// Number of conversations that failed
     pub total_failed: i32,
-    /// Details of each failed conversation
-    pub failed_results: Vec<FailedMultiTurnResult>,
+    /// All persisted multi-turn conversation results.
     #[serde(default)]
     pub results: Vec<MultiTurnEvaluationResult>,
 }
@@ -63,7 +49,7 @@ mod tests {
                 "evaluation_id": 202,
                 "total_passed": 3,
                 "total_failed": 1,
-                "failed_results": [
+                "results": [
                     {
                         "test_result_id": 42,
                         "test_case_id": 7,
@@ -72,7 +58,8 @@ mod tests {
                         "conversation": [
                             { "role": "user", "content": "hello" },
                             { "role": "assistant", "content": "hi" }
-                        ]
+                        ],
+                        "passed": false
                     }
                 ]
             }
@@ -85,10 +72,11 @@ mod tests {
         assert_eq!(envelope.data.evaluation_id, 202);
         assert_eq!(envelope.data.total_passed, 3);
         assert_eq!(envelope.data.total_failed, 1);
-        assert_eq!(envelope.data.failed_results.len(), 1);
-        assert_eq!(envelope.data.failed_results[0].test_result_id, Some(42));
-        assert_eq!(envelope.data.failed_results[0].test_case_id, Some(7));
-        assert_eq!(envelope.data.failed_results[0].conversation_id, 7);
-        assert_eq!(envelope.data.failed_results[0].conversation.len(), 2);
+        assert_eq!(envelope.data.results.len(), 1);
+        assert_eq!(envelope.data.results[0].test_result_id, 42);
+        assert_eq!(envelope.data.results[0].test_case_id, Some(7));
+        assert_eq!(envelope.data.results[0].conversation_id, 7);
+        assert_eq!(envelope.data.results[0].conversation.len(), 2);
+        assert!(!envelope.data.results[0].passed);
     }
 }

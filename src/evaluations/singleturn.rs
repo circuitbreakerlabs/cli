@@ -319,7 +319,7 @@ mod tests {
                             "evaluation_id": 11,
                             "total_passed": 2,
                             "total_failed": 0,
-                            "failed_results": []
+                            "results": []
                         }
                     }),
                 )
@@ -348,7 +348,7 @@ mod tests {
         assert_eq!(response.total_passed, 2);
         assert_eq!(response.total_failed, 0);
         assert_eq!(response.evaluation_id, 11);
-        assert!(response.failed_results.is_empty());
+        assert!(response.results.is_empty());
     }
 
     #[tokio::test]
@@ -370,7 +370,7 @@ mod tests {
                         "evaluation_id": 12,
                         "total_passed": 1,
                         "total_failed": 0,
-                        "failed_results": []
+                        "results": []
                     }
                 }),
             )
@@ -498,7 +498,7 @@ mod tests {
                         "evaluation_id": 13,
                         "total_passed": 0,
                         "total_failed": 1,
-                        "failed_results": []
+                        "results": []
                     }
                 }),
             )

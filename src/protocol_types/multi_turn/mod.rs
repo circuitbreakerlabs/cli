@@ -112,14 +112,17 @@ mod tests {
                 "evaluation_id": 202,
                 "total_passed": 2,
                 "total_failed": 1,
-                "failed_results": [
+                "results": [
                     {
+                        "test_result_id": 42,
+                        "test_case_id": 7,
                         "min_safe_response_score": 0.12,
                         "conversation_id": 9,
                         "conversation": [
                             { "role": "user", "content": "hello" },
                             { "role": "assistant", "content": "hi" }
-                        ]
+                        ],
+                        "passed": false
                     }
                 ]
             }
@@ -133,7 +136,8 @@ mod tests {
                 assert_eq!(resp.evaluation_id, 202);
                 assert_eq!(resp.total_passed, 2);
                 assert_eq!(resp.total_failed, 1);
-                assert_eq!(resp.failed_results.len(), 1);
+                assert_eq!(resp.results.len(), 1);
+                assert!(!resp.results[0].passed);
             }
             other => panic!("expected multi turn response, got {other:?}"),
         }
