@@ -2,21 +2,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::protocol_types::ConversationId;
 
-/// Details of a failed single-turn test case.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FailedSingleTurnResult {
-    pub test_result_id: Option<i64>,
-    pub test_case_id: Option<i64>,
-    /// The prompt that was tested
-    pub user_input: String,
-    /// Unique identifier for this conversation across this request
-    pub conversation_id: ConversationId,
-    /// The model's response
-    pub model_response: String,
-    /// Safety score (lower indicates less safe)
-    pub safe_response_score: f64,
-}
-
 /// Payload for `SingleTurnResponseEnvelope` messages (Server -> Client).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SingleTurnResponse {
@@ -26,16 +11,16 @@ pub struct SingleTurnResponse {
     pub total_passed: i32,
     /// Number of test cases that failed
     pub total_failed: i32,
-    /// Details of each failed test case per iteration layer
-    pub failed_results: Vec<Vec<FailedSingleTurnResult>>,
+    /// All persisted single-turn test results.
     #[serde(default)]
-    pub results_by_iteration: Vec<Vec<SingleTurnEvaluationResult>>,
+    pub results: Vec<SingleTurnEvaluationResult>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SingleTurnEvaluationResult {
     pub test_result_id: i64,
     pub test_case_id: Option<i64>,
+    pub iteration: i32,
     pub user_input: String,
     pub conversation_id: ConversationId,
     pub model_response: String,
@@ -66,17 +51,17 @@ mod tests {
                 "evaluation_id": 101,
                 "total_passed": 5,
                 "total_failed": 1,
-                "failed_results": [
-                    [
-                        {
-                            "test_result_id": 42,
-                            "test_case_id": 7,
-                            "user_input": "unsafe prompt",
-                            "conversation_id": 2,
-                            "model_response": "unsafe reply",
-                            "safe_response_score": 0.12
-                        }
-                    ]
+                "results": [
+                    {
+                        "test_result_id": 42,
+                        "test_case_id": 7,
+                        "iteration": 0,
+                        "user_input": "unsafe prompt",
+                        "conversation_id": 2,
+                        "model_response": "unsafe reply",
+                        "safe_response_score": 0.12,
+                        "passed": false
+                    }
                 ]
             }
         });
@@ -88,13 +73,12 @@ mod tests {
         assert_eq!(envelope.data.evaluation_id, 101);
         assert_eq!(envelope.data.total_passed, 5);
         assert_eq!(envelope.data.total_failed, 1);
-        assert_eq!(envelope.data.failed_results.len(), 1);
-        assert_eq!(envelope.data.failed_results[0][0].test_result_id, Some(42));
-        assert_eq!(envelope.data.failed_results[0][0].test_case_id, Some(7));
-        assert_eq!(envelope.data.failed_results[0][0].conversation_id, 2);
-        assert_eq!(
-            envelope.data.failed_results[0][0].model_response,
-            "unsafe reply"
-        );
+        assert_eq!(envelope.data.results.len(), 1);
+        assert_eq!(envelope.data.results[0].test_result_id, 42);
+        assert_eq!(envelope.data.results[0].test_case_id, Some(7));
+        assert_eq!(envelope.data.results[0].iteration, 0);
+        assert_eq!(envelope.data.results[0].conversation_id, 2);
+        assert_eq!(envelope.data.results[0].model_response, "unsafe reply");
+        assert!(!envelope.data.results[0].passed);
     }
 }
