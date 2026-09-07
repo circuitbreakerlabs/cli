@@ -1,5 +1,5 @@
 use crate::protocol_types::{self, Role};
-use crate::response_provider::{ProviderError, ResponseProvider};
+use crate::response_provider::{ProviderCompletion, ProviderError, ResponseProvider};
 use crate::websockets::WebSocketConnection;
 
 use async_trait::async_trait;
@@ -34,7 +34,7 @@ impl ResponseProvider for ControlledProvider {
     async fn generate_response(
         &self,
         conversation_history: &[protocol_types::Message],
-    ) -> Result<protocol_types::Message, ProviderError> {
+    ) -> Result<ProviderCompletion, ProviderError> {
         let key = conversation_history
             .first()
             .expect("test conversations should have at least one message")
@@ -57,7 +57,8 @@ impl ResponseProvider for ControlledProvider {
         Ok(protocol_types::Message {
             role: Role::Assistant,
             content,
-        })
+        }
+        .into())
     }
 }
 

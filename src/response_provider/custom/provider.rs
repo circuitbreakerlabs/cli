@@ -1,6 +1,6 @@
 use super::config::CustomProviderConfig;
 use crate::protocol_types;
-use crate::response_provider::{ProviderError, ResponseProvider};
+use crate::response_provider::{ProviderCompletion, ProviderError, ResponseProvider};
 use async_trait::async_trait;
 use reqwest::header::HeaderMap;
 use rhai::serde::to_dynamic;
@@ -44,7 +44,7 @@ impl ResponseProvider for CustomProvider {
     async fn generate_response(
         &self,
         conversation_history: &[protocol_types::Message],
-    ) -> Result<protocol_types::Message, ProviderError> {
+    ) -> Result<ProviderCompletion, ProviderError> {
         let messages_dynamic =
             to_dynamic(conversation_history).map_err(|e| ProviderError::Parsing(e.to_string()))?;
         let engine = self.engine.clone();
@@ -91,7 +91,8 @@ impl ResponseProvider for CustomProvider {
         Ok(protocol_types::Message {
             role: protocol_types::Role::Assistant,
             content,
-        })
+        }
+        .into())
     }
 }
 
@@ -263,8 +264,12 @@ mod tests {
             .expect("response should be generated");
         let request_json = server_handle.await.expect("server task should complete");
 
-        assert!(matches!(response.role, Role::Assistant));
-        assert_eq!(response.content, "translated response");
+        assert!(matches!(response.message.role, Role::Assistant));
+        assert_eq!(response.message.content, "translated response");
+        assert_eq!(response.model_id, None);
+        assert_eq!(response.tokens_used, None);
+        assert_eq!(response.finish_reason, None);
+        assert_eq!(response.provider_response_id, None);
         assert_eq!(request_json["message_count"], json!(2));
         assert_eq!(request_json["last_role"], json!("user"));
         assert_eq!(request_json["last_content"], json!("hello"));
