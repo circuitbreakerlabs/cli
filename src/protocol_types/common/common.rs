@@ -154,6 +154,18 @@ pub struct CompletionResponse {
     pub request_id: String,
     /// The model's generated response
     pub model_response: String,
+    /// Provider-reported model identifier for this response
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
+    /// Provider-reported total prompt and completion token usage
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tokens_used: Option<u64>,
+    /// Provider-reported reason the completion ended
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finish_reason: Option<String>,
+    /// Provider-assigned identifier for the completion
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_response_id: Option<String>,
 }
 
 /// Client returns the model's completion for a requested conversation.
@@ -188,6 +200,10 @@ mod tests {
         let envelope = CompletionResponseEnvelope::from(CompletionResponse {
             request_id: "req-123".to_string(),
             model_response: "safe reply".to_string(),
+            model_id: Some("gpt-4o-2024-08-06".to_string()),
+            tokens_used: Some(42),
+            finish_reason: Some("stop".to_string()),
+            provider_response_id: Some("chatcmpl-123".to_string()),
         });
 
         let value = serde_json::to_value(envelope).expect("envelope should serialize");
@@ -198,7 +214,11 @@ mod tests {
                 "type": "completion_response",
                 "data": {
                     "request_id": "req-123",
-                    "model_response": "safe reply"
+                    "model_response": "safe reply",
+                    "model_id": "gpt-4o-2024-08-06",
+                    "tokens_used": 42,
+                    "finish_reason": "stop",
+                    "provider_response_id": "chatcmpl-123"
                 }
             })
         );
