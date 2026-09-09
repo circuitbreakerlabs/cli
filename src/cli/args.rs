@@ -171,6 +171,13 @@ pub struct ApiEvaluationsCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum EvaluationCommand {
+    /// Run a multi-turn voice evaluation through a local adapter
+    Voice {
+        #[command(subcommand)]
+        provider: crate::voice::ProviderCommand,
+        #[command(flatten)]
+        request: MultiTurnEvalRequest,
+    },
     /// Run single-turn evaluation
     SingleTurn {
         #[command(subcommand)]
@@ -196,6 +203,13 @@ pub enum EvaluationCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum ReRunEvaluationCommand {
+    /// Re-run historic multi-turn results using a voice endpoint
+    Voice {
+        #[command(subcommand)]
+        provider: crate::voice::ProviderCommand,
+        #[command(flatten)]
+        request: MultiTurnRerunEvalRequest,
+    },
     /// Re-run a historic single-turn evaluation result
     SingleTurn {
         #[command(subcommand)]
@@ -278,6 +292,7 @@ mod tests {
         #[allow(clippy::match_wildcard_for_single_variants)]
         match args.command {
             Some(super::Command::Eval { evaluation }) => match evaluation {
+                super::EvaluationCommand::Voice { .. } => panic!("expected text command"),
                 super::EvaluationCommand::SingleTurn { request, .. } => {
                     assert!((request.threshold - 0.5).abs() < f32::EPSILON);
                     assert_eq!(request.variations, 2);
@@ -468,6 +483,7 @@ mod tests {
         #[allow(clippy::match_wildcard_for_single_variants)]
         match args.command {
             Some(super::Command::Eval { evaluation }) => match evaluation {
+                super::EvaluationCommand::Voice { .. } => panic!("expected text command"),
                 super::EvaluationCommand::SingleTurn { request, .. } => {
                     assert_eq!(request.maximum_iteration_layers, 0);
                 }
@@ -567,6 +583,7 @@ mod tests {
         #[allow(clippy::match_wildcard_for_single_variants)]
         match args.command {
             Some(super::Command::Eval { evaluation }) => match evaluation {
+                super::EvaluationCommand::Voice { .. } => panic!("expected text command"),
                 super::EvaluationCommand::MultiTurn { request, .. } => {
                     assert!((request.threshold - 0.5).abs() < f32::EPSILON);
                     assert_eq!(request.max_turns, 4);
@@ -635,6 +652,7 @@ mod tests {
         #[allow(clippy::match_wildcard_for_single_variants)]
         match args.command {
             Some(super::Command::Eval { evaluation }) => match evaluation {
+                super::EvaluationCommand::Voice { .. } => panic!("expected text command"),
                 super::EvaluationCommand::MultiTurn { request, .. } => {
                     assert_eq!(request.max_turns, 100);
                 }
@@ -757,7 +775,9 @@ mod tests {
 
         match args.command {
             Some(super::Command::Eval { evaluation }) => match evaluation {
+                super::EvaluationCommand::Voice { .. } => panic!("expected text command"),
                 super::EvaluationCommand::ReRun { rerun } => match rerun {
+                    super::ReRunEvaluationCommand::Voice { .. } => panic!("expected text command"),
                     super::ReRunEvaluationCommand::SingleTurn { request, .. } => {
                         assert_eq!(
                             request
@@ -874,7 +894,9 @@ mod tests {
 
         match args.command {
             Some(super::Command::Eval { evaluation }) => match evaluation {
+                super::EvaluationCommand::Voice { .. } => panic!("expected text command"),
                 super::EvaluationCommand::ReRun { rerun } => match rerun {
+                    super::ReRunEvaluationCommand::Voice { .. } => panic!("expected text command"),
                     super::ReRunEvaluationCommand::SingleTurn { request, .. } => {
                         assert!(request.test_result_ids.is_none());
                         assert_eq!(request.evaluation_id, Some(123));
@@ -995,7 +1017,9 @@ mod tests {
 
         match args.command {
             Some(super::Command::Eval { evaluation }) => match evaluation {
+                super::EvaluationCommand::Voice { .. } => panic!("expected text command"),
                 super::EvaluationCommand::ReRun { rerun } => match rerun {
+                    super::ReRunEvaluationCommand::Voice { .. } => panic!("expected text command"),
                     super::ReRunEvaluationCommand::MultiTurn { request, .. } => {
                         assert_eq!(
                             request
@@ -1045,7 +1069,9 @@ mod tests {
 
         match args.command {
             Some(super::Command::Eval { evaluation }) => match evaluation {
+                super::EvaluationCommand::Voice { .. } => panic!("expected text command"),
                 super::EvaluationCommand::ReRun { rerun } => match rerun {
+                    super::ReRunEvaluationCommand::Voice { .. } => panic!("expected text command"),
                     super::ReRunEvaluationCommand::MultiTurn { request, .. } => {
                         assert!(request.test_result_ids.is_none());
                         assert_eq!(request.evaluation_id, Some(123));
@@ -1629,5 +1655,28 @@ mod tests {
         ])
         .expect_err("eval --validate-api-key should be rejected");
         assert_eq!(err.kind(), ErrorKind::UnknownArgument);
+    }
+    #[test]
+    fn parses_voice_config_for_fresh_and_rerun_commands() {
+        for (rerun, selector) in [(false, "--test-case-groups"), (true, "--evaluation-id")] {
+            let mut arguments = vec!["cbl", "--cbl-api-key", "test", "eval"];
+            if rerun {
+                arguments.push("re-run");
+            }
+            arguments.extend([
+                "voice",
+                "--threshold",
+                "0.5",
+                "--max-turns",
+                "4",
+                selector,
+                if rerun { "123" } else { "test" },
+                "livekit",
+                "--config",
+                "voice.toml",
+            ]);
+            let args = super::Args::try_parse_from(arguments).unwrap();
+            args.validate().unwrap();
+        }
     }
 }

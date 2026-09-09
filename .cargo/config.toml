@@ -1,0 +1,6 @@
+# Required by LiveKit's Objective-C WebRTC implementation on macOS.
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-arg=-ObjC"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "link-arg=-ObjC"]

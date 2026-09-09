@@ -14,6 +14,8 @@ pub use validate_api_key::VALIDATE_API_KEY_ENDPOINT;
 
 pub fn endpoint_from_evaluation_type(eval: &crate::evaluations::EvaluationType) -> &str {
     match eval {
+        crate::evaluations::EvaluationType::Voice => "/ws/multiturn_voice_evaluation",
+        crate::evaluations::EvaluationType::VoiceRerun => "/ws/multiturn_voice_rerun_evaluation",
         crate::evaluations::EvaluationType::SingleTurn => singleturn::SINGLE_TURN_ENDPOINT,
         crate::evaluations::EvaluationType::SingleTurnRerun => {
             singleturn::SINGLE_TURN_RERUN_ENDPOINT

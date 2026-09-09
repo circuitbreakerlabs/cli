@@ -17,9 +17,9 @@ impl TestResultIds {
     }
 }
 
-impl Into<Vec<i64>> for TestResultIds {
-    fn into(self) -> Vec<i64> {
-        self.0
+impl From<TestResultIds> for Vec<i64> {
+    fn from(value: TestResultIds) -> Self {
+        value.0
     }
 }
 

@@ -103,3 +103,8 @@ CBL offers specialized test packs for different domains and risk scenarios. Pass
 ---
 
 Questions? Feedback? Reach us at [team@circuitbreakerlabs.ai](mailto:team@circuitbreakerlabs.ai).
+
+## Voice evaluations
+
+Voice-enabled builds connect to customer LiveKit endpoints using local configuration
+and optional Rhai hooks. See [voice setup, examples, and protocol](docs/voice.md).

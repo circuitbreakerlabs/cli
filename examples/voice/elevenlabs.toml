@@ -1,0 +1,13 @@
+label = "my-voice-agent"
+bootstrap_script = "elevenlabs-bootstrap.rhai"
+control_script = "response-events.rhai"
+
+[parameters]
+agent_id = "replace-me"
+livekit_url = "wss://your-livekit-host"
+# Optional bootstrap query parameters:
+# branch_id = "..."
+# environment = "..."
+
+[credentials]
+api_key = "ELEVENLABS_API_KEY"
