@@ -67,6 +67,34 @@ impl Args {
             api.validate()?;
         }
 
+        if let Some(Command::Eval { evaluation }) = &self.command {
+            let (voice, provider) = match evaluation {
+                EvaluationCommand::SingleTurn {
+                    voice, provider, ..
+                }
+                | EvaluationCommand::MultiTurn {
+                    voice, provider, ..
+                } => (Some(*voice), Some(provider)),
+                EvaluationCommand::ReRun { rerun } => match rerun {
+                    ReRunEvaluationCommand::MultiTurn {
+                        voice, provider, ..
+                    } => (Some(*voice), Some(provider)),
+                    ReRunEvaluationCommand::SingleTurn { provider, .. } => {
+                        (Some(false), Some(provider))
+                    }
+                },
+            };
+            if let (Some(voice), Some(provider)) = (voice, provider) {
+                let livekit = matches!(provider, ProviderCommand::Livekit { .. });
+                if voice != livekit {
+                    return Err(Self::command().error(
+                        clap::error::ErrorKind::ArgumentConflict,
+                        "--voice must be used with the livekit provider, and livekit requires --voice",
+                    ));
+                }
+            }
+        }
+
         Ok(())
     }
 }
@@ -171,15 +199,11 @@ pub struct ApiEvaluationsCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum EvaluationCommand {
-    /// Run a multi-turn voice evaluation through a local adapter
-    Voice {
-        #[command(subcommand)]
-        provider: crate::voice::ProviderCommand,
-        #[command(flatten)]
-        request: MultiTurnEvalRequest,
-    },
     /// Run single-turn evaluation
     SingleTurn {
+        /// Use the customer-configured voice transport instead of a text provider
+        #[arg(long)]
+        voice: bool,
         #[command(subcommand)]
         provider: ProviderCommand,
         #[command(flatten)]
@@ -188,6 +212,9 @@ pub enum EvaluationCommand {
 
     /// Run multi-turn evaluation
     MultiTurn {
+        /// Use the customer-configured voice transport instead of a text provider
+        #[arg(long)]
+        voice: bool,
         #[command(subcommand)]
         provider: ProviderCommand,
         #[command(flatten)]
@@ -203,13 +230,6 @@ pub enum EvaluationCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum ReRunEvaluationCommand {
-    /// Re-run historic multi-turn results using a voice endpoint
-    Voice {
-        #[command(subcommand)]
-        provider: crate::voice::ProviderCommand,
-        #[command(flatten)]
-        request: MultiTurnRerunEvalRequest,
-    },
     /// Re-run a historic single-turn evaluation result
     SingleTurn {
         #[command(subcommand)]
@@ -220,6 +240,9 @@ pub enum ReRunEvaluationCommand {
 
     /// Re-run a historic multi-turn evaluation result
     MultiTurn {
+        /// Use the customer-configured voice transport instead of a text provider
+        #[arg(long)]
+        voice: bool,
         #[command(subcommand)]
         provider: ProviderCommand,
         #[command(flatten)]
@@ -237,6 +260,12 @@ pub enum ProviderCommand {
     OpenAI(OpenAIProviderConfig),
     /// Use Custom Rhai-scripted provider
     Custom(CustomProviderConfig),
+    /// Connect to a customer `LiveKit` endpoint for voice evaluation
+    Livekit {
+        /// Customer-owned TOML connection and control configuration
+        #[arg(long)]
+        config: PathBuf,
+    },
 }
 
 #[derive(Clone, Copy, ValueEnum, Debug)]
@@ -292,7 +321,6 @@ mod tests {
         #[allow(clippy::match_wildcard_for_single_variants)]
         match args.command {
             Some(super::Command::Eval { evaluation }) => match evaluation {
-                super::EvaluationCommand::Voice { .. } => panic!("expected text command"),
                 super::EvaluationCommand::SingleTurn { request, .. } => {
                     assert!((request.threshold - 0.5).abs() < f32::EPSILON);
                     assert_eq!(request.variations, 2);
@@ -328,6 +356,14 @@ mod tests {
             "gpt-4.1-nano",
         ])
         .expect_err("legacy top-level evaluation command should be rejected");
+
+        assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
+    }
+
+    #[test]
+    fn rejects_legacy_voice_evaluation_command() {
+        let err = Args::try_parse_from(["cbl", "--cbl-api-key", "cbl-key", "eval", "voice"])
+            .expect_err("legacy voice command should be rejected");
 
         assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
     }
@@ -483,7 +519,6 @@ mod tests {
         #[allow(clippy::match_wildcard_for_single_variants)]
         match args.command {
             Some(super::Command::Eval { evaluation }) => match evaluation {
-                super::EvaluationCommand::Voice { .. } => panic!("expected text command"),
                 super::EvaluationCommand::SingleTurn { request, .. } => {
                     assert_eq!(request.maximum_iteration_layers, 0);
                 }
@@ -583,7 +618,6 @@ mod tests {
         #[allow(clippy::match_wildcard_for_single_variants)]
         match args.command {
             Some(super::Command::Eval { evaluation }) => match evaluation {
-                super::EvaluationCommand::Voice { .. } => panic!("expected text command"),
                 super::EvaluationCommand::MultiTurn { request, .. } => {
                     assert!((request.threshold - 0.5).abs() < f32::EPSILON);
                     assert_eq!(request.max_turns, 4);
@@ -652,7 +686,6 @@ mod tests {
         #[allow(clippy::match_wildcard_for_single_variants)]
         match args.command {
             Some(super::Command::Eval { evaluation }) => match evaluation {
-                super::EvaluationCommand::Voice { .. } => panic!("expected text command"),
                 super::EvaluationCommand::MultiTurn { request, .. } => {
                     assert_eq!(request.max_turns, 100);
                 }
@@ -775,9 +808,7 @@ mod tests {
 
         match args.command {
             Some(super::Command::Eval { evaluation }) => match evaluation {
-                super::EvaluationCommand::Voice { .. } => panic!("expected text command"),
                 super::EvaluationCommand::ReRun { rerun } => match rerun {
-                    super::ReRunEvaluationCommand::Voice { .. } => panic!("expected text command"),
                     super::ReRunEvaluationCommand::SingleTurn { request, .. } => {
                         assert_eq!(
                             request
@@ -894,9 +925,7 @@ mod tests {
 
         match args.command {
             Some(super::Command::Eval { evaluation }) => match evaluation {
-                super::EvaluationCommand::Voice { .. } => panic!("expected text command"),
                 super::EvaluationCommand::ReRun { rerun } => match rerun {
-                    super::ReRunEvaluationCommand::Voice { .. } => panic!("expected text command"),
                     super::ReRunEvaluationCommand::SingleTurn { request, .. } => {
                         assert!(request.test_result_ids.is_none());
                         assert_eq!(request.evaluation_id, Some(123));
@@ -1017,9 +1046,7 @@ mod tests {
 
         match args.command {
             Some(super::Command::Eval { evaluation }) => match evaluation {
-                super::EvaluationCommand::Voice { .. } => panic!("expected text command"),
                 super::EvaluationCommand::ReRun { rerun } => match rerun {
-                    super::ReRunEvaluationCommand::Voice { .. } => panic!("expected text command"),
                     super::ReRunEvaluationCommand::MultiTurn { request, .. } => {
                         assert_eq!(
                             request
@@ -1069,9 +1096,7 @@ mod tests {
 
         match args.command {
             Some(super::Command::Eval { evaluation }) => match evaluation {
-                super::EvaluationCommand::Voice { .. } => panic!("expected text command"),
                 super::EvaluationCommand::ReRun { rerun } => match rerun {
-                    super::ReRunEvaluationCommand::Voice { .. } => panic!("expected text command"),
                     super::ReRunEvaluationCommand::MultiTurn { request, .. } => {
                         assert!(request.test_result_ids.is_none());
                         assert_eq!(request.evaluation_id, Some(123));
@@ -1657,14 +1682,15 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::UnknownArgument);
     }
     #[test]
-    fn parses_voice_config_for_fresh_and_rerun_commands() {
+    fn parses_multi_turn_voice_config_for_fresh_and_rerun_commands() {
         for (rerun, selector) in [(false, "--test-case-groups"), (true, "--evaluation-id")] {
             let mut arguments = vec!["cbl", "--cbl-api-key", "test", "eval"];
             if rerun {
                 arguments.push("re-run");
             }
             arguments.extend([
-                "voice",
+                "multi-turn",
+                "--voice",
                 "--threshold",
                 "0.5",
                 "--max-turns",
@@ -1678,5 +1704,123 @@ mod tests {
             let args = super::Args::try_parse_from(arguments).unwrap();
             args.validate().unwrap();
         }
+    }
+
+    #[test]
+    fn parses_single_turn_voice_command() {
+        let args = super::Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "test",
+            "eval",
+            "single-turn",
+            "--voice",
+            "--threshold",
+            "0.5",
+            "--variations",
+            "2",
+            "--maximum-iteration-layers",
+            "1",
+            "--test-case-groups",
+            "test",
+            "livekit",
+            "--config",
+            "voice.toml",
+        ])
+        .expect("single-turn voice command should parse");
+        args.validate()
+            .expect("single-turn voice command should validate");
+        match args.command {
+            Some(super::Command::Eval {
+                evaluation: super::EvaluationCommand::SingleTurn { voice: true, .. },
+            }) => {}
+            _ => panic!("expected single-turn voice command"),
+        }
+    }
+
+    #[test]
+    fn keeps_text_provider_as_default() {
+        let args = super::Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "test",
+            "eval",
+            "single-turn",
+            "--threshold",
+            "0.5",
+            "--variations",
+            "2",
+            "--maximum-iteration-layers",
+            "1",
+            "--test-case-groups",
+            "test",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "model",
+        ])
+        .expect("text command should parse");
+        args.validate().expect("text command should validate");
+        match args.command {
+            Some(super::Command::Eval {
+                evaluation: super::EvaluationCommand::SingleTurn { voice: false, .. },
+            }) => {}
+            _ => panic!("expected default text command"),
+        }
+    }
+
+    #[test]
+    fn rejects_voice_without_livekit_provider() {
+        let args = super::Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "test",
+            "eval",
+            "multi-turn",
+            "--voice",
+            "--threshold",
+            "0.5",
+            "--max-turns",
+            "4",
+            "--test-case-groups",
+            "test",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "model",
+        ])
+        .expect("command should parse before semantic validation");
+        let error = args.validate().expect_err("voice should require livekit");
+        assert_eq!(error.kind(), ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn rejects_livekit_for_single_turn_rerun() {
+        let args = super::Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "test",
+            "eval",
+            "re-run",
+            "single-turn",
+            "--threshold",
+            "0.5",
+            "--variations",
+            "2",
+            "--maximum-iteration-layers",
+            "1",
+            "--evaluation-id",
+            "123",
+            "livekit",
+            "--config",
+            "voice.toml",
+        ])
+        .expect("command should parse before semantic validation");
+        let error = args
+            .validate()
+            .expect_err("single-turn voice reruns should not be exposed");
+        assert_eq!(error.kind(), ErrorKind::ArgumentConflict);
     }
 }

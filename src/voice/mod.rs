@@ -11,18 +11,6 @@ pub mod protocol;
 #[cfg(all(feature = "voice", not(target_env = "musl")))]
 mod runner;
 
-use std::path::PathBuf;
-
-#[derive(Clone, Debug, clap::Subcommand)]
-pub enum ProviderCommand {
-    /// Connect to a customer `LiveKit` endpoint
-    Livekit {
-        /// Customer-owned TOML connection and control configuration
-        #[arg(long)]
-        config: PathBuf,
-    },
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Invalid voice configuration: {0}")]
@@ -46,4 +34,4 @@ pub enum Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[cfg(all(feature = "voice", not(target_env = "musl")))]
-pub use runner::run;
+pub use runner::{run, run_single};

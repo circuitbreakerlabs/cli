@@ -62,7 +62,9 @@ cbl --top-level-arg1 eval <evaluation_type> --evaluation-arg1 <provider> --provi
 
 where `eval`, `<evaluation_type>`, and `<provider>` are subcommands.
 
-The available evaluation types are `single-turn` and `multi-turn`. The available providers are `ollama`, `openai`, and `custom`.
+The available evaluation types are `single-turn` and `multi-turn`. The text
+providers are `ollama`, `openai`, and `custom`. Add `--voice` and use the
+`livekit` provider to run either evaluation type against a customer endpoint.
 
 #### Example
 

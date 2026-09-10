@@ -16,6 +16,9 @@ pub fn endpoint_from_evaluation_type(eval: &crate::evaluations::EvaluationType) 
     match eval {
         crate::evaluations::EvaluationType::Voice => "/ws/multiturn_voice_evaluation",
         crate::evaluations::EvaluationType::VoiceRerun => "/ws/multiturn_voice_rerun_evaluation",
+        crate::evaluations::EvaluationType::SingleTurnVoice => {
+            singleturn::SINGLE_TURN_VOICE_ENDPOINT
+        }
         crate::evaluations::EvaluationType::SingleTurn => singleturn::SINGLE_TURN_ENDPOINT,
         crate::evaluations::EvaluationType::SingleTurnRerun => {
             singleturn::SINGLE_TURN_RERUN_ENDPOINT
@@ -35,6 +38,10 @@ mod tests {
         assert_eq!(
             endpoint_from_evaluation_type(&EvaluationType::SingleTurn),
             "/ws/singleturn_evaluation"
+        );
+        assert_eq!(
+            endpoint_from_evaluation_type(&EvaluationType::SingleTurnVoice),
+            "/ws/singleturn_voice_evaluation"
         );
         assert_eq!(
             endpoint_from_evaluation_type(&EvaluationType::SingleTurnRerun),

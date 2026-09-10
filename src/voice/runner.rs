@@ -5,7 +5,8 @@ use super::{
     protocol::{Audio, Command, Input, MAX_CONTROL_BYTES, QUEUE_FRAMES, VERSION},
 };
 use crate::{
-    protocol_types::MultiTurnEvaluationRequest, tui::MultiTurnProgressIndicatorMessage,
+    protocol_types::{MultiTurnEvaluationRequest, SingleTurnEvaluationRequest},
+    tui::{MultiTurnProgressIndicatorMessage, SingleTurnProgressIndicatorMessage},
     websockets::WebSocketConnection,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -24,12 +25,68 @@ pub async fn run(
     request: MultiTurnEvaluationRequest,
     progress: Option<mpsc::Sender<MultiTurnProgressIndicatorMessage>>,
 ) -> Result<Value> {
+    let (kind, data) = match &request {
+        MultiTurnEvaluationRequest::Standard(data) => ("voice_request", serde_json::to_value(data)),
+        MultiTurnEvaluationRequest::Rerun(data) => {
+            ("voice_rerun_request", serde_json::to_value(data))
+        }
+    };
+    run_inner(
+        websocket,
+        path,
+        data.map_err(|_| Error::Protocol)?,
+        kind,
+        request.max_turns(),
+        Progress::Multi(progress),
+        false,
+    )
+    .await
+}
+
+pub async fn run_single(
+    websocket: WebSocketConnection,
+    path: &Path,
+    request: SingleTurnEvaluationRequest,
+    progress: Option<mpsc::Sender<SingleTurnProgressIndicatorMessage>>,
+) -> Result<Value> {
+    let (kind, data) = match &request {
+        SingleTurnEvaluationRequest::Standard(data) => {
+            ("voice_request", serde_json::to_value(data))
+        }
+        SingleTurnEvaluationRequest::Rerun(data) => {
+            ("voice_rerun_request", serde_json::to_value(data))
+        }
+    };
+    run_inner(
+        websocket,
+        path,
+        data.map_err(|_| Error::Protocol)?,
+        kind,
+        1,
+        Progress::Single(progress),
+        true,
+    )
+    .await
+}
+
+enum Progress {
+    Multi(Option<mpsc::Sender<MultiTurnProgressIndicatorMessage>>),
+    Single(Option<mpsc::Sender<SingleTurnProgressIndicatorMessage>>),
+}
+
+#[allow(clippy::too_many_lines)]
+async fn run_inner(
+    websocket: WebSocketConnection,
+    path: &Path,
+    data: Value,
+    kind: &str,
+    max_turns: usize,
+    progress: Progress,
+    single: bool,
+) -> Result<Value> {
     let config = Config::load(path)?;
     // Resolve secrets and compile hooks before asking the API to start paid work.
-    config.context(
-        0,
-        u32::try_from(request.max_turns()).map_err(|_| Error::Protocol)?,
-    )?;
+    config.context(0, u32::try_from(max_turns).map_err(|_| Error::Protocol)?)?;
     super::hooks::Hooks::new(&config)?;
     if let Some(path) = &config.bootstrap_script {
         super::hooks::Script::load(path)?;
@@ -41,19 +98,20 @@ pub async fn run(
                 .ok_or(Error::Configuration("missing token_env"))?,
         )?;
     }
-    let (kind, data) = match &request {
-        MultiTurnEvaluationRequest::Standard(data) => ("voice_request", serde_json::to_value(data)),
-        MultiTurnEvaluationRequest::Rerun(data) => {
-            ("voice_rerun_request", serde_json::to_value(data))
-        }
-    };
     let target =
         json!({"label":config.label,"transport":"livekit","cli_version":env!("CARGO_PKG_VERSION")});
     let provider: Arc<dyn VoiceSessionProvider> = Arc::new(Provider(config));
     let (mut writer, mut reader) = websocket.split();
-    writer.send(Message::Text(json!({"type":kind,"version":VERSION,"data":data.map_err(|_| Error::Protocol)?,"target":target}).to_string().into())).await.map_err(|_| Error::Transport)?;
+    writer
+        .send(Message::Text(
+            json!({"type":kind,"version":VERSION,"data":data,"target":target})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .map_err(|_| Error::Transport)?;
     let (output, mut outgoing) = mpsc::channel::<Message>(QUEUE_FRAMES);
-    let mut sessions = HashMap::<i32, (mpsc::Sender<Input>, watch::Sender<bool>)>::new();
+    let mut sessions = HashMap::<i32, (mpsc::Sender<Input>, watch::Sender<bool>, i32)>::new();
     let mut tasks = JoinSet::new();
     let result = async {
         loop {
@@ -68,7 +126,8 @@ pub async fn run(
                         let event: Value = serde_json::from_str(text).map_err(|_| Error::Protocol)?;
                         if event["type"] == "response_end" {
                             let id = i32::try_from(event["session_id"].as_i64().ok_or(Error::Protocol)?).map_err(|_| Error::Protocol)?;
-                            turn_progress(progress.as_ref(), id, false).await;
+                            let progress_id = sessions.get(&id).map_or(id, |(_, _, conversation_id)| *conversation_id);
+                            turn_progress(&progress, progress_id, false, single).await;
                         }
                     }
                     writer.send(message).await.map_err(|_| Error::Transport)?;
@@ -90,13 +149,22 @@ pub async fn run(
                                     continue;
                                 }
                                 Some("voice_result") => {
-                                    serde_json::from_value::<crate::protocol_types::multi_turn::MultiTurnResponse>(value["data"].clone()).map_err(|_| Error::Protocol)?;
+                                    if single {
+                                        serde_json::from_value::<
+                                            crate::protocol_types::single_turn::SingleTurnResponse,
+                                        >(value["data"].clone())
+                                        .map_err(|_| Error::Protocol)?;
+                                    } else {
+                                        serde_json::from_value::<
+                                            crate::protocol_types::multi_turn::MultiTurnResponse,
+                                        >(value["data"].clone())
+                                        .map_err(|_| Error::Protocol)?;
+                                    }
                                     return Ok(value["data"].clone());
                                 },
                                 Some("voice_error") => return Err(Error::Protocol),
-                                Some("multi_turn_evaluation_start" | "conversation_complete" | "conversation_error") => {
-                                    if let Some(tx) = &progress { forward_progress(tx, &value, request.max_turns()).await?; }
-                                    else { tracing::info!(event = value["type"].as_str().unwrap_or("progress"), "Voice evaluation progress"); }
+                                Some("multi_turn_evaluation_start" | "iteration_start" | "iteration_complete" | "conversation_complete" | "conversation_error") => {
+                                    forward_progress(&progress, &value, max_turns, single).await?;
                                     continue;
                                 }
                                 _ => Input::Control(serde_json::from_value(value).map_err(|_| Error::Protocol)?),
@@ -105,19 +173,28 @@ pub async fn run(
                         Message::Frame(_) => return Err(Error::Protocol),
                     };
                     if let Input::Control(Command::UtteranceStart { session_id, .. }) = &input {
-                        turn_progress(progress.as_ref(), *session_id, true).await;
+                        let progress_id = sessions
+                            .get(session_id)
+                            .map_or(*session_id, |(_, _, conversation_id)| *conversation_id);
+                        turn_progress(&progress, progress_id, true, single).await;
                     }
                     let id = match &input { Input::Audio(audio) => audio.header.session_id, Input::Control(command) => command.session_id() };
-                    if let Input::Control(Command::SessionOpen { max_turns, timeout_ms, .. }) = input {
-                        if sessions.contains_key(&id) || sessions.len() >= 128 || timeout_ms == 0 { return Err(Error::Protocol); }
+                    if let Input::Control(Command::SessionOpen { conversation_id, max_turns: session_max_turns, timeout_ms, .. }) = input {
+                        if sessions.contains_key(&id)
+                            || sessions.len() >= 128
+                            || timeout_ms == 0
+                            || (single && session_max_turns != 1)
+                        {
+                            return Err(Error::Protocol);
+                        }
                         let (tx, rx) = mpsc::channel(QUEUE_FRAMES + 2);
                         let (session_stop, stop_rx) = watch::channel(false);
-                        sessions.insert(id, (tx, session_stop));
+                        sessions.insert(id, (tx, session_stop, conversation_id.unwrap_or(id)));
                         let provider = provider.clone();
                         let output = output.clone();
                         tasks.spawn(async move {
                             let execution = async {
-                                let session = tokio::time::timeout(Duration::from_millis(timeout_ms.min(3_300_000)), provider.connect(id, max_turns)).await.map_err(|_| Error::Timeout)??;
+                                let session = tokio::time::timeout(Duration::from_millis(timeout_ms.min(3_300_000)), provider.connect(id, session_max_turns)).await.map_err(|_| Error::Timeout)??;
                                 session.run(rx, output.clone(), stop_rx).await
                             };
                             let result = execution.await;
@@ -128,9 +205,9 @@ pub async fn run(
                             }
                         });
                     } else if matches!(input, Input::Control(Command::SessionClose { .. } | Command::PlaybackCancel { .. })) {
-                        if let Some((_, stop)) = sessions.remove(&id) { let _ = stop.send(true); }
+                        if let Some((_, stop, _)) = sessions.remove(&id) { let _ = stop.send(true); }
                     } else {
-                        let Some((tx, session_stop)) = sessions.get(&id) else { return Err(Error::Protocol); };
+                        let Some((tx, session_stop, _)) = sessions.get(&id) else { return Err(Error::Protocol); };
                         if tx.try_send(input).is_err() {
                             let _ = session_stop.send(true);
                             emit(&output, json!({"type":"session_error","session_id":id,"code":"overflow"})).await?;
@@ -140,7 +217,7 @@ pub async fn run(
             }
         }
     }.await;
-    for (_, session_stop) in sessions.values() {
+    for (_, session_stop, _) in sessions.values() {
         let _ = session_stop.send(true);
     }
     // Continue draining output while sessions close so cleanup cannot deadlock on
@@ -158,21 +235,53 @@ pub async fn run(
         while tasks.join_next().await.is_some() {}
     }
     let _ = writer.close().await;
-    if let Some(tx) = progress {
-        let _ = tx
-            .send(MultiTurnProgressIndicatorMessage::EvaluationComplete)
-            .await;
+    match progress {
+        Progress::Multi(Some(tx)) => {
+            let _ = tx
+                .send(MultiTurnProgressIndicatorMessage::EvaluationComplete)
+                .await;
+        }
+        Progress::Single(Some(tx)) => {
+            let _ = tx
+                .send(SingleTurnProgressIndicatorMessage::EvaluationComplete)
+                .await;
+        }
+        Progress::Multi(None) | Progress::Single(None) => {}
     }
     result
 }
 
 async fn forward_progress(
-    tx: &mpsc::Sender<MultiTurnProgressIndicatorMessage>,
+    progress: &Progress,
     value: &Value,
     max_turns: usize,
+    single: bool,
 ) -> Result<()> {
     let data = value["data"].clone();
-    let progress = match value["type"].as_str() {
+    if single {
+        let message = match value["type"].as_str() {
+            Some("iteration_start") => SingleTurnProgressIndicatorMessage::IterationStart(
+                serde_json::from_value(data).map_err(|_| Error::Protocol)?,
+            ),
+            Some("iteration_complete") => SingleTurnProgressIndicatorMessage::IterationComplete(
+                serde_json::from_value(data).map_err(|_| Error::Protocol)?,
+            ),
+            Some("conversation_complete") => {
+                SingleTurnProgressIndicatorMessage::ConversationComplete(
+                    serde_json::from_value(data).map_err(|_| Error::Protocol)?,
+                )
+            }
+            Some("conversation_error") => SingleTurnProgressIndicatorMessage::ConversationError(
+                serde_json::from_value(data).map_err(|_| Error::Protocol)?,
+            ),
+            _ => return Ok(()),
+        };
+        if let Progress::Single(Some(tx)) = progress {
+            let _ = tx.send(message).await;
+        }
+        return Ok(());
+    }
+    let message = match value["type"].as_str() {
         Some("multi_turn_evaluation_start") => MultiTurnProgressIndicatorMessage::EvaluationStart {
             conversation_ids: serde_json::from_value(data["conversation_ids"].clone())
                 .map_err(|_| Error::Protocol)?,
@@ -186,17 +295,28 @@ async fn forward_progress(
         ),
         _ => return Ok(()),
     };
-    let _ = tx.send(progress).await;
+    if let Progress::Multi(Some(tx)) = progress {
+        let _ = tx.send(message).await;
+    }
     Ok(())
 }
 
-async fn turn_progress(
-    progress: Option<&mpsc::Sender<MultiTurnProgressIndicatorMessage>>,
-    id: i32,
-    customer: bool,
-) {
+async fn turn_progress(progress: &Progress, id: i32, customer: bool, single: bool) {
     use crate::tui::WaitingFor;
-    if let Some(tx) = progress {
+    if single {
+        if let Progress::Single(Some(tx)) = progress {
+            let _ = tx
+                .send(SingleTurnProgressIndicatorMessage::WaitingFor {
+                    conversation_id: id,
+                    waiting_for: if customer {
+                        WaitingFor::Provider
+                    } else {
+                        WaitingFor::API
+                    },
+                })
+                .await;
+        }
+    } else if let Progress::Multi(Some(tx)) = progress {
         let _ = tx
             .send(MultiTurnProgressIndicatorMessage::ConversationTurn {
                 conversation_id: id,

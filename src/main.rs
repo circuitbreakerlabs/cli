@@ -84,11 +84,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     match evaluation {
-        cli::EvaluationCommand::Voice { provider, request } => {
+        cli::EvaluationCommand::SingleTurn {
+            voice: true,
+            provider: cli::ProviderCommand::Livekit { config },
+            request,
+        } => {
+            return run_single_turn_voice_cli(
+                &cli_args.cbl_api_base_url,
+                &cli_args.cbl_api_key,
+                config,
+                request.into(),
+                cli_args.log_mode,
+                cli_args.output_file,
+            )
+            .await;
+        }
+        cli::EvaluationCommand::MultiTurn {
+            voice: true,
+            provider: cli::ProviderCommand::Livekit { config },
+            request,
+        } => {
             return run_voice_cli(
                 &cli_args.cbl_api_base_url,
                 &cli_args.cbl_api_key,
-                provider,
+                config,
                 request.into(),
                 cli_args.log_mode,
                 cli_args.output_file,
@@ -96,12 +115,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .await;
         }
         cli::EvaluationCommand::ReRun {
-            rerun: cli::ReRunEvaluationCommand::Voice { provider, request },
+            rerun:
+                cli::ReRunEvaluationCommand::MultiTurn {
+                    voice: true,
+                    provider: cli::ProviderCommand::Livekit { config },
+                    request,
+                },
         } => {
             return run_voice_cli(
                 &cli_args.cbl_api_base_url,
                 &cli_args.cbl_api_key,
-                provider,
+                config,
                 request.into(),
                 cli_args.log_mode,
                 cli_args.output_file,
@@ -112,13 +136,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let provider_command = match &evaluation {
-        cli::EvaluationCommand::Voice { .. } => unreachable!("voice dispatched above"),
-        cli::EvaluationCommand::SingleTurn { provider, .. }
-        | cli::EvaluationCommand::MultiTurn { provider, .. } => provider,
+        cli::EvaluationCommand::SingleTurn {
+            provider, voice, ..
+        }
+        | cli::EvaluationCommand::MultiTurn {
+            provider, voice, ..
+        } => {
+            if *voice {
+                unreachable!("voice dispatched above")
+            }
+            provider
+        }
         cli::EvaluationCommand::ReRun { rerun } => match rerun {
-            cli::ReRunEvaluationCommand::Voice { .. } => unreachable!("voice dispatched above"),
-            cli::ReRunEvaluationCommand::SingleTurn { provider, .. }
-            | cli::ReRunEvaluationCommand::MultiTurn { provider, .. } => provider,
+            cli::ReRunEvaluationCommand::SingleTurn { provider, .. } => provider,
+            cli::ReRunEvaluationCommand::MultiTurn {
+                provider, voice, ..
+            } => {
+                if *voice {
+                    unreachable!("voice dispatched above")
+                }
+                provider
+            }
         },
     };
 
@@ -132,6 +170,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         cli::ProviderCommand::Custom(config) => {
             Arc::new(CustomProvider::new(config, &headers)?) as Arc<dyn ResponseProvider>
         }
+        cli::ProviderCommand::Livekit { .. } => {
+            unreachable!("voice provider dispatched above")
+        }
     };
 
     let websocket = websockets::connect(
@@ -142,7 +183,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
 
     match evaluation {
-        cli::EvaluationCommand::Voice { .. } => unreachable!("voice dispatched above"),
         cli::EvaluationCommand::SingleTurn { request, .. } => {
             run_single_turn_evaluation(
                 websocket,
@@ -164,7 +204,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .await?;
         }
         cli::EvaluationCommand::ReRun { rerun } => match rerun {
-            cli::ReRunEvaluationCommand::Voice { .. } => unreachable!("voice dispatched above"),
             cli::ReRunEvaluationCommand::SingleTurn { request, .. } => {
                 run_single_turn_evaluation(
                     websocket,
@@ -231,7 +270,7 @@ async fn run_single_turn_evaluation(
     };
     std::fs::write(&filename, json)?;
 
-    print_success_message(log_mode, "single", &filename);
+    print_success_message(log_mode, "single-turn", &filename);
     print_update_warning_if_needed(log_mode).await;
 
     Ok(())
@@ -276,7 +315,7 @@ async fn run_multi_turn_evaluation(
     };
     std::fs::write(&filename, json)?;
 
-    print_success_message(log_mode, "multi", &filename);
+    print_success_message(log_mode, "multi-turn", &filename);
     print_update_warning_if_needed(log_mode).await;
 
     Ok(())
@@ -285,13 +324,13 @@ async fn run_multi_turn_evaluation(
 fn print_success_message(log_mode: bool, turn_type: &str, filename: &Path) {
     if log_mode {
         tracing::info!(
-            "Saved full {}-turn evaluation results to {}",
+            "Saved full {} evaluation results to {}",
             turn_type,
             filename.display(),
         );
     } else {
         println!(
-            "Saved full {}-turn evaluation results to {}{}{}{}{}{}",
+            "Saved full {} evaluation results to {}{}{}{}{}{}",
             turn_type,
             SetForegroundColor(Color::Magenta),
             SetAttribute(Attribute::Bold),
@@ -308,7 +347,7 @@ fn print_success_message(log_mode: bool, turn_type: &str, filename: &Path) {
 async fn run_voice_cli(
     _base_url: &str,
     _key: &str,
-    _provider: voice::ProviderCommand,
+    _config: PathBuf,
     _request: MultiTurnEvaluationRequest,
     _log_mode: bool,
     _output: Option<PathBuf>,
@@ -316,11 +355,68 @@ async fn run_voice_cli(
     Err("This build does not include voice. Install the voice-enabled GNU Linux, macOS, or Windows build, or build with --features voice.".into())
 }
 
+#[cfg(not(all(feature = "voice", not(target_env = "musl"))))]
+#[allow(clippy::unused_async)]
+async fn run_single_turn_voice_cli(
+    _base_url: &str,
+    _key: &str,
+    _config: PathBuf,
+    _request: protocol_types::SingleTurnEvaluationRequest,
+    _log_mode: bool,
+    _output: Option<PathBuf>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    Err("This build does not include voice. Install the voice-enabled GNU Linux, macOS, or Windows build, or build with --features voice.".into())
+}
+
+#[cfg(all(feature = "voice", not(target_env = "musl")))]
+async fn run_single_turn_voice_cli(
+    base_url: &str,
+    key: &str,
+    config: PathBuf,
+    request: protocol_types::SingleTurnEvaluationRequest,
+    log_mode: bool,
+    output: Option<PathBuf>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let groups = request.test_case_groups().map(<[_]>::to_vec);
+    let maximum_iteration_layers = request.maximum_iteration_layers();
+    let websocket =
+        websockets::connect(base_url, evaluations::EvaluationType::SingleTurnVoice, key).await?;
+    let (progress, render) = if log_mode {
+        (None, None)
+    } else {
+        let (tx, rx) = tokio::sync::mpsc::channel(128);
+        (
+            Some(tx),
+            Some(tokio::spawn(singleturn::render_task(
+                rx,
+                maximum_iteration_layers,
+            ))),
+        )
+    };
+    let result = voice::run_single(websocket, &config, request, progress).await;
+    if let Some(render) = render {
+        let _ = render.await;
+    }
+    let result = result?;
+    let json =
+        evaluation_output::serialize_evaluation_output(&result, &groups.unwrap_or_default())?;
+    let filename = output.unwrap_or_else(|| {
+        PathBuf::from(format!(
+            "circuit_breaker_labs_single_turn_voice_evaluation_{}.json",
+            Local::now().format("%Y%m%d_%H%M%S")
+        ))
+    });
+    std::fs::write(&filename, json)?;
+    print_success_message(log_mode, "single-turn voice", &filename);
+    print_update_warning_if_needed(log_mode).await;
+    Ok(())
+}
+
 #[cfg(all(feature = "voice", not(target_env = "musl")))]
 async fn run_voice_cli(
     base_url: &str,
     key: &str,
-    provider: voice::ProviderCommand,
+    config: PathBuf,
     request: MultiTurnEvaluationRequest,
     log_mode: bool,
     output: Option<PathBuf>,
@@ -332,7 +428,6 @@ async fn run_voice_cli(
     } else {
         evaluations::EvaluationType::Voice
     };
-    let voice::ProviderCommand::Livekit { config } = provider;
     let websocket = websockets::connect(base_url, kind, key).await?;
     let (progress, render) = if log_mode {
         (None, None)
@@ -357,6 +452,6 @@ async fn run_voice_cli(
         ))
     });
     std::fs::write(&filename, json)?;
-    print_success_message(log_mode, "voice multi", &filename);
+    print_success_message(log_mode, "multi-turn voice", &filename);
     Ok(())
 }

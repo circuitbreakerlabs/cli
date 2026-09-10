@@ -104,4 +104,4 @@ jobs:
       - name: Check public voice help
         shell: bash
         run: |
-          target/release/cbl --cbl-api-key unused eval voice --help
+          target/release/cbl --cbl-api-key unused eval multi-turn --voice --help

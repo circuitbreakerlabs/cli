@@ -23,15 +23,22 @@ Copy `examples/voice/mock.toml` and its scripts, then configure the bootstrap UR
 With `CBL_API_KEY` in the environment:
 
 ```sh
-cbl eval voice --threshold 0.5 --max-turns 4 --test-case-groups your-group \
+cbl eval single-turn --voice --threshold 0.5 --variations 3 \
+  --maximum-iteration-layers 2 --test-case-groups your-group \
   livekit --config ./voice-target.toml
-cbl eval re-run voice --threshold 0.5 --max-turns 4 --evaluation-id 123 \
+cbl eval multi-turn --voice --threshold 0.5 --max-turns 4 --test-case-groups your-group \
+  livekit --config ./voice-target.toml
+cbl eval re-run multi-turn --voice --threshold 0.5 --max-turns 4 --evaluation-id 123 \
   livekit --config ./voice-target.toml
 ```
 
-`--test-result-ids` is also available for re-runs. Global `--log-mode` and
+Single-turn voice uses the single-turn evaluator: each attempt is one caller
+utterance and one customer response, while `--variations` and iteration layers
+retain their normal single-turn semantics. Multi-turn voice uses `--max-turns`.
+`--test-result-ids` is also available for multi-turn re-runs. Global `--log-mode` and
 `--output-file` work as for text. Results include target metadata and per-turn
 voice metadata. API-generated audio artifacts remain on the API.
+Single-turn voice re-runs are not exposed by this CLI version.
 
 ## Describe your endpoint
 
@@ -109,16 +116,18 @@ speaker audibly played the audio. Timing metadata uses the CLI's session-local c
 
 ## API/CLI protocol v1
 
-Routes are `/ws/multiturn_voice_evaluation` and
+Routes are `/ws/singleturn_voice_evaluation`, `/ws/multiturn_voice_evaluation`, and
 `/ws/multiturn_voice_rerun_evaluation`, under the normal API prefix. Initial JSON
 contains `type` (`voice_request` or `voice_rerun_request`), `version: "1"`, existing
-multi-turn `data`, and `target: {label, transport: "livekit", cli_version}`.
-The API acknowledges `voice_ready` before opening sessions.
+single-turn or multi-turn `data`, and `target: {label, transport: "livekit", cli_version}`.
+The API acknowledges `voice_ready` before opening sessions. The selected route
+determines the evaluation schema; single-turn requests do not include `max_turns`.
 
 Commands: `session_open`, `utterance_start`, `utterance_end`, `playback_cancel`,
 `session_close`. All carry `session_id`; utterance commands carry `stream_id`.
-Session open carries `max_turns` and `timeout_ms`; utterance start also carries
-`text` and `timeout_ms`.
+Session open carries `max_turns` and `timeout_ms`, plus an optional
+`conversation_id` used to group repeated single-turn attempts. Utterance start
+also carries `text` and `timeout_ms`.
 
 CLI events: `session_ready` (capabilities and optional external identifier),
 `utterance_ready`, `audio_consumed`, `playback_complete`, `response_start`,

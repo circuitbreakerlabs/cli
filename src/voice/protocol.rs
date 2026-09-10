@@ -65,6 +65,8 @@ impl Audio {
 pub enum Command {
     SessionOpen {
         session_id: i32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        conversation_id: Option<i32>,
         max_turns: u32,
         timeout_ms: u64,
     },
@@ -145,5 +147,26 @@ mod tests {
         );
         assert_eq!(audio.pcm, [0, 1, 2, 3]);
         assert_eq!(audio.encode().unwrap(), wire);
+    }
+
+    #[test]
+    fn session_open_accepts_optional_conversation_id() {
+        let command: Command = serde_json::from_value(serde_json::json!({
+            "type": "session_open",
+            "session_id": 17,
+            "conversation_id": 4,
+            "max_turns": 1,
+            "timeout_ms": 1000
+        }))
+        .expect("session open should deserialize");
+        assert!(matches!(
+            command,
+            Command::SessionOpen {
+                session_id: 17,
+                conversation_id: Some(4),
+                max_turns: 1,
+                timeout_ms: 1000
+            }
+        ));
     }
 }
