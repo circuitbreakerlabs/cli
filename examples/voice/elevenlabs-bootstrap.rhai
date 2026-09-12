@@ -1,5 +1,10 @@
 fn build_connect_request(context) {
-    let url = "https://api.elevenlabs.io/v1/convai/conversation/token?agent_id=" + url_encode(context.parameters.agent_id);
+    let agent_id = if context.parameters.contains("agent_id") {
+        context.parameters.agent_id
+    } else {
+        context.credentials.agent_id
+    };
+    let url = "https://api.elevenlabs.io/v1/convai/conversation/token?agent_id=" + url_encode(agent_id);
     if context.parameters.contains("branch_id") {
         url += "&branch_id=" + url_encode(context.parameters.branch_id);
     }

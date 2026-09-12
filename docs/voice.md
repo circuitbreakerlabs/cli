@@ -65,6 +65,15 @@ when each conversation needs fresh credentials or a separate room.
 The `elevenlabs` example shows an existing hosted integration; `mock` shows the
 local mock's handshake. These are editable examples, not compiled provider names.
 A LiveKit URL alone does not define authentication or conversational turn control.
+The ElevenLabs example reads `AGENT_ID` and `ELEVENLABS_API_KEY` from the process
+environment and uses the hosted ElevenLabs LiveKit URL. The CLI does not load
+`.env` automatically. If using the sibling API's Python environment, load it with
+`../api/.venv/bin/python -m dotenv -f .env run -- target/debug/cbl ...`.
+Its control script sends conversation initialization and waits for initialization
+metadata before declaring readiness. Enable `agent_response_complete` in the
+ElevenLabs agent's client events and configure the agent to wait for caller input.
+Hosted connection sequencing and final audio capture still require a live smoke
+test; the example is not evidence of verified hosted compatibility.
 Version 1 requires explicit customer response-completion events. Silence-based turn
 detection, arbitrary multistep bootstrap, standalone WebRTC/WebSocket transports,
 greeting-aware evaluation, and deliberate interruption scenarios are not supported.
@@ -142,12 +151,21 @@ stream. Both repositories consume the same fixture in `tests/fixtures/voice`.
 At most 100 unacknowledged caller frames are sent. `audio_consumed` replenishes one
 frame of credit. Pending CLI audio is bounded; overflow fails the conversation.
 The API retains complete responses for transcription within the response limit.
+The API admits at most three voice sessions per worker; additional conversations
+wait in a queue until a slot is released. Queue waiting is separate from the
+connection and response timeouts.
 
 Disconnects cancel active work and close customer rooms. No partial audio is
 replayed automatically. Local publication cancellation closes the session; remote
 agent interruption is not advertised. Existing voice timeout environment settings
 remain API-owned. The registry-based REST voice endpoint is removed; text routes
 are unchanged.
+
+Terminal voice errors use sanitized codes: `authentication`, `configuration`,
+`transport`, `timeout`, `synthesis_failed`, `transcription_failed`,
+`invalid_response`, `invalid_request`, `not_found`, `evaluation_failed`, or
+`internal_error`. Codes contain no provider details, prompts, scoring data, or
+credentials.
 
 ## Local end-to-end test
 

@@ -25,6 +25,8 @@ pub enum Error {
     TransportStage(&'static str),
     #[error("Invalid voice protocol message")]
     Protocol,
+    #[error("Voice evaluation failed: {0}")]
+    Remote(String),
     #[error("Voice operation timed out")]
     Timeout,
     #[error("Voice evaluation cancelled")]

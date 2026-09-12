@@ -9,9 +9,14 @@ use crate::{
     tui::{MultiTurnProgressIndicatorMessage, SingleTurnProgressIndicatorMessage},
     websockets::WebSocketConnection,
 };
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{Sink, SinkExt, StreamExt};
 use serde_json::{Value, json};
-use std::{collections::HashMap, path::Path, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+    sync::Arc,
+    time::Duration,
+};
 use tokio::{
     sync::{mpsc, watch},
     task::JoinSet,
@@ -112,6 +117,7 @@ async fn run_inner(
         .map_err(|_| Error::Transport)?;
     let (output, mut outgoing) = mpsc::channel::<Message>(QUEUE_FRAMES);
     let mut sessions = HashMap::<i32, (mpsc::Sender<Input>, watch::Sender<bool>, i32)>::new();
+    let mut overflowed_sessions = HashSet::new();
     let mut tasks = JoinSet::new();
     let result = async {
         loop {
@@ -162,7 +168,22 @@ async fn run_inner(
                                     }
                                     return Ok(value["data"].clone());
                                 },
-                                Some("voice_error") => return Err(Error::Protocol),
+                                Some("voice_error") => {
+                                    let code = match value.get("code").and_then(Value::as_str) {
+                                        Some("authentication") => "authentication",
+                                        Some("configuration") => "configuration",
+                                        Some("transport" | "overflow") => "transport",
+                                        Some("timeout") => "timeout",
+                                        Some("synthesis_failed") => "synthesis_failed",
+                                        Some("transcription_failed") => "transcription_failed",
+                                        Some("invalid_response") => "invalid_response",
+                                        Some("invalid_request") => "invalid_request",
+                                        Some("not_found") => "not_found",
+                                        Some("internal_error") => "internal_error",
+                                        _ => "evaluation_failed",
+                                    };
+                                    return Err(Error::Remote(code.into()));
+                                }
                                 Some("multi_turn_evaluation_start" | "iteration_start" | "iteration_complete" | "conversation_complete" | "conversation_error") => {
                                     forward_progress(&progress, &value, max_turns, single).await?;
                                     continue;
@@ -172,13 +193,24 @@ async fn run_inner(
                         }
                         Message::Frame(_) => return Err(Error::Protocol),
                     };
+                    let id = match &input { Input::Audio(audio) => audio.header.session_id, Input::Control(command) => command.session_id() };
+                    if overflowed_sessions.contains(&id) {
+                        if matches!(input, Input::Control(Command::SessionClose { .. })) {
+                            overflowed_sessions.remove(&id);
+                            if let Some((_, stop, _)) = sessions.remove(&id) {
+                                let _ = stop.send(true);
+                            }
+                        } else if matches!(input, Input::Control(Command::SessionOpen { .. })) {
+                            return Err(Error::Protocol);
+                        }
+                        continue;
+                    }
                     if let Input::Control(Command::UtteranceStart { session_id, .. }) = &input {
                         let progress_id = sessions
                             .get(session_id)
                             .map_or(*session_id, |(_, _, conversation_id)| *conversation_id);
                         turn_progress(&progress, progress_id, true, single).await;
                     }
-                    let id = match &input { Input::Audio(audio) => audio.header.session_id, Input::Control(command) => command.session_id() };
                     if let Input::Control(Command::SessionOpen { conversation_id, max_turns: session_max_turns, timeout_ms, .. }) = input {
                         if sessions.contains_key(&id)
                             || sessions.len() >= 128
@@ -200,7 +232,13 @@ async fn run_inner(
                             let result = execution.await;
                             if let Err(error) = result {
                                 tracing::warn!(session_id = id, error = %error, "Voice session failed");
-                                let code = match error { Error::Authentication => "authentication", Error::Timeout => "timeout", _ => "transport" };
+                                let code = match error {
+                                    Error::Authentication => "authentication",
+                                    Error::Timeout => "timeout",
+                                    Error::Configuration(_) | Error::Hook => "configuration",
+                                    Error::Protocol => "invalid_response",
+                                    _ => "transport",
+                                };
                                 let _ = emit(&output, json!({"type":"session_error","session_id":id,"code":code})).await;
                             }
                         });
@@ -210,7 +248,8 @@ async fn run_inner(
                         let Some((tx, session_stop, _)) = sessions.get(&id) else { return Err(Error::Protocol); };
                         if tx.try_send(input).is_err() {
                             let _ = session_stop.send(true);
-                            emit(&output, json!({"type":"session_error","session_id":id,"code":"overflow"})).await?;
+                            overflowed_sessions.insert(id);
+                            send_overflow(&mut writer, id).await?;
                         }
                     }
                 }
@@ -249,6 +288,24 @@ async fn run_inner(
         Progress::Multi(None) | Progress::Single(None) => {}
     }
     result
+}
+
+async fn send_overflow<S>(writer: &mut S, session_id: i32) -> Result<()>
+where
+    S: Sink<Message> + Unpin,
+{
+    let send = writer.send(Message::Text(
+        json!({"type":"session_error","session_id":session_id,"code":"overflow"})
+            .to_string()
+            .into(),
+    ));
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => Err(Error::Cancelled),
+        result = tokio::time::timeout(Duration::from_secs(1), send) => match result {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(_)) | Err(_) => Err(Error::Transport),
+        },
+    }
 }
 
 async fn forward_progress(
@@ -332,5 +389,122 @@ async fn turn_progress(progress: &Progress, id: i32, customer: bool, single: boo
                 },
             })
             .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        io,
+        pin::Pin,
+        task::{Context, Poll},
+    };
+
+    #[derive(Default)]
+    struct RecordingSink {
+        messages: Vec<Message>,
+    }
+
+    impl Sink<Message> for RecordingSink {
+        type Error = io::Error;
+
+        fn poll_ready(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<std::result::Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn start_send(
+            mut self: Pin<&mut Self>,
+            item: Message,
+        ) -> std::result::Result<(), Self::Error> {
+            self.messages.push(item);
+            Ok(())
+        }
+
+        fn poll_flush(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<std::result::Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_close(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<std::result::Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    struct StalledSink;
+
+    impl Sink<Message> for StalledSink {
+        type Error = io::Error;
+
+        fn poll_ready(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<std::result::Result<(), Self::Error>> {
+            Poll::Pending
+        }
+
+        fn start_send(
+            self: Pin<&mut Self>,
+            _item: Message,
+        ) -> std::result::Result<(), Self::Error> {
+            unreachable!("a stalled sink never accepts messages")
+        }
+
+        fn poll_flush(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<std::result::Result<(), Self::Error>> {
+            Poll::Pending
+        }
+
+        fn poll_close(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<std::result::Result<(), Self::Error>> {
+            Poll::Pending
+        }
+    }
+
+    #[tokio::test]
+    async fn overflow_error_bypasses_full_outgoing_queue() {
+        let (outgoing, mut queued) = mpsc::channel(1);
+        outgoing
+            .try_send(Message::Text("queued".to_owned().into()))
+            .expect("the outgoing queue should accept its first message");
+        let mut writer = RecordingSink::default();
+
+        send_overflow(&mut writer, 7)
+            .await
+            .expect("the direct writer should accept the overflow error");
+
+        assert_eq!(
+            queued.try_recv().unwrap(),
+            Message::Text("queued".to_owned().into())
+        );
+        let [Message::Text(message)] = writer.messages.as_slice() else {
+            panic!("expected one direct overflow message");
+        };
+        assert_eq!(
+            serde_json::from_str::<Value>(message).unwrap(),
+            json!({"type":"session_error","session_id":7,"code":"overflow"})
+        );
+    }
+
+    #[tokio::test]
+    async fn overflow_error_times_out_when_writer_stalls() {
+        let mut writer = StalledSink;
+
+        assert!(matches!(
+            send_overflow(&mut writer, 9).await,
+            Err(Error::Transport)
+        ));
     }
 }

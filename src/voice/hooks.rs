@@ -213,7 +213,7 @@ mod tests {
             let config = Config::load(&root.join(format!("{name}.toml"))).unwrap();
             let script = Script::load(config.bootstrap_script.as_ref().unwrap()).unwrap();
             let context = json!({"session_id":7,"session_nonce":"nonce","max_turns":2,
-                "parameters":config.parameters,"credentials":{"api_key":"test-secret"}});
+                "parameters":config.parameters,"credentials":{"api_key":"test-secret","agent_id":"test-agent"}});
             let request = script
                 .call("build_connect_request", vec![context.clone()])
                 .unwrap();
@@ -255,5 +255,54 @@ mod tests {
                 ));
             }
         }
+    }
+
+    #[test]
+    fn elevenlabs_waits_for_initialization_and_completes_each_turn_once() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/voice");
+        let config = Config::load(&root.join("elevenlabs.toml")).unwrap();
+        let mut hooks = Hooks::new(&config).unwrap();
+        let actions = hooks.event(false, json!({"type":"connected"})).unwrap();
+        assert!(matches!(actions.as_slice(), [Action::Send { message, .. }]
+            if message["type"] == "conversation_initiation_client_data"));
+        for expected_ready in [true, false] {
+            let actions = hooks
+                .event(
+                    true,
+                    json!({"message":{"type":"conversation_initiation_metadata"}}),
+                )
+                .unwrap();
+            assert_eq!(
+                matches!(actions.as_slice(), [Action::SessionReady]),
+                expected_ready
+            );
+        }
+        for _ in 0..2 {
+            let actions = hooks
+                .event(false, json!({"type":"utterance_start"}))
+                .unwrap();
+            assert!(matches!(
+                actions.as_slice(),
+                [Action::CaptureStart, Action::UtteranceReady]
+            ));
+            let actions = hooks
+                .event(true, json!({"message":{"type":"agent_response_complete"}}))
+                .unwrap();
+            assert!(matches!(actions.as_slice(), [Action::ResponseEnd]));
+            assert!(
+                hooks
+                    .event(true, json!({"message":{"type":"agent_response_complete"}}))
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+        let actions = hooks
+            .event(
+                true,
+                json!({"message":{"type":"ping","ping_event":{"event_id":42}}}),
+            )
+            .unwrap();
+        assert!(matches!(actions.as_slice(), [Action::Send { message, .. }]
+            if message == &json!({"type":"pong","event_id":42})));
     }
 }
