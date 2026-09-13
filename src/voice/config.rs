@@ -18,6 +18,8 @@ pub struct Config {
     pub participant: Option<String>,
     pub track: Option<String>,
     #[serde(default)]
+    pub playback_ticks: bool,
+    #[serde(default)]
     pub parameters: BTreeMap<String, Value>,
     #[serde(default)]
     pub credentials: BTreeMap<String, String>,

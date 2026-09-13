@@ -243,6 +243,8 @@ async fn run_inner(
                             }
                         });
                     } else if matches!(input, Input::Control(Command::SessionClose { .. } | Command::PlaybackCancel { .. })) {
+                        let reason = if matches!(input, Input::Control(Command::SessionClose { .. })) { "session_close" } else { "playback_cancel" };
+                        tracing::info!(session_id = id, reason, "voice_diag: API requested stop");
                         if let Some((_, stop, _)) = sessions.remove(&id) { let _ = stop.send(true); }
                     } else {
                         let Some((tx, session_stop, _)) = sessions.get(&id) else { return Err(Error::Protocol); };
@@ -256,6 +258,7 @@ async fn run_inner(
             }
         }
     }.await;
+    tracing::info!(error = ?result.as_ref().err(), remaining_sessions = sessions.len(), "voice_diag: evaluation ended; stopping remaining sessions");
     for (_, session_stop, _) in sessions.values() {
         let _ = session_stop.send(true);
     }

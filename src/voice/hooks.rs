@@ -148,6 +148,22 @@ pub enum Action {
     Error,
 }
 
+impl Action {
+    pub fn diagnostic_name(&self) -> &'static str {
+        match self {
+            Self::Send { .. } => "send",
+            Self::SessionReady => "session_ready",
+            Self::CloseReady => "close_ready",
+            Self::UtteranceReady => "utterance_ready",
+            Self::CaptureStart => "capture_start",
+            Self::CaptureStop => "capture_stop",
+            Self::ResponseEnd => "response_end",
+            Self::Transcript { .. } => "transcript",
+            Self::Error => "error",
+        }
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct HookOutput {
@@ -190,6 +206,98 @@ impl Hooks {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn initialized_elevenlabs_hooks() -> Hooks {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/voice");
+        let config = Config::load(&root.join("elevenlabs.toml")).unwrap();
+        let mut hooks = Hooks::new(&config).unwrap();
+        hooks.event(false, json!({"type":"connected"})).unwrap();
+        hooks
+            .event(
+                true,
+                json!({"message":{"type":"conversation_initiation_metadata"}}),
+            )
+            .unwrap();
+        hooks
+    }
+
+    #[test]
+    fn elevenlabs_protects_pauses_only_in_the_current_caller_turn() {
+        let mut hooks = initialized_elevenlabs_hooks();
+        hooks
+            .event(false, json!({"type":"connected","playback_ticks":true}))
+            .unwrap();
+        let tick = |stream_id| json!({"type":"playback_tick","stream_id":stream_id});
+        assert!(hooks.event(false, tick(1)).unwrap().is_empty());
+        for stream_id in 1..=2 {
+            let actions = hooks
+                .event(
+                    false,
+                    json!({"type":"utterance_start","stream_id":stream_id}),
+                )
+                .unwrap();
+            assert!(matches!(actions.as_slice(),
+                [Action::Send { message, topic: None }, Action::CaptureStart, Action::UtteranceReady]
+                if message == &json!({"type":"user_activity"})));
+            assert!(hooks.event(false, tick(stream_id + 1)).unwrap().is_empty());
+            // Refresh across a pause longer than the provider's two-second hold.
+            for _ in 0..6 {
+                let actions = hooks.event(false, tick(stream_id)).unwrap();
+                assert!(
+                    matches!(actions.as_slice(), [Action::Send { message, topic: None }]
+                    if message == &json!({"type":"user_activity"}))
+                );
+            }
+            hooks
+                .event(
+                    false,
+                    json!({"type":"playback_complete","stream_id":stream_id + 1}),
+                )
+                .unwrap();
+            assert!(!hooks.event(false, tick(stream_id)).unwrap().is_empty());
+            hooks
+                .event(
+                    false,
+                    json!({"type":"playback_complete","stream_id":stream_id}),
+                )
+                .unwrap();
+            assert!(hooks.event(false, tick(stream_id)).unwrap().is_empty());
+            let actions = hooks
+                .event(
+                    true,
+                    json!({"caller_started":true,"message":{"type":"agent_response_complete"}}),
+                )
+                .unwrap();
+            assert!(matches!(actions.as_slice(), [Action::ResponseEnd]));
+        }
+        hooks
+            .event(false, json!({"type":"utterance_start","stream_id":3}))
+            .unwrap();
+        hooks.event(false, json!({"type":"closing"})).unwrap();
+        assert!(hooks.event(false, tick(3)).unwrap().is_empty());
+    }
+
+    #[test]
+    fn elevenlabs_activity_can_be_disabled_for_baseline_runs() {
+        let mut hooks = initialized_elevenlabs_hooks();
+        hooks
+            .event(false, json!({"type":"connected","playback_ticks":false}))
+            .unwrap();
+        let actions = hooks
+            .event(false, json!({"type":"utterance_start","stream_id":1}))
+            .unwrap();
+        assert!(matches!(
+            actions.as_slice(),
+            [Action::CaptureStart, Action::UtteranceReady]
+        ));
+        assert!(
+            hooks
+                .event(false, json!({"type":"playback_tick","stream_id":1}))
+                .unwrap()
+                .is_empty()
+        );
+    }
+
     #[test]
     fn calls_hooks_with_separate_arguments() {
         let script = Script::compile("fn add(a, b) { a + b }").unwrap();
@@ -285,8 +393,41 @@ mod tests {
                 actions.as_slice(),
                 [Action::CaptureStart, Action::UtteranceReady]
             ));
+            assert!(hooks
+                .event(
+                    true,
+                    json!({"caller_started":false,"message":{"type":"agent_response","agent_response_event":{"agent_response":"greeting"}}}),
+                )
+                .unwrap()
+                .is_empty());
+            assert!(hooks
+                .event(
+                    true,
+                    json!({"caller_started":false,"message":{"type":"agent_response_complete"}}),
+                )
+                .unwrap()
+                .is_empty());
             let actions = hooks
                 .event(true, json!({"message":{"type":"agent_response_complete"}}))
+                .unwrap();
+            assert!(actions.is_empty());
+            let actions = hooks
+                .event(false, json!({"type":"playback_complete"}))
+                .unwrap();
+            assert!(actions.is_empty());
+            assert!(hooks
+                .event(
+                    true,
+                    json!({"caller_started":true,"message":{"type":"agent_response","agent_response_event":{"agent_response":"reply"}}}),
+                )
+                .unwrap()
+                .iter()
+                .any(|action| matches!(action, Action::Transcript { .. })));
+            let actions = hooks
+                .event(
+                    true,
+                    json!({"caller_started":true,"message":{"type":"agent_response_complete"}}),
+                )
                 .unwrap();
             assert!(matches!(actions.as_slice(), [Action::ResponseEnd]));
             assert!(
@@ -304,5 +445,196 @@ mod tests {
             .unwrap();
         assert!(matches!(actions.as_slice(), [Action::Send { message, .. }]
             if message == &json!({"type":"pong","event_id":42})));
+    }
+
+    #[test]
+    fn elevenlabs_completes_uninterrupted_turns_without_transcripts() {
+        let mut hooks = initialized_elevenlabs_hooks();
+        for stream_id in 1..=2 {
+            hooks
+                .event(
+                    false,
+                    json!({"type":"utterance_start","stream_id":stream_id}),
+                )
+                .unwrap();
+            hooks
+                .event(
+                    false,
+                    json!({"type":"playback_complete","stream_id":stream_id}),
+                )
+                .unwrap();
+            let complete =
+                json!({"caller_started":true,"message":{"type":"agent_response_complete"}});
+            let actions = hooks.event(true, complete.clone()).unwrap();
+            assert!(matches!(actions.as_slice(), [Action::ResponseEnd]));
+            assert!(hooks.event(true, complete).unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn elevenlabs_ignores_agent_response_without_text_payload() {
+        let mut hooks = initialized_elevenlabs_hooks();
+        hooks
+            .event(false, json!({"type":"utterance_start","stream_id":1}))
+            .unwrap();
+        assert!(
+            hooks
+                .event(
+                    true,
+                    json!({"caller_started":true,"message":{"type":"agent_response"}}),
+                )
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn elevenlabs_keeps_interrupted_turn_open_until_recovery() {
+        let mut hooks = initialized_elevenlabs_hooks();
+        let actions = hooks
+            .event(false, json!({"type":"utterance_start"}))
+            .unwrap();
+        assert!(matches!(
+            actions.as_slice(),
+            [Action::CaptureStart, Action::UtteranceReady]
+        ));
+        assert!(hooks
+            .event(
+                true,
+                json!({"caller_started":true,"message":{"type":"agent_response","agent_response_event":{"agent_response":"partial"}}}),
+            )
+            .unwrap()
+            .iter()
+            .any(|action| matches!(action, Action::Transcript { .. })));
+        assert!(
+            hooks
+                .event(
+                    true,
+                    json!({"caller_started":true,"message":{"type":"interruption"}}),
+                )
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            hooks
+                .event(
+                    true,
+                    json!({"caller_started":true,"message":{"type":"agent_response_complete"}}),
+                )
+                .unwrap()
+                .is_empty()
+        );
+        hooks
+            .event(false, json!({"type":"playback_complete"}))
+            .unwrap();
+        assert!(
+            hooks
+                .event(
+                    true,
+                    json!({"caller_started":true,"message":{"type":"agent_response_complete"}}),
+                )
+                .unwrap()
+                .is_empty()
+        );
+        hooks
+            .event(
+                true,
+                json!({"caller_started":true,"message":{"type":"agent_response","agent_response_event":{"agent_response":"recovered"}}}),
+            )
+            .unwrap();
+        let actions = hooks
+            .event(
+                true,
+                json!({"caller_started":true,"message":{"type":"agent_response_complete"}}),
+            )
+            .unwrap();
+        assert!(matches!(actions.as_slice(), [Action::ResponseEnd]));
+    }
+
+    #[test]
+    fn elevenlabs_ignores_completion_during_caller_playback() {
+        let mut hooks = initialized_elevenlabs_hooks();
+        hooks
+            .event(false, json!({"type":"utterance_start"}))
+            .unwrap();
+        assert!(hooks
+            .event(
+                true,
+                json!({"caller_started":true,"message":{"type":"agent_response","agent_response_event":{"agent_response":"complete soon"}}}),
+            )
+            .unwrap()
+            .iter()
+            .any(|action| matches!(action, Action::Transcript { .. })));
+        assert!(
+            hooks
+                .event(
+                    true,
+                    json!({"caller_started":true,"message":{"type":"agent_response_complete"}}),
+                )
+                .unwrap()
+                .is_empty()
+        );
+        hooks
+            .event(false, json!({"type":"playback_complete"}))
+            .unwrap();
+        assert!(
+            hooks
+                .event(
+                    true,
+                    json!({"caller_started":true,"message":{"type":"agent_response_complete"}}),
+                )
+                .unwrap()
+                .is_empty()
+        );
+        hooks
+            .event(
+                true,
+                json!({"caller_started":true,"message":{"type":"agent_response","agent_response_event":{"agent_response":"recovered"}}}),
+            )
+            .unwrap();
+        let actions = hooks
+            .event(
+                true,
+                json!({"caller_started":true,"message":{"type":"agent_response_complete"}}),
+            )
+            .unwrap();
+        assert!(matches!(actions.as_slice(), [Action::ResponseEnd]));
+    }
+
+    #[test]
+    fn elevenlabs_resets_recovery_state_for_each_turn() {
+        let mut hooks = initialized_elevenlabs_hooks();
+        hooks
+            .event(false, json!({"type":"utterance_start","stream_id":1}))
+            .unwrap();
+        hooks
+            .event(
+                true,
+                json!({"caller_started":true,"message":{"type":"agent_response","agent_response_event":{"agent_response":"partial"}}}),
+            )
+            .unwrap();
+        hooks
+            .event(
+                true,
+                json!({"caller_started":true,"message":{"type":"interruption"}}),
+            )
+            .unwrap();
+        hooks
+            .event(false, json!({"type":"playback_complete","stream_id":1}))
+            .unwrap();
+
+        hooks
+            .event(false, json!({"type":"utterance_start","stream_id":2}))
+            .unwrap();
+        hooks
+            .event(false, json!({"type":"playback_complete","stream_id":2}))
+            .unwrap();
+        let actions = hooks
+            .event(
+                true,
+                json!({"caller_started":true,"message":{"type":"agent_response_complete"}}),
+            )
+            .unwrap();
+        assert!(matches!(actions.as_slice(), [Action::ResponseEnd]));
     }
 }

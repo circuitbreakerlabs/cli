@@ -17,7 +17,14 @@ use livekit::{
     },
 };
 use serde_json::{Value, json};
-use std::{borrow::Cow, sync::Arc, time::Duration};
+use std::{
+    borrow::Cow,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::Duration,
+};
 use tokio::{
     sync::{mpsc, watch},
     task::JoinSet,
@@ -102,16 +109,18 @@ struct State {
     sequence: u64,
     offset: u64,
     capturing: bool,
-    published: bool,
+    caller_started: bool,
+    caller_generation: u64,
     started: bool,
     ready: bool,
     utterance_ready: bool,
+    caller_playing: bool,
     transcript: Option<String>,
     end_at: Option<Instant>,
 }
 
 enum Media {
-    Audio(Vec<u8>),
+    Audio { pcm: Vec<u8>, generation: u64 },
     Published,
     Consumed,
     Failed,
@@ -133,8 +142,12 @@ impl VoiceSession for Session {
         let mut tasks = JoinSet::new();
         let result = tokio::select! {
             result = self.drive(&mut input, &output, &source, &mut tasks) => result,
-            _ = stop.changed() => Ok(()),
+            _ = stop.changed() => {
+                tracing::info!(session_id = self.id, "voice_diag: session stop signal");
+                Ok(())
+            },
         };
+        tracing::info!(session_id = self.id, error = ?result.as_ref().err(), "voice_diag: closing customer transport");
         source.clear_buffer();
         tasks.abort_all();
         while tasks.join_next().await.is_some() {}
@@ -200,6 +213,12 @@ impl Session {
         output: &Output,
     ) -> Result<()> {
         for action in actions {
+            tracing::info!(
+                session_id = self.id,
+                stream_id = state.stream,
+                action = action.diagnostic_name(),
+                "voice_diag: hook action"
+            );
             match action {
                 Action::Send { message, topic } => {
                     self.room
@@ -267,13 +286,20 @@ impl Session {
         let (publish_tx, mut publish_rx) = mpsc::channel(QUEUE_FRAMES);
         let publisher_source = source.clone();
         let publisher_events = media_tx.clone();
+        let caller_generation = Arc::new(AtomicU64::new(0));
+        let reset_tx = {
+            let (tx, _rx) = watch::channel(0_u64);
+            tx
+        };
+        let publisher_generation = Arc::clone(&caller_generation);
+        let publisher_reset = reset_tx.clone();
         tasks.spawn(async move {
             while let Some(command) = publish_rx.recv().await {
                 match command {
                     Publish::Audio(pcm) => {
                         // LiveKit's unbuffered source requires exactly 10 ms,
                         // independently of the 20 ms evaluation wire framing.
-                        for samples in native_frames(&pcm) {
+                        for (index, samples) in native_frames(&pcm).into_iter().enumerate() {
                             let frame = AudioFrame {
                                 data: Cow::Owned(samples),
                                 sample_rate: 24_000,
@@ -283,6 +309,13 @@ impl Session {
                             if publisher_source.capture_frame(&frame).await.is_err() {
                                 let _ = publisher_events.send(Media::Failed).await;
                                 return;
+                            }
+                            if index == 0
+                                && publisher_generation
+                                    .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
+                                    .is_ok()
+                            {
+                                publisher_reset.send_replace(1);
                             }
                             tokio::time::sleep(Duration::from_millis(10)).await;
                         }
@@ -299,17 +332,31 @@ impl Session {
             }
         });
         let mut state = State::default();
+        let mut caller_gate_rx = reset_tx.subscribe();
         let mut selected = None;
         let mut text = String::new();
         let started = Instant::now();
-        let initial = self.hooks.event(false, json!({"type":"connected","session_id":self.id,"max_turns":self.max_turns,"parameters":self.config.parameters,"session_nonce":self.nonce}))?;
+        let mut playback_tick = tokio::time::interval(Duration::from_millis(500));
+        playback_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let initial = self.hooks.event(false, json!({"type":"connected","session_id":self.id,"max_turns":self.max_turns,"parameters":self.config.parameters,"session_nonce":self.nonce,"playback_ticks":self.config.playback_ticks}))?;
         self.actions(initial, &mut state, output).await?;
         loop {
             let end_at = state
                 .end_at
                 .unwrap_or_else(|| Instant::now() + Duration::from_hours(1));
             tokio::select! {
+                _ = playback_tick.tick(), if self.config.playback_ticks && state.caller_playing => {
+                    let actions = self.hooks.event(false, json!({"type":"playback_tick","stream_id":state.stream}))?;
+                    self.actions(actions, &mut state, output).await?;
+                }
+                changed = caller_gate_rx.changed() => {
+                    if changed.is_err() { return Err(Error::Transport); }
+                    state.caller_started = true;
+                    state.caller_generation = *caller_gate_rx.borrow();
+                    tracing::info!(session_id = self.id, elapsed_ms = started.elapsed().as_millis(), "voice_diag: first caller frame published");
+                }
                 () = tokio::time::sleep_until(end_at), if state.end_at.is_some() => {
+                    tracing::info!(session_id = self.id, stream_id = state.stream, samples = state.offset, elapsed_ms = started.elapsed().as_millis(), "voice_diag: emitting response_end after 200 ms drain");
                     emit(output, json!({"type":"response_end","session_id":self.id,"stream_id":state.stream,
                         "transcript":state.transcript,"samples":state.offset,"elapsed_ms":started.elapsed().as_millis()})).await?;
                     state.end_at = None;
@@ -319,13 +366,23 @@ impl Session {
                     Input::Control(Command::SessionClose { .. }) => return Ok(()),
                     Input::Control(Command::PlaybackCancel { .. }) => { source.clear_buffer(); return Err(Error::Cancelled); }
                     Input::Control(Command::UtteranceStart { stream_id, text: original, .. }) => {
+                        tracing::info!(session_id = self.id, stream_id, elapsed_ms = started.elapsed().as_millis(), "voice_diag: utterance_start");
                         if !state.ready || stream_id <= state.stream { return Err(Error::Protocol); }
-                        state = State { stream:stream_id, ready:true, published:state.published, ..State::default() };
+                        state = State {
+                            stream: stream_id,
+                            ready: true,
+                            caller_playing: true,
+                            caller_started: state.caller_started,
+                            caller_generation: state.caller_generation,
+                            ..State::default()
+                        };
                         text = original;
                         let actions = self.hooks.event(false, json!({"type":"utterance_start","stream_id":stream_id,"text":text}))?;
                         self.actions(actions, &mut state, output).await?;
+                        playback_tick.reset();
                     }
                     Input::Control(Command::UtteranceEnd { stream_id, .. }) => {
+                        tracing::info!(session_id = self.id, stream_id, elapsed_ms = started.elapsed().as_millis(), "voice_diag: utterance_end queued");
                         if stream_id != state.stream { return Err(Error::Protocol); }
                         publish_tx.send(Publish::End).await.map_err(|_| Error::Transport)?;
                     }
@@ -334,7 +391,6 @@ impl Session {
                         if !state.utterance_ready || audio.header.stream_id != state.stream || audio.header.sequence != state.input_sequence || audio.header.sample_offset != state.input_offset { return Err(Error::Protocol); }
                         state.input_sequence += 1;
                         state.input_offset += (audio.pcm.len() / 2) as u64;
-                        state.published = true;
                         publish_tx
                             .send(Publish::Audio(audio.pcm))
                             .await
@@ -348,7 +404,31 @@ impl Session {
                         if let Some(expected) = &self.config.participant
                             && participant.as_ref().is_none_or(|p| p.identity().to_string() != *expected) { continue; }
                         let Ok(message) = serde_json::from_slice::<Value>(&payload) else { continue; };
-                        let actions = self.hooks.event(true, json!({"message":message,"topic":topic}))?;
+                        // Only known event names and numeric IDs are safe to log.
+                        let event_type = message
+                            .get("type")
+                            .and_then(Value::as_str)
+                            .unwrap_or("<missing>");
+                        let top_level_keys = message
+                            .as_object()
+                            .map(|object| object.keys().map(String::as_str).collect::<Vec<_>>())
+                            .unwrap_or_default();
+                        let event_id = ["/agent_response_complete_event/event_id", "/interruption_event/event_id", "/agent_response_event/event_id", "/event_id"]
+                            .iter().find_map(|path| message.pointer(path).and_then(Value::as_u64));
+                        tracing::info!(session_id = self.id, stream_id = state.stream, event_type, ?top_level_keys, event_id, caller_started = state.caller_started, elapsed_ms = started.elapsed().as_millis(), "voice_diag: provider event");
+                        // Customer audio is delivered through the subscribed LiveKit
+                        // track. ElevenLabs also emits base64 `audio` data events;
+                        // they are redundant here and can exceed the Rhai hook input
+                        // limits, so keep them out of the control script.
+                        if event_type == "audio" {
+                            continue;
+                        }
+                        if !state.caller_started
+                            && matches!(message.get("type").and_then(Value::as_str), Some("agent_response" | "agent_response_complete"))
+                        {
+                            continue;
+                        }
+                        let actions = self.hooks.event(true, json!({"message":message,"topic":topic,"caller_started":state.caller_started}))?;
                         self.actions(actions, &mut state, output).await?;
                     }
                     RoomEvent::TrackSubscribed { track:RemoteTrack::Audio(track), participant, publication } => {
@@ -356,19 +436,33 @@ impl Session {
                         if selected.is_some() { return Err(Error::Configuration("multiple eligible remote audio tracks; select participant/track")); }
                         selected = Some(track.sid());
                         let tx = media_tx.clone();
+                        let mut reset_rx = reset_tx.subscribe();
                         tasks.spawn(async move {
+                            let mut generation = *reset_rx.borrow();
                             let mut stream = NativeAudioStream::with_options(track.rtc_track(), 24_000, 1, NativeAudioStreamOptions { queue_size_frames: Some(200) });
-                            while let Some(frame) = stream.next().await {
-                                let bytes: Vec<u8> = frame.data.iter().flat_map(|sample| sample.to_le_bytes()).collect();
-                                for pcm in bytes.chunks(FRAME_BYTES) {
-                                    if tx.try_send(Media::Audio(pcm.to_vec())).is_err() {
-                                        let _ = tx.send(Media::Failed).await;
+                            loop {
+                                tokio::select! {
+                                    biased;
+                                    changed = reset_rx.changed() => {
+                                        if changed.is_err() { break; }
+                                        generation = *reset_rx.borrow();
                                         stream.close();
-                                        return;
+                                        stream = NativeAudioStream::with_options(track.rtc_track(), 24_000, 1, NativeAudioStreamOptions { queue_size_frames: Some(200) });
+                                    }
+                                    frame = stream.next() => {
+                                        let Some(frame) = frame else { break; };
+                                        let bytes: Vec<u8> = frame.data.iter().flat_map(|sample| sample.to_le_bytes()).collect();
+                                        for pcm in bytes.chunks(FRAME_BYTES) {
+                                            if tx.try_send(Media::Audio { pcm: pcm.to_vec(), generation }).is_err() {
+                                                let _ = tx.send(Media::Failed).await;
+                                                stream.close();
+                                                return;
+                                            }
+                                        }
                                     }
                                 }
                             }
-                            let _ = tx.send(Media::Failed).await;
+                            stream.close();
                         });
                     }
                     _ => {}
@@ -377,13 +471,19 @@ impl Session {
                     Media::Failed => return Err(Error::TransportStage("media stream")),
                     Media::Consumed => emit(output, json!({"type":"audio_consumed","session_id":self.id,"stream_id":state.stream})).await?,
                     Media::Published => {
+                        state.caller_playing = false;
+                        tracing::info!(session_id = self.id, stream_id = state.stream, elapsed_ms = started.elapsed().as_millis(), "voice_diag: playback_complete");
                         emit(output, json!({"type":"playback_complete","session_id":self.id,"stream_id":state.stream,"elapsed_ms":started.elapsed().as_millis()})).await?;
                         let actions = self.hooks.event(false, json!({"type":"playback_complete","stream_id":state.stream,"text":text}))?;
                         self.actions(actions, &mut state, output).await?;
                     }
-                    Media::Audio(pcm) => {
-                        if state.capturing && !state.published && pcm.iter().any(|b| *b != 0) { return Err(Error::Configuration("customer audio preceded first caller playback")); }
-                        if !state.capturing { continue; }
+                    Media::Audio { pcm, generation } => {
+                        if !customer_audio_allowed(
+                            state.capturing,
+                            state.caller_started,
+                            state.caller_generation,
+                            generation,
+                        ) { continue; }
                         if !state.started {
                             state.started = true;
                             emit(output, json!({"type":"response_start","session_id":self.id,"stream_id":state.stream,"elapsed_ms":started.elapsed().as_millis()})).await?;
@@ -412,9 +512,18 @@ fn native_frames(pcm: &[u8]) -> Vec<Vec<i16>> {
         .collect()
 }
 
+fn customer_audio_allowed(
+    capturing: bool,
+    caller_started: bool,
+    caller_generation: u64,
+    frame_generation: u64,
+) -> bool {
+    capturing && caller_started && frame_generation >= caller_generation
+}
+
 #[cfg(test)]
 mod tests {
-    use super::native_frames;
+    use super::{customer_audio_allowed, native_frames};
     #[test]
     fn native_capture_uses_ten_ms_and_pads_only_final_frame() {
         let pcm = vec![1; 962];
@@ -424,5 +533,13 @@ mod tests {
         assert!(frames[0].iter().all(|sample| *sample == 257));
         assert_eq!(frames[2][0], 257);
         assert!(frames[2][1..].iter().all(|sample| *sample == 0));
+    }
+
+    #[test]
+    fn buffered_greeting_frames_are_dropped_after_caller_gate_opens() {
+        assert!(!customer_audio_allowed(true, false, 0, 0));
+        assert!(!customer_audio_allowed(true, true, 1, 0));
+        assert!(customer_audio_allowed(true, true, 1, 1));
+        assert!(!customer_audio_allowed(false, true, 1, 1));
     }
 }

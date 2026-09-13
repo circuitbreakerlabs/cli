@@ -72,13 +72,44 @@ environment and uses the hosted ElevenLabs LiveKit URL. The CLI does not load
 Its control script sends conversation initialization and waits for initialization
 metadata before declaring readiness. Enable `agent_response_complete` in the
 ElevenLabs agent's client events and configure the agent to wait for caller input.
+Normal completion does not require transcript events. Recovery after an interruption
+or premature completion additionally requires `agent_response` events.
 Hosted connection sequencing and final audio capture still require a live smoke
 test; the example is not evidence of verified hosted compatibility.
+
+The ElevenLabs example enables `playback_ticks = true` in the local target TOML.
+It sends `user_activity` before releasing the caller-audio gate and every 500 ms
+until paced publication completes, including pauses and temporary input starvation.
+This uses ElevenLabs' documented client activity signal to hold the caller's turn;
+it requires no additional agent configuration. The SDK documents at least two
+seconds of speech suppression after activity, so this can add roughly 1.5–2 seconds
+of hold time after publication, plus provider/network latency. See
+[sendUserActivity](https://elevenlabs.io/docs/eleven-agents/libraries/java-script#senduseractivity).
+This is a mitigation requiring a hosted smoke test, not an acknowledged turn lock.
+Set `playback_ticks = false` for baseline comparisons. Existing target files default
+to false; copy both the updated control script and setting to enable protection.
+No noise is mixed into the audio, and the API's synthesized PCM stays unchanged.
+For a hosted comparison, use the same audio with short and multi-second mid-sentence
+pauses, compare agent speech onset against `voice_diag: playback_complete`, and
+confirm the reply follows the entire utterance. Also check response latency and
+multi-turn completion with protection enabled and disabled.
 Version 1 requires explicit customer response-completion events. Silence-based turn
 detection, arbitrary multistep bootstrap, standalone WebRTC/WebSocket transports,
-greeting-aware evaluation, and deliberate interruption scenarios are not supported.
+greeting-aware evaluation, and deliberate interruption scenarios are not generated
+by the evaluator. The ElevenLabs example keeps an interrupted active turn open
+until a later response completion or the existing session timeout.
 
 ## Hook contract
+
+For cutoff diagnosis, run with `--log-mode --log-level info` and capture stdout
+and stderr. Lines marked `voice_diag` record provider event types and numeric IDs,
+hook action names, caller publication boundaries, response completion, and local
+shutdown reasons. Provider-event timings are milliseconds since the local session
+drive loop began; log timestamps also correlate actions and API stop requests.
+These diagnostic fields omit credentials, message text, raw payloads, and audio.
+Unknown provider event names are logged as `other`. A provider interruption is
+distinct from an API `session_close` or `playback_cancel` request; evaluation cleanup
+can also stop remaining sessions after a result or error.
 
 Hooks are synchronous Rhai functions. Rust owns HTTP, media, queues, deadlines,
 and connection cleanup. Audio and binary frames never enter the interpreter.
@@ -94,9 +125,15 @@ imports, print output, and debug output are disabled. Errors are sanitized.
   external_session_id?}`. The optional identifier must be non-secret.
 - `on_session_event(event, state)` receives `connected`, `utterance_start`, or
   `playback_complete`, or `closing`. Connected events include session identifiers, maximum turns,
-  and parameters. Utterance events include `stream_id` and source `text`.
-- `on_target_event(event, state)` receives `{message, topic}`, where `message` is
-  parsed customer JSON. It never receives raw audio.
+  parameters, and the `playback_ticks` flag. Utterance events include `stream_id` and source `text`.
+  Opting into `playback_ticks` adds a `playback_tick` event with the current `stream_id`
+  every 500 ms between `utterance_start` and `playback_complete`. Ticks continue
+  after API `utterance_end` while queued audio drains, and stop on cancellation or
+  session shutdown. Missed ticks are skipped rather than replayed in a burst.
+- `on_target_event(event, state)` receives `{message, topic, caller_started}`, where
+  `message` is parsed customer JSON. Initial customer response and completion
+  events are discarded before the first caller frame; other events expose
+  `caller_started: false` during that interval. The hook never receives raw audio.
 
 Both control hooks return `{state, actions}`. State starts as an empty map and is
 isolated per session. At most 32 actions and 64 KiB of serialized output are allowed.
@@ -122,6 +159,17 @@ can arrive independently. This is a bounded transport accommodation, not silence
 turn detection. Integrations should keep response capture enabled across this tail.
 `playback_complete` means the CLI finished paced publication, not that a remote
 speaker audibly played the audio. Timing metadata uses the CLI's session-local clock.
+After the final configured turn is captured, the API closes the customer transport
+before transcription and scoring so post-processing cannot keep a paid conversation
+open. The ElevenLabs example keeps an interrupted active turn open rather than
+treating `interruption` as a successful response boundary. After an interruption or
+completion during caller playback, the hook requires fresh `agent_response` text
+before accepting a later completion after playback finishes. Fresh text is a
+recovery heuristic; the hook does not correlate response generations. Without
+fresh text and a subsequent completion, the existing API/session timeout remains
+the bounded fallback.
+Audio already streamed before an interruption cannot be retracted by the CLI, so a
+recovered response may still contain that partial audio.
 
 ## API/CLI protocol v1
 
@@ -153,7 +201,11 @@ frame of credit. Pending CLI audio is bounded; overflow fails the conversation.
 The API retains complete responses for transcription within the response limit.
 The API admits at most three voice sessions per worker; additional conversations
 wait in a queue until a slot is released. Queue waiting is separate from the
-connection and response timeouts.
+connection and response timeouts. A queued conversation reserves its slot before
+the first caller turn is annotated and synthesized, and the customer session is
+opened only after that preparation and configured model readiness checks finish.
+The CLI ignores customer media and response-completion events received before the
+first caller frame is published, so an agent's initial greeting is not evaluated.
 
 Disconnects cancel active work and close customer rooms. No partial audio is
 replayed automatically. Local publication cancellation closes the session; remote
