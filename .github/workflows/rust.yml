@@ -104,4 +104,8 @@ jobs:
       - name: Check public voice help
         shell: bash
         run: |
-          target/release/cbl --cbl-api-key unused eval multi-turn --voice --help
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            target/x86_64-pc-windows-msvc/release/cbl.exe --cbl-api-key unused eval multi-turn --voice --help
+          else
+            target/release/cbl --cbl-api-key unused eval multi-turn --voice --help
+          fi

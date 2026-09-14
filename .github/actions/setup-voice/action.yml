@@ -19,4 +19,8 @@ runs:
       run: |
         choco install llvm --version=21.1.8 --yes --no-progress
         "CXX=clang-cl" | Out-File -FilePath $env:GITHUB_ENV -Append
+        # Match the prebuilt WebRTC static CRT; cc-rs inherits this for the C++ bridge.
+        "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS=-C target-feature=+crt-static" | Out-File -FilePath $env:GITHUB_ENV -Append
+        # Keep target flags off host build scripts and procedural macros.
+        "CARGO_BUILD_TARGET=x86_64-pc-windows-msvc" | Out-File -FilePath $env:GITHUB_ENV -Append
         'C:\Program Files\LLVM\bin' | Out-File -FilePath $env:GITHUB_PATH -Append
