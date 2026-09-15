@@ -132,7 +132,11 @@ async fn execute_completion_request<M: EvaluationMode>(
             outbound: OutboundProtocolMessage::CompletionResponse(
                 protocol_types::CompletionResponse {
                     request_id: request.request_id,
-                    model_response: completion.content,
+                    model_response: completion.message.content,
+                    model_id: completion.model_id,
+                    tokens_used: completion.tokens_used,
+                    finish_reason: completion.finish_reason,
+                    provider_response_id: completion.provider_response_id,
                 },
             ),
         },
@@ -344,7 +348,7 @@ mod tests {
         websocket_message_from_outbound,
     };
     use crate::protocol_types::{self, Role};
-    use crate::response_provider::{ProviderError, ResponseProvider};
+    use crate::response_provider::{ProviderCompletion, ProviderError, ResponseProvider};
 
     use async_trait::async_trait;
     use serde_json::json;
@@ -444,10 +448,16 @@ mod tests {
         async fn generate_response(
             &self,
             _conversation_history: &[protocol_types::Message],
-        ) -> Result<protocol_types::Message, ProviderError> {
-            Ok(protocol_types::Message {
-                role: Role::Assistant,
-                content: "safe reply".to_string(),
+        ) -> Result<ProviderCompletion, ProviderError> {
+            Ok(ProviderCompletion {
+                message: protocol_types::Message {
+                    role: Role::Assistant,
+                    content: "safe reply".to_string(),
+                },
+                model_id: Some("model-version".to_string()),
+                tokens_used: Some(42),
+                finish_reason: Some("stop".to_string()),
+                provider_response_id: Some("provider-response".to_string()),
             })
         }
     }
@@ -459,7 +469,7 @@ mod tests {
         async fn generate_response(
             &self,
             _conversation_history: &[protocol_types::Message],
-        ) -> Result<protocol_types::Message, ProviderError> {
+        ) -> Result<ProviderCompletion, ProviderError> {
             Err(ProviderError::Network("timeout".to_string()))
         }
     }
@@ -488,6 +498,10 @@ mod tests {
             OutboundProtocolMessage::CompletionResponse(protocol_types::CompletionResponse {
                 request_id: "req-1".to_string(),
                 model_response: "safe".to_string(),
+                model_id: Some("model-version".to_string()),
+                tokens_used: Some(42),
+                finish_reason: Some("stop".to_string()),
+                provider_response_id: Some("provider-response".to_string()),
             }),
         )
         .expect("protocol message should serialize");
@@ -498,7 +512,11 @@ mod tests {
                 "type": "completion_response",
                 "data": {
                     "request_id": "req-1",
-                    "model_response": "safe"
+                    "model_response": "safe",
+                    "model_id": "model-version",
+                    "tokens_used": 42,
+                    "finish_reason": "stop",
+                    "provider_response_id": "provider-response"
                 }
             })
         );
@@ -542,8 +560,17 @@ mod tests {
             output.outbound,
             OutboundProtocolMessage::CompletionResponse(protocol_types::CompletionResponse {
                 request_id,
-                model_response
-            }) if request_id == "req-1" && model_response == "safe reply"
+                model_response,
+                model_id,
+                tokens_used,
+                finish_reason,
+                provider_response_id,
+            }) if request_id == "req-1"
+                && model_response == "safe reply"
+                && model_id.as_deref() == Some("model-version")
+                && tokens_used == Some(42)
+                && finish_reason.as_deref() == Some("stop")
+                && provider_response_id.as_deref() == Some("provider-response")
         ));
     }
 
