@@ -62,7 +62,9 @@ cbl --top-level-arg1 eval <evaluation_type> --evaluation-arg1 <provider> --provi
 
 where `eval`, `<evaluation_type>`, and `<provider>` are subcommands.
 
-The available evaluation types are `single-turn` and `multi-turn`. The available providers are `ollama`, `openai`, and `custom`.
+The available evaluation types are `single-turn` and `multi-turn`. The text
+providers are `ollama`, `openai`, and `custom`. Add `--voice` and use the
+`livekit` provider to run either evaluation type against a customer endpoint.
 
 #### Example
 
@@ -103,3 +105,8 @@ CBL offers specialized test packs for different domains and risk scenarios. Pass
 ---
 
 Questions? Feedback? Reach us at [team@circuitbreakerlabs.ai](mailto:team@circuitbreakerlabs.ai).
+
+## Voice evaluations
+
+Voice-enabled builds connect to customer LiveKit endpoints using local configuration
+and optional Rhai hooks. See [voice setup, examples, and protocol](docs/voice.md).

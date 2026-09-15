@@ -1,0 +1,15 @@
+label = "my-voice-agent"
+bootstrap_script = "elevenlabs-bootstrap.rhai"
+control_script = "elevenlabs-control.rhai"
+# Keep the caller's turn through natural pauses. Set false for baseline runs.
+playback_ticks = true
+
+[parameters]
+livekit_url = "wss://livekit.rtc.elevenlabs.io"
+# Optional bootstrap query parameters:
+# branch_id = "..."
+# environment = "..."
+
+[credentials]
+agent_id = "AGENT_ID"
+api_key = "ELEVENLABS_API_KEY"

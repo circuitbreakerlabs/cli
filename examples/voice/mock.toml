@@ -1,0 +1,6 @@
+label = "local-voice-test"
+bootstrap_script = "mock-bootstrap.rhai"
+control_script = "mock-control.rhai"
+
+[parameters]
+bootstrap_url = "http://127.0.0.1:8001"
