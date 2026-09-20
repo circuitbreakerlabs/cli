@@ -116,6 +116,8 @@ struct State {
     utterance_ready: bool,
     caller_playing: bool,
     transcript: Option<String>,
+    completion_timeout: Duration,
+    completion_deadline: Option<Instant>,
     end_at: Option<Instant>,
 }
 
@@ -257,6 +259,7 @@ impl Session {
                     // Control and RTP are independent. Keep a short bounded media drain
                     // after the explicit end event; this is not silence turn detection.
                     state.end_at = Some(Instant::now() + Duration::from_millis(200));
+                    state.completion_deadline = None;
                 }
                 Action::Transcript { text } => state.transcript = Some(text),
                 Action::Error | Action::CloseReady => return Err(Error::Hook),
@@ -344,6 +347,9 @@ impl Session {
             let end_at = state
                 .end_at
                 .unwrap_or_else(|| Instant::now() + Duration::from_hours(1));
+            let completion_deadline = state
+                .completion_deadline
+                .unwrap_or_else(|| Instant::now() + Duration::from_hours(1));
             tokio::select! {
                 _ = playback_tick.tick(), if self.config.playback_ticks && state.caller_playing => {
                     let actions = self.hooks.event(false, json!({"type":"playback_tick","stream_id":state.stream}))?;
@@ -362,18 +368,23 @@ impl Session {
                     state.end_at = None;
                     state.capturing = false;
                 }
+                () = tokio::time::sleep_until(completion_deadline), if state.completion_deadline.is_some() => {
+                    tracing::warn!(session_id = self.id, stream_id = state.stream, elapsed_ms = started.elapsed().as_millis(), "voice_diag: customer response completion timed out");
+                    return Err(Error::Timeout);
+                }
                 message = input.recv() => match message.ok_or(Error::Transport)? {
                     Input::Control(Command::SessionClose { .. }) => return Ok(()),
                     Input::Control(Command::PlaybackCancel { .. }) => { source.clear_buffer(); return Err(Error::Cancelled); }
-                    Input::Control(Command::UtteranceStart { stream_id, text: original, .. }) => {
+                    Input::Control(Command::UtteranceStart { stream_id, timeout_ms, text: original, .. }) => {
                         tracing::info!(session_id = self.id, stream_id, elapsed_ms = started.elapsed().as_millis(), "voice_diag: utterance_start");
-                        if !state.ready || stream_id <= state.stream { return Err(Error::Protocol); }
+                        if !state.ready || stream_id <= state.stream || timeout_ms == 0 { return Err(Error::Protocol); }
                         state = State {
                             stream: stream_id,
                             ready: true,
                             caller_playing: true,
                             caller_started: state.caller_started,
                             caller_generation: state.caller_generation,
+                            completion_timeout: Duration::from_millis(timeout_ms.min(3_300_000)),
                             ..State::default()
                         };
                         text = original;
@@ -487,6 +498,9 @@ impl Session {
                         if !state.started {
                             state.started = true;
                             emit(output, json!({"type":"response_start","session_id":self.id,"stream_id":state.stream,"elapsed_ms":started.elapsed().as_millis()})).await?;
+                        }
+                        if state.end_at.is_none() {
+                            state.completion_deadline = Some(Instant::now() + state.completion_timeout);
                         }
                         let audio = Audio { header:AudioHeader { session_id:self.id, stream_id:state.stream, sequence:state.sequence, sample_offset:state.offset }, pcm };
                         state.sequence += 1;
