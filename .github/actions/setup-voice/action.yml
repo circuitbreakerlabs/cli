@@ -1,0 +1,26 @@
+name: Set up native voice build
+description: Install build tools for the pinned LiveKit Rust SDK
+runs:
+  using: composite
+  steps:
+    - name: Linux native dependencies
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential pkg-config libglib2.0-dev libjpeg-turbo8-dev
+        curl -fsSL https://apt.llvm.org/llvm.sh -o "$RUNNER_TEMP/cbl-llvm.sh"
+        sudo bash "$RUNNER_TEMP/cbl-llvm.sh" 21
+        echo 'CC=clang-21' >> "$GITHUB_ENV"
+        echo 'CXX=clang++-21' >> "$GITHUB_ENV"
+    - name: Windows native dependencies
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        choco install llvm --version=21.1.8 --yes --no-progress
+        "CXX=clang-cl" | Out-File -FilePath $env:GITHUB_ENV -Append
+        # Match the prebuilt WebRTC static CRT; cc-rs inherits this for the C++ bridge.
+        "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS=-C target-feature=+crt-static" | Out-File -FilePath $env:GITHUB_ENV -Append
+        # Keep target flags off host build scripts and procedural macros.
+        "CARGO_BUILD_TARGET=x86_64-pc-windows-msvc" | Out-File -FilePath $env:GITHUB_ENV -Append
+        'C:\Program Files\LLVM\bin' | Out-File -FilePath $env:GITHUB_PATH -Append
