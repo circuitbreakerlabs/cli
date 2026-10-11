@@ -13,6 +13,7 @@ pub enum ServerErrorCode {
     InvalidMessageType = 4005,
     InvalidRequestFormat = 4006,
     Timeout = 4007,
+    Forbidden = 4009,
 }
 
 impl TryFrom<u16> for ServerErrorCode {
@@ -28,6 +29,7 @@ impl TryFrom<u16> for ServerErrorCode {
             4005 => Ok(Self::InvalidMessageType),
             4006 => Ok(Self::InvalidRequestFormat),
             4007 => Ok(Self::Timeout),
+            4009 => Ok(Self::Forbidden),
             _ => Err(value),
         }
     }
@@ -127,6 +129,10 @@ mod tests {
         assert_eq!(
             ServerErrorCode::try_from(4007),
             Ok(ServerErrorCode::Timeout)
+        );
+        assert_eq!(
+            ServerErrorCode::try_from(4009),
+            Ok(ServerErrorCode::Forbidden)
         );
     }
 
