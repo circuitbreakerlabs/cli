@@ -590,7 +590,7 @@ mod tests {
         )
         .await;
 
-        assert!(output.progress.is_empty());
+        assert_eq!(output.progress, [] as [std::string::String; 0]);
         assert!(matches!(
             output.outbound,
             OutboundProtocolMessage::CompletionError(protocol_types::CompletionError {

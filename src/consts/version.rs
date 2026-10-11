@@ -1,1 +1,1 @@
-pub const PROTOCOL_VERSION: &str = "1.1.1";
+pub const PROTOCOL_VERSION: &str = "1.1.2";

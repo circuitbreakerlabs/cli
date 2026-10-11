@@ -129,7 +129,7 @@ impl ApiCommand {
     fn validate(&self) -> Result<(), clap::Error> {
         let query_count = [
             self.query.monthly_quota,
-            self.query.validate_api_key,
+            self.query.roles,
             self.query.test_case_groups,
         ]
         .into_iter()
@@ -158,9 +158,9 @@ pub struct ApiQueryCommand {
     #[arg(long = "monthly-quota", short = 'M')]
     pub monthly_quota: bool,
 
-    /// Validate the API key
-    #[arg(long = "validate-api-key", short = 'A')]
-    pub validate_api_key: bool,
+    /// List roles assigned to the API key
+    #[arg(long, short = 'R')]
+    pub roles: bool,
 
     /// List accessible test case groups
     #[arg(long = "test-case-groups", short = 'T')]
@@ -1275,24 +1275,32 @@ mod tests {
     }
 
     #[test]
-    fn parses_api_validate_api_key_flag() {
-        let args =
-            Args::try_parse_from(["cbl", "--cbl-api-key", "key", "api", "--validate-api-key"])
-                .expect("api --validate-api-key should parse");
+    fn parses_api_roles_flag() {
+        let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "api", "--roles"])
+            .expect("api --roles should parse");
         match args.command {
-            Some(super::Command::Api(api)) => assert!(api.query.validate_api_key),
+            Some(super::Command::Api(api)) => assert!(api.query.roles),
             _ => panic!("expected api command"),
         }
     }
 
     #[test]
-    fn parses_api_validate_api_key_short_flag() {
-        let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "api", "-A"])
-            .expect("api -A should parse");
+    fn parses_api_roles_short_flag() {
+        let args = Args::try_parse_from(["cbl", "--cbl-api-key", "key", "api", "-R"])
+            .expect("api -R should parse");
         match args.command {
-            Some(super::Command::Api(api)) => assert!(api.query.validate_api_key),
+            Some(super::Command::Api(api)) => assert!(api.query.roles),
             _ => panic!("expected api command"),
         }
+    }
+
+    #[test]
+    fn rejects_removed_api_validate_api_key_flag() {
+        let err =
+            Args::try_parse_from(["cbl", "--cbl-api-key", "key", "api", "--validate-api-key"])
+                .expect_err("removed API key validation flag should be rejected");
+
+        assert_eq!(err.kind(), ErrorKind::UnknownArgument);
     }
 
     #[test]
@@ -1491,19 +1499,13 @@ mod tests {
     }
 
     #[test]
-    fn accepts_json_with_validate_api_key() {
-        let args = Args::try_parse_from([
-            "cbl",
-            "--cbl-api-key",
-            "key",
-            "api",
-            "--validate-api-key",
-            "--json",
-        ])
-        .expect("api --validate-api-key --json should parse");
+    fn accepts_json_with_roles() {
+        let args =
+            Args::try_parse_from(["cbl", "--cbl-api-key", "key", "api", "--roles", "--json"])
+                .expect("api --roles --json should parse");
         match args.command {
             Some(super::Command::Api(api)) => {
-                assert!(api.query.validate_api_key);
+                assert!(api.query.roles);
                 assert!(api.json);
             }
             _ => panic!("expected api command"),
@@ -1603,7 +1605,7 @@ mod tests {
             "key",
             "api",
             "--monthly-quota",
-            "--validate-api-key",
+            "--roles",
         ])
         .expect("API query flag conflict parses before validation");
         let err = args
@@ -1664,7 +1666,7 @@ mod tests {
             "--cbl-api-key",
             "key",
             "eval",
-            "--validate-api-key",
+            "--roles",
             "multi-turn",
             "--threshold",
             "0.5",
@@ -1678,7 +1680,7 @@ mod tests {
             "--model",
             "gpt-4.1-nano",
         ])
-        .expect_err("eval --validate-api-key should be rejected");
+        .expect_err("eval --roles should be rejected");
         assert_eq!(err.kind(), ErrorKind::UnknownArgument);
     }
     #[test]
