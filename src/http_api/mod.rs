@@ -28,8 +28,8 @@ pub async fn handle(
         return run_monthly_quota(ws_base_url, api_key, log_mode, command.json).await;
     }
 
-    if command.query.validate_api_key {
-        return run_validate_api_key(ws_base_url, api_key, log_mode, command.json).await;
+    if command.query.roles {
+        return run_roles(ws_base_url, api_key, log_mode, command.json).await;
     }
 
     if command.query.test_case_groups {
@@ -188,42 +188,45 @@ async fn run_monthly_quota(
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
-struct ValidateApiKeyResponse {
-    valid: bool,
+struct RolesResponse {
+    roles: Vec<String>,
 }
 
 #[derive(tabled::Tabled)]
-struct ValidateDisplay {
-    #[tabled(rename = "API Key Status")]
-    status: String,
+struct RoleDisplay {
+    #[tabled(rename = "Role")]
+    role: String,
 }
 
-async fn run_validate_api_key(
+async fn run_roles(
     ws_base_url: &str,
     api_key: &str,
     log_mode: bool,
     json: bool,
 ) -> Result<(), HttpApiError> {
-    let url = build_http_url(ws_base_url, consts::endpoints::VALIDATE_API_KEY_ENDPOINT);
-    let data: ValidateApiKeyResponse = http_get_json(&url, api_key).await?;
+    let url = build_http_url(ws_base_url, consts::endpoints::ROLES_ENDPOINT);
+    let data: RolesResponse = http_get_json(&url, api_key).await?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&data)?);
     } else if log_mode {
-        tracing::info!(
-            "API key is {}",
-            if data.valid { "valid" } else { "invalid" }
-        );
+        if data.roles.is_empty() {
+            tracing::info!("No roles assigned to this API key.");
+        }
+        for role in &data.roles {
+            tracing::info!("API key role: {role}");
+        }
+    } else if data.roles.is_empty() {
+        println!("No roles assigned to this API key.");
     } else {
-        let status = if data.valid {
-            "✓ Valid".to_string()
-        } else {
-            "✗ Invalid".to_string()
-        };
+        let rows: Vec<RoleDisplay> = data
+            .roles
+            .into_iter()
+            .map(|role| RoleDisplay { role })
+            .collect();
         println!(
             "{}",
-            tabled::Table::new([ValidateDisplay { status }])
-                .with(tabled::settings::Style::modern())
+            tabled::Table::new(rows).with(tabled::settings::Style::modern())
         );
     }
 
