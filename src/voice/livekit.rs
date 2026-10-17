@@ -496,8 +496,10 @@ fn native_frames(pcm: &[u8]) -> Vec<Vec<i16>> {
     pcm.chunks(480)
         .map(|chunk| {
             let mut samples: Vec<i16> = chunk
-                .chunks_exact(2)
-                .map(|b| i16::from_le_bytes([b[0], b[1]]))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|b| i16::from_le_bytes(*b))
                 .collect();
             samples.resize(240, 0);
             samples

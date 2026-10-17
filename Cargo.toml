@@ -17,7 +17,7 @@ pedantic = "deny"
 
 [dependencies]
 async-openai = { optional = true, version = "0.32.4", default-features = false, features = ["chat-completion", "rustls"] }
-async-trait = "0.1.89"
+async-trait = "0.1.92"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5.57", features = ["derive", "env"] }
 const_format = "0.2.35"
