@@ -12,12 +12,11 @@
 1. Copy the installation command for your preferred shell from the [releases page](https://github.com/circuitbreakerlabs/cli/releases).
 2. Verify `cbl` installed correctly with `cbl help`
 3. Set the Circuit Breaker Labs API key environment variable:
-   * **macOS/Linux:** `export CBL_API_KEY="<your_api_key_here>"`
-   * **Windows (PowerShell):** `$env:CBL_API_KEY="<your_api_key_here>"`
+   - **macOS/Linux:** `export CBL_API_KEY="<your_api_key_here>"`
+   - **Windows (PowerShell):** `$env:CBL_API_KEY="<your_api_key_here>"`
 4. Set the OpenAI API key environment variable (required for this example):
-   * **macOS/Linux:** `export OPENAI_API_KEY="<your_api_key_here>"`
-   * **Windows (PowerShell):** `$env:OPENAI_API_KEY="<your_api_key_here>"`
-
+   - **macOS/Linux:** `export OPENAI_API_KEY="<your_api_key_here>"`
+   - **Windows (PowerShell):** `$env:OPENAI_API_KEY="<your_api_key_here>"`
 
 Try a single-turn evaluation:
 
@@ -63,8 +62,9 @@ cbl --top-level-arg1 eval <evaluation_type> --evaluation-arg1 <provider> --provi
 where `eval`, `<evaluation_type>`, and `<provider>` are subcommands.
 
 The available evaluation types are `single-turn` and `multi-turn`. The text
-providers are `ollama`, `openai`, and `custom`. Add `--voice` and use the
-`livekit` provider to run either evaluation type against a customer endpoint.
+providers are `ollama`, `openai`, and `custom`. Use the `livekit` target in a
+LiveKit-enabled build to run either evaluation type against a voice endpoint.
+The selected target determines whether the evaluation uses text or voice.
 
 #### Example
 
@@ -106,7 +106,50 @@ CBL offers specialized test packs for different domains and risk scenarios. Pass
 
 Questions? Feedback? Reach us at [team@circuitbreakerlabs.ai](mailto:team@circuitbreakerlabs.ai).
 
+## Build features
+
+Default builds enable the `openai`, `ollama`, and `custom` target features. Each
+feature controls its target's implementation, dependencies, and CLI commands.
+Disabled targets are absent from help and rejected by the command parser.
+
+```sh
+cargo build --release                            # All three text targets
+cargo build --release --features livekit          # Text targets plus LiveKit
+cargo build --release --no-default-features --features openai
+cargo build --release --no-default-features --features livekit
+cargo build --release --no-default-features       # API-only CLI, without eval
+```
+
+The `livekit` feature is incompatible with musl: builds combining them fail,
+including `--all-features`. Build musl binaries with the text features only.
+Release builds enable all four targets on GNU Linux, macOS, and Windows, and
+only the three text targets on musl.
+
 ## Voice evaluations
 
-Voice-enabled builds connect to customer LiveKit endpoints using local configuration
-and optional Rhai hooks. See [voice setup, examples, and protocol](docs/voice.md).
+Build with `--features livekit` to enable the native LiveKit voice adapter.
+
+```sh
+cbl eval multi-turn --threshold 0.75 --max-turns 4 \
+    --test-case-groups example livekit --config voice.toml
+```
+
+LiveKit supports fresh and rerun evaluations for both single-turn and multi-turn.
+For example, rerun a prior single-turn evaluation with:
+
+```sh
+cbl eval re-run single-turn --threshold 0.75 --variations 2 \
+    --maximum-iteration-layers 1 --evaluation-id 123 \
+    livekit --config voice.toml
+```
+
+Use `--test-result-ids 456,789` instead of `--evaluation-id` to select individual
+results. Single-turn voice reruns require the API's
+`/v1/ws/singleturn_voice_rerun_evaluation` endpoint.
+
+The shared voice protocol and runner remain independent of LiveKit and
+are tested using a fake adapter, including on musl.
+
+LiveKit connections use local TOML configuration and Rhai hooks; see the
+[configuration examples](examples/voice) and
+[voice setup and protocol](https://api.circuitbreakerlabs.ai/v1/docs).
