@@ -45,66 +45,11 @@ Pre-built executables and installation methods for Linux, Mac, and Windows are a
 
 Click [here](mailto:team@circuitbreakerlabs.ai?subject=Getting%20Set%20Up&body=I%27m%20interested%20in%20using%20the%20Circuit%20Breaker%20Labs%20CLI%20tool%20for%20autonomous%20red-teaming%20and%20would%20like%20to%20request%20an%20API%20access%20key.) to get an access key.
 
-## Usage
+## Usage reference
 
-### Flags and Options
-
-You can see the available options and flags for `cbl` with `cbl help`, for evaluation commands with `cbl eval help`, or for a specific evaluation type with `cbl eval <evaluation_type> help`.
-
-### Syntax
-
-The syntax for `cbl` is:
-
-```sh
-cbl --top-level-arg1 eval <evaluation_type> --evaluation-arg1 <provider> --provider-arg1
-```
-
-where `eval`, `<evaluation_type>`, and `<provider>` are subcommands.
-
-The available evaluation types are `single-turn` and `multi-turn`. The text
-providers are `ollama`, `openai`, and `custom`. Use the `livekit` target in a
-LiveKit-enabled build to run either evaluation type against a voice endpoint.
-The selected target determines whether the evaluation uses text or voice.
-
-#### Example
-
-The following would run a single-turn evaluation against a custom OpenAI finetune, and save the results to `result.json`. If you haven't already, set the `CBL_API_KEY` and `OPENAI_API_KEY` environment variables.
-
-```sh
-cbl \
-    --output-file result.json \
-    eval \
-    single-turn \  # evaluation type
-    --threshold 0.3 \
-    --variations 3 \
-    --maximum-iteration-layers 2 \
-    --test-case-groups suicidal_ideation \
-    openai \       # provider
-    --temperature 1.2 \
-    --model $MY_FINETUNE_ID
-```
-
-### Integrating With a Custom Model Endpoint
-
-For APIs that aren't already supported or OpenAI compatible, `cbl` supports scripting. The `custom` provider expects a [Rhai](https://rhai.rs/) script that defines the translation between `cbl`'s and the custom endpoint's request/response schema. Examples scripts are available in [`examples/providers/`](https://github.com/circuitbreakerlabs/cli/tree/main/examples/providers).
-
-### Configuration Reference
-
-#### Safety Threshold
-
-The `--threshold` flag accepts a value from `0` to `1`. Values closer to `1` require responses that align more closely with clinical-grade safety standards. Lower values allow more permissive responses.
-
-#### Maximum Turns
-
-`--max-turns` must be an even number between `2` and `100` because each turn pairs one user message with one model response. [Contact us](mailto:team@circuitbreakerlabs.ai) if you need a higher limit for your environment.
-
-#### Test Packs
-
-CBL offers specialized test packs for different domains and risk scenarios. Pass one or more pack names with `--test-case-groups`, separated by commas.
-
----
-
-Questions? Feedback? Reach us at [team@circuitbreakerlabs.ai](mailto:team@circuitbreakerlabs.ai).
+See the [CLI reference](https://api.circuitbreakerlabs.ai/v1/docs)
+in the API documentation for command syntax, evaluation options, custom model
+integration, and LiveKit setup and reruns.
 
 ## Build features
 
@@ -125,31 +70,6 @@ including `--all-features`. Build musl binaries with the text features only.
 Release builds enable all four targets on GNU Linux, macOS, and Windows, and
 only the three text targets on musl.
 
-## Voice evaluations
+---
 
-Build with `--features livekit` to enable the native LiveKit voice adapter.
-
-```sh
-cbl eval multi-turn --threshold 0.75 --max-turns 4 \
-    --test-case-groups example livekit --config voice.toml
-```
-
-LiveKit supports fresh and rerun evaluations for both single-turn and multi-turn.
-For example, rerun a prior single-turn evaluation with:
-
-```sh
-cbl eval re-run single-turn --threshold 0.75 --variations 2 \
-    --maximum-iteration-layers 1 --evaluation-id 123 \
-    livekit --config voice.toml
-```
-
-Use `--test-result-ids 456,789` instead of `--evaluation-id` to select individual
-results. Single-turn voice reruns require the API's
-`/v1/ws/singleturn_voice_rerun_evaluation` endpoint.
-
-The shared voice protocol and runner remain independent of LiveKit and
-are tested using a fake adapter, including on musl.
-
-LiveKit connections use local TOML configuration and Rhai hooks; see the
-[configuration examples](examples/voice) and
-[voice setup and protocol](https://api.circuitbreakerlabs.ai/v1/docs).
+Questions? Feedback? Reach us at [team@circuitbreakerlabs.ai](mailto:team@circuitbreakerlabs.ai).
