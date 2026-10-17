@@ -12,6 +12,7 @@ pub enum EvaluationType {
     Voice,
     VoiceRerun,
     SingleTurnVoice,
+    SingleTurnVoiceRerun,
     SingleTurn,
     SingleTurnRerun,
     MultiTurn,
@@ -37,9 +38,12 @@ impl From<&crate::cli::EvaluationCommand> for EvaluationType {
                 }
             }
             crate::cli::EvaluationCommand::ReRun { rerun } => match rerun {
-                #[cfg(text_targets)]
-                crate::cli::ReRunEvaluationCommand::SingleTurn { .. } => {
-                    EvaluationType::SingleTurnRerun
+                crate::cli::ReRunEvaluationCommand::SingleTurn { provider, .. } => {
+                    if provider.is_voice() {
+                        EvaluationType::SingleTurnVoiceRerun
+                    } else {
+                        EvaluationType::SingleTurnRerun
+                    }
                 }
                 crate::cli::ReRunEvaluationCommand::MultiTurn { provider, .. } => {
                     if provider.is_voice() {
@@ -77,9 +81,6 @@ mod routing_tests {
         ];
         for &(target, options, voice) in targets {
             for (single, rerun) in [(true, false), (false, false), (false, true), (true, true)] {
-                if voice && single && rerun {
-                    continue;
-                }
                 let mut argv = vec!["cbl", "--cbl-api-key", "unused", "eval"];
                 if rerun {
                     argv.push("re-run");
@@ -114,7 +115,7 @@ mod routing_tests {
                     (false, true, true) => "/ws/singleturn_rerun_evaluation",
                     (false, false, false) => "/ws/multiturn_evaluation",
                     (false, false, true) => "/ws/multiturn_rerun_evaluation",
-                    _ => unreachable!(),
+                    (true, true, true) => "/ws/singleturn_voice_rerun_evaluation",
                 };
                 assert_eq!(endpoint, expected, "{argv:?}");
             }

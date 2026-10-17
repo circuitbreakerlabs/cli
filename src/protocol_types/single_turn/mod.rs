@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize, de::Error};
 
 #[cfg(eval_targets)]
 pub use request::SingleTurnEvalRequest;
-#[cfg(text_targets)]
+#[cfg(eval_targets)]
 pub use request::SingleTurnRerunEvalRequest;
 
 mod optional;

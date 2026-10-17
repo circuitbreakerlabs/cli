@@ -1,5 +1,5 @@
 use super::headers::Headers;
-#[cfg(text_targets)]
+#[cfg(eval_targets)]
 use crate::protocol_types::SingleTurnRerunEvalRequest;
 #[cfg(eval_targets)]
 use crate::protocol_types::{
@@ -208,11 +208,10 @@ pub enum EvaluationCommand {
 #[cfg(eval_targets)]
 #[derive(Subcommand, Debug)]
 pub enum ReRunEvaluationCommand {
-    #[cfg(text_targets)]
     /// Re-run a historic single-turn evaluation result
     SingleTurn {
         #[command(subcommand)]
-        provider: TextProviderCommand,
+        provider: ProviderCommand,
         #[command(flatten)]
         request: SingleTurnRerunEvalRequest,
     },

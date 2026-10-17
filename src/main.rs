@@ -121,6 +121,24 @@ async fn run_evaluation(
 ) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "livekit")]
     match evaluation {
+        cli::EvaluationCommand::ReRun {
+            rerun:
+                cli::ReRunEvaluationCommand::SingleTurn {
+                    provider: cli::ProviderCommand::Livekit { config },
+                    request,
+                },
+        } => {
+            let target = voice::prepare_livekit(&config, 1).map_err(|error| error.to_string())?;
+            return run_single_turn_voice_cli(
+                &cli_args.cbl_api_base_url,
+                &cli_args.cbl_api_key,
+                target,
+                request.into(),
+                cli_args.log_mode,
+                cli_args.output_file,
+            )
+            .await;
+        }
         cli::EvaluationCommand::SingleTurn {
             provider: cli::ProviderCommand::Livekit { config },
             request,
@@ -184,8 +202,8 @@ async fn run_evaluation(
             cli::EvaluationCommand::SingleTurn { provider, .. }
             | cli::EvaluationCommand::MultiTurn { provider, .. } => provider.text(),
             cli::EvaluationCommand::ReRun { rerun } => match rerun {
-                cli::ReRunEvaluationCommand::SingleTurn { provider, .. } => provider,
-                cli::ReRunEvaluationCommand::MultiTurn { provider, .. } => provider.text(),
+                cli::ReRunEvaluationCommand::SingleTurn { provider, .. }
+                | cli::ReRunEvaluationCommand::MultiTurn { provider, .. } => provider.text(),
             },
         };
 
@@ -388,8 +406,13 @@ async fn run_single_turn_voice_cli(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let groups = request.test_case_groups().map(<[_]>::to_vec);
     let maximum_iteration_layers = request.maximum_iteration_layers();
-    let websocket =
-        websockets::connect(base_url, evaluations::EvaluationType::SingleTurnVoice, key).await?;
+    let selector = request.rerun_selector();
+    let kind = if selector.is_some() {
+        evaluations::EvaluationType::SingleTurnVoiceRerun
+    } else {
+        evaluations::EvaluationType::SingleTurnVoice
+    };
+    let websocket = websockets::connect(base_url, kind, key).await?;
     let (progress, render) = if log_mode {
         (None, None)
     } else {
@@ -407,8 +430,11 @@ async fn run_single_turn_voice_cli(
         let _ = render.await;
     }
     let result = result?;
-    let json =
-        evaluation_output::serialize_evaluation_output(&result, &groups.unwrap_or_default())?;
+    let json = if let Some(selector) = selector {
+        serialize_rerun_evaluation_output(&result, &selector)?
+    } else {
+        serialize_evaluation_output(&result, &groups.unwrap_or_default())?
+    };
     let filename = output.unwrap_or_else(|| {
         PathBuf::from(format!(
             "circuit_breaker_labs_single_turn_voice_evaluation_{}.json",

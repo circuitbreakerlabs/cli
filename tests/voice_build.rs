@@ -50,6 +50,7 @@ fn command_surface_matches_enabled_targets() {
         vec!["eval", "single-turn"],
         vec!["eval", "multi-turn"],
         vec!["eval", "re-run", "multi-turn"],
+        vec!["eval", "re-run", "single-turn"],
     ] {
         let mut args = path.clone();
         args.push("--help");
@@ -84,20 +85,6 @@ fn command_surface_matches_enabled_targets() {
                 );
             }
         }
-    }
-
-    let rerun = help(&["eval", "re-run", "--help"]);
-    assert_eq!(
-        rerun
-            .lines()
-            .any(|line| line.split_whitespace().next() == Some("single-turn")),
-        cfg!(text_targets)
-    );
-    let livekit_rerun = cli(&["eval", "re-run", "single-turn", "livekit", "--help"]);
-    assert_eq!(livekit_rerun.status.code(), Some(2));
-    if cfg!(text_targets) {
-        let single = help(&["eval", "re-run", "single-turn", "--help"]);
-        assert!(!single.contains("livekit"));
     }
 }
 

@@ -65,6 +65,7 @@ async fn receive_json(
     serde_json::from_str(message.to_text().unwrap()).unwrap()
 }
 
+#[allow(clippy::too_many_lines)] // One complete media exchange and its cleanup assertions.
 async fn exercise(mode: u8, disconnect: bool) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -78,13 +79,24 @@ async fn exercise(mode: u8, disconnect: bool) {
         );
         assert_eq!(
             request["type"],
-            if mode == 2 {
+            if mode >= 2 {
                 "voice_rerun_request"
             } else {
                 "voice_request"
             }
         );
-        socket.send(Message::Text(json!({"type":"session_open","session_id":7,"max_turns":if mode == 0 {1} else {4},"timeout_ms":1000}).to_string().into())).await.unwrap();
+        if mode >= 3 {
+            assert_eq!(request["data"]["variations"], 1);
+            assert_eq!(request["data"]["maximum_iteration_layers"], 1);
+            assert!(request["data"].get("test_case_groups").is_none());
+            assert!(request["data"].get("max_turns").is_none());
+            if mode == 3 {
+                assert_eq!(request["data"]["evaluation_id"], 1);
+            } else {
+                assert_eq!(request["data"]["test_result_ids"], json!([2, 3]));
+            }
+        }
+        socket.send(Message::Text(json!({"type":"session_open","session_id":7,"max_turns":if mode == 0 || mode >= 3 {1} else {4},"timeout_ms":1000}).to_string().into())).await.unwrap();
         assert_eq!(receive_json(&mut socket).await["type"], "session_ready");
         socket.send(Message::Text(json!({"type":"utterance_start","session_id":7,"stream_id":1,"text":"hello","timeout_ms":1000}).to_string().into())).await.unwrap();
         assert_eq!(receive_json(&mut socket).await["type"], "utterance_ready");
@@ -126,15 +138,26 @@ async fn exercise(mode: u8, disconnect: bool) {
             transport: "fake",
         },
     };
-    let result = if mode == 0 {
-        let request = serde_json::from_value(json!({"threshold":0.75,"variations":1,"maximum_iteration_layers":1,"test_case_groups":["test"]})).unwrap();
-        runner::run_single(
-            socket,
-            target,
-            crate::protocol_types::SingleTurnEvaluationRequest::Standard(request),
-            None,
-        )
-        .await
+    let result = if mode == 0 || mode >= 3 {
+        let request = if mode == 0 {
+            crate::protocol_types::SingleTurnEvaluationRequest::Standard(
+                serde_json::from_value(json!({"threshold":0.75,"variations":1,"maximum_iteration_layers":1,"test_case_groups":["test"]})).unwrap()
+            )
+        } else {
+            let selector = if mode == 3 {
+                json!({"evaluation_id":1})
+            } else {
+                json!({"test_result_ids":[2,3]})
+            };
+            let mut data = json!({"threshold":0.75,"variations":1,"maximum_iteration_layers":1});
+            data.as_object_mut()
+                .unwrap()
+                .extend(selector.as_object().unwrap().clone());
+            crate::protocol_types::SingleTurnEvaluationRequest::Rerun(
+                serde_json::from_value(data).unwrap(),
+            )
+        };
+        runner::run_single(socket, target, request, None).await
     } else {
         let request = if mode == 1 {
             crate::protocol_types::MultiTurnEvaluationRequest::Standard(
@@ -162,7 +185,7 @@ async fn exercise(mode: u8, disconnect: bool) {
 #[tokio::test]
 async fn all_voice_entrypoints_work_without_livekit() {
     tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        for mode in 0..3 {
+        for mode in 0..5 {
             exercise(mode, false).await;
         }
     })

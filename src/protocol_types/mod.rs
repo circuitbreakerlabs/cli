@@ -13,5 +13,5 @@ pub use multi_turn::{MultiTurnEvalRequest, MultiTurnRerunEvalRequest};
 #[cfg(eval_targets)]
 pub use single_turn::SingleTurnEvalRequest;
 pub use single_turn::SingleTurnEvaluationRequest;
-#[cfg(text_targets)]
+#[cfg(eval_targets)]
 pub use single_turn::SingleTurnRerunEvalRequest;
