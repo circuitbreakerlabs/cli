@@ -65,6 +65,23 @@ impl AddCustomEntries<&'static str, String> for ExactTag {
 }
 
 fn main() -> Result<()> {
+    // Keep CLI availability and dispatch on the same feature predicates.
+    let text = ["OPENAI", "OLLAMA", "CUSTOM"]
+        .iter()
+        .any(|name| std::env::var_os(format!("CARGO_FEATURE_{name}")).is_some());
+    let livekit = std::env::var_os("CARGO_FEATURE_LIVEKIT").is_some();
+    let musl = std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("musl");
+    if livekit && musl {
+        return Err(anyhow!(
+            "the livekit feature is incompatible with musl; build without livekit"
+        ));
+    }
+    for (name, enabled) in [("text_targets", text), ("eval_targets", text || livekit)] {
+        println!("cargo:rustc-check-cfg=cfg({name})");
+        if enabled {
+            println!("cargo:rustc-cfg={name}");
+        }
+    }
     let gitcl = Gitcl::builder().branch(true).sha(true).build();
 
     Emitter::default()
