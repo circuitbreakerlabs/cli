@@ -1,3 +1,4 @@
+//! `LiveKit` connection configuration; parsing has no native SDK dependency.
 use super::{Error, Result};
 use serde::Deserialize;
 use serde_json::{Value, json};

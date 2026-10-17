@@ -1,15 +1,16 @@
-#![cfg_attr(not(feature = "voice"), allow(dead_code))]
-//! Customer-configured voice sessions. Customer configuration never leaves this process.
-#[cfg(any(all(feature = "voice", not(target_env = "musl")), test))]
+//! Customer-configured voice sessions. Credentials stay in the local adapter.
+#[cfg(feature = "livekit")]
 mod config;
-#[cfg(any(all(feature = "voice", not(target_env = "musl")), test))]
+#[cfg(feature = "livekit")]
 mod hooks;
-#[cfg(all(feature = "voice", not(target_env = "musl")))]
+#[cfg(feature = "livekit")]
 mod livekit;
-#[cfg(any(all(feature = "voice", not(target_env = "musl")), test))]
 pub mod protocol;
-#[cfg(all(feature = "voice", not(target_env = "musl")))]
 mod runner;
+mod session;
+mod target;
+#[cfg(feature = "livekit")]
+pub use target::{PreparedTarget, prepare_livekit};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -22,6 +23,7 @@ pub enum Error {
     #[error("Voice endpoint connection or transport failed")]
     Transport,
     #[error("Native voice transport failed during {0}")]
+    #[cfg_attr(not(feature = "livekit"), allow(dead_code))]
     TransportStage(&'static str),
     #[error("Invalid voice protocol message")]
     Protocol,
@@ -35,5 +37,8 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-#[cfg(all(feature = "voice", not(target_env = "musl")))]
+#[cfg(feature = "livekit")]
 pub use runner::{run, run_single};
+
+#[cfg(test)]
+mod runner_tests;

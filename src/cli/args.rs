@@ -1,10 +1,18 @@
 use super::headers::Headers;
+#[cfg(eval_targets)]
+use crate::protocol_types::SingleTurnRerunEvalRequest;
+#[cfg(eval_targets)]
 use crate::protocol_types::{
     MultiTurnEvalRequest, MultiTurnRerunEvalRequest, SingleTurnEvalRequest,
-    SingleTurnRerunEvalRequest,
 };
-use crate::response_provider::{CustomProviderConfig, OllamaProviderConfig, OpenAIProviderConfig};
+#[cfg(feature = "custom")]
+use crate::response_provider::CustomProviderConfig;
+#[cfg(feature = "ollama")]
+use crate::response_provider::OllamaProviderConfig;
+#[cfg(feature = "openai")]
+use crate::response_provider::OpenAIProviderConfig;
 use clap::{ArgGroup, CommandFactory, Parser, Subcommand, ValueEnum};
+#[cfg(text_targets)]
 use reqwest::header::HeaderMap;
 use std::path::PathBuf;
 
@@ -51,6 +59,7 @@ pub struct Args {
 }
 
 impl Args {
+    #[cfg(text_targets)]
     pub fn headers(&self) -> HeaderMap {
         super::headers::merge_headers(&self.headers)
     }
@@ -59,40 +68,12 @@ impl Args {
         if self.command.is_none() {
             return Err(Self::command().error(
                 clap::error::ErrorKind::MissingSubcommand,
-                "an eval or api subcommand is required",
+                "a subcommand is required",
             ));
         }
 
         if let Some(Command::Api(api)) = &self.command {
             api.validate()?;
-        }
-
-        if let Some(Command::Eval { evaluation }) = &self.command {
-            let (voice, provider) = match evaluation {
-                EvaluationCommand::SingleTurn {
-                    voice, provider, ..
-                }
-                | EvaluationCommand::MultiTurn {
-                    voice, provider, ..
-                } => (Some(*voice), Some(provider)),
-                EvaluationCommand::ReRun { rerun } => match rerun {
-                    ReRunEvaluationCommand::MultiTurn {
-                        voice, provider, ..
-                    } => (Some(*voice), Some(provider)),
-                    ReRunEvaluationCommand::SingleTurn { provider, .. } => {
-                        (Some(false), Some(provider))
-                    }
-                },
-            };
-            if let (Some(voice), Some(provider)) = (voice, provider) {
-                let livekit = matches!(provider, ProviderCommand::Livekit { .. });
-                if voice != livekit {
-                    return Err(Self::command().error(
-                        clap::error::ErrorKind::ArgumentConflict,
-                        "--voice must be used with the livekit provider, and livekit requires --voice",
-                    ));
-                }
-            }
         }
 
         Ok(())
@@ -105,6 +86,7 @@ pub enum Command {
     /// Query the Circuit Breaker Labs API
     Api(ApiCommand),
 
+    #[cfg(eval_targets)]
     /// Run evaluations
     Eval {
         #[command(subcommand)]
@@ -197,13 +179,11 @@ pub struct ApiEvaluationsCommand {
     pub offset: Option<u32>,
 }
 
+#[cfg(eval_targets)]
 #[derive(Subcommand, Debug)]
 pub enum EvaluationCommand {
     /// Run single-turn evaluation
     SingleTurn {
-        /// Use the customer-configured voice transport instead of a text provider
-        #[arg(long)]
-        voice: bool,
         #[command(subcommand)]
         provider: ProviderCommand,
         #[command(flatten)]
@@ -212,9 +192,6 @@ pub enum EvaluationCommand {
 
     /// Run multi-turn evaluation
     MultiTurn {
-        /// Use the customer-configured voice transport instead of a text provider
-        #[arg(long)]
-        voice: bool,
         #[command(subcommand)]
         provider: ProviderCommand,
         #[command(flatten)]
@@ -228,6 +205,7 @@ pub enum EvaluationCommand {
     },
 }
 
+#[cfg(eval_targets)]
 #[derive(Subcommand, Debug)]
 pub enum ReRunEvaluationCommand {
     /// Re-run a historic single-turn evaluation result
@@ -240,9 +218,6 @@ pub enum ReRunEvaluationCommand {
 
     /// Re-run a historic multi-turn evaluation result
     MultiTurn {
-        /// Use the customer-configured voice transport instead of a text provider
-        #[arg(long)]
-        voice: bool,
         #[command(subcommand)]
         provider: ProviderCommand,
         #[command(flatten)]
@@ -250,22 +225,57 @@ pub enum ReRunEvaluationCommand {
     },
 }
 
+#[cfg(eval_targets)]
 #[derive(Subcommand, Debug)]
 #[command(rename_all = "lowercase")]
 pub enum ProviderCommand {
-    /// Use Ollama provider
-    Ollama(OllamaProviderConfig),
-    #[allow(clippy::doc_markdown)]
-    /// Use OpenAI provider
-    OpenAI(OpenAIProviderConfig),
-    /// Use Custom Rhai-scripted provider
-    Custom(CustomProviderConfig),
+    #[cfg(text_targets)]
+    #[command(flatten)]
+    Text(TextProviderCommand),
     /// Connect to a customer `LiveKit` endpoint for voice evaluation
+    #[cfg(feature = "livekit")]
     Livekit {
         /// Customer-owned TOML connection and control configuration
         #[arg(long)]
         config: PathBuf,
     },
+}
+
+#[cfg(eval_targets)]
+impl ProviderCommand {
+    pub fn is_voice(&self) -> bool {
+        match self {
+            #[cfg(text_targets)]
+            Self::Text(_) => false,
+            #[cfg(feature = "livekit")]
+            Self::Livekit { .. } => true,
+        }
+    }
+
+    #[cfg(text_targets)]
+    pub fn text(&self) -> &TextProviderCommand {
+        match self {
+            Self::Text(provider) => provider,
+            #[cfg(feature = "livekit")]
+            Self::Livekit { .. } => unreachable!("voice dispatched before text"),
+        }
+    }
+}
+
+#[cfg(text_targets)]
+#[derive(Subcommand, Debug)]
+#[command(rename_all = "lowercase")]
+pub enum TextProviderCommand {
+    /// Use Ollama provider
+    #[cfg(feature = "ollama")]
+    Ollama(OllamaProviderConfig),
+    #[allow(clippy::doc_markdown)]
+    /// Use OpenAI provider
+    #[cfg(feature = "openai")]
+    OpenAI(OpenAIProviderConfig),
+    /// Use Custom Rhai-scripted provider
+    #[cfg(feature = "custom")]
+    Custom(CustomProviderConfig),
 }
 
 #[derive(Clone, Copy, ValueEnum, Debug)]
@@ -294,6 +304,7 @@ mod tests {
     use super::Args;
     use clap::{Parser, error::ErrorKind};
 
+    #[cfg(feature = "openai")]
     #[test]
     fn parses_valid_single_turn_command() {
         let args = Args::try_parse_from([
@@ -360,6 +371,7 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn rejects_legacy_voice_evaluation_command() {
         let err = Args::try_parse_from(["cbl", "--cbl-api-key", "cbl-key", "eval", "voice"])
@@ -368,6 +380,7 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn rejects_out_of_range_threshold() {
         let err = Args::try_parse_from([
@@ -399,6 +412,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn rejects_negative_threshold() {
         let err = Args::try_parse_from([
@@ -430,6 +444,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn rejects_non_positive_variations() {
         let err = Args::try_parse_from([
@@ -461,6 +476,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn rejects_variations_above_spec_maximum() {
         let err = Args::try_parse_from([
@@ -492,6 +508,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn allows_zero_maximum_iteration_layers() {
         let args = Args::try_parse_from([
@@ -531,6 +548,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn rejects_maximum_iteration_layers_above_spec_maximum() {
         let err = Args::try_parse_from([
@@ -562,6 +580,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn rejects_negative_maximum_iteration_layers() {
         let err = Args::try_parse_from([
@@ -593,6 +612,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn parses_valid_multi_turn_command() {
         let args = Args::try_parse_from([
@@ -632,6 +652,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn rejects_odd_max_turns() {
         let err = Args::try_parse_from([
@@ -661,6 +682,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn accepts_max_turns_at_spec_maximum() {
         let args = Args::try_parse_from([
@@ -698,6 +720,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn rejects_max_turns_above_spec_maximum() {
         let err = Args::try_parse_from([
@@ -727,6 +750,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn rejects_max_turns_below_spec_minimum() {
         let err = Args::try_parse_from([
@@ -756,6 +780,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn rejects_missing_single_turn_test_case_groups() {
         let err = Args::try_parse_from([
@@ -781,6 +806,7 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn parses_valid_single_turn_rerun_command() {
         let args = Args::try_parse_from([
@@ -834,6 +860,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn rejects_single_turn_test_result_ids_outside_rerun_subcommand() {
         let err = Args::try_parse_from([
@@ -863,6 +890,7 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::UnknownArgument);
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn rejects_invalid_single_turn_test_result_ids() {
         for value in ["0", "-1", "abc", "1,,2", "1,1"] {
@@ -898,6 +926,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn parses_valid_single_turn_rerun_command_with_evaluation_id() {
         let args = Args::try_parse_from([
@@ -941,6 +970,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn rejects_single_turn_rerun_without_selector() {
         let err = Args::try_parse_from([
@@ -967,6 +997,7 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn rejects_single_turn_rerun_with_multiple_selectors() {
         let err = Args::try_parse_from([
@@ -997,6 +1028,7 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::ArgumentConflict);
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn rejects_multi_turn_rerun_without_selector() {
         let err = Args::try_parse_from([
@@ -1021,6 +1053,7 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn parses_valid_multi_turn_rerun_command() {
         let args = Args::try_parse_from([
@@ -1071,6 +1104,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn parses_valid_multi_turn_rerun_command_with_evaluation_id() {
         let args = Args::try_parse_from([
@@ -1112,6 +1146,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn rejects_multi_turn_rerun_with_multiple_selectors() {
         let err = Args::try_parse_from([
@@ -1140,6 +1175,7 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::ArgumentConflict);
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn rejects_multi_turn_test_result_ids_outside_rerun_subcommand() {
         let err = Args::try_parse_from([
@@ -1167,6 +1203,7 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::UnknownArgument);
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn rejects_invalid_multi_turn_test_result_ids() {
         for value in ["0", "-1", "abc", "1,,2", "1,1"] {
@@ -1200,6 +1237,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn rejects_empty_single_turn_test_case_groups() {
         let err = Args::try_parse_from([
@@ -1228,6 +1266,7 @@ mod tests {
         assert!(err.to_string().contains("non-empty test case group"));
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn rejects_empty_multi_turn_test_case_groups() {
         let err = Args::try_parse_from([
@@ -1632,6 +1671,7 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::ArgumentConflict);
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn rejects_api_query_flag_with_single_turn_subcommand() {
         let err = Args::try_parse_from([
@@ -1659,6 +1699,7 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::UnknownArgument);
     }
 
+    #[cfg(feature = "openai")]
     #[test]
     fn rejects_api_query_flag_with_multi_turn_subcommand() {
         let err = Args::try_parse_from([
@@ -1682,147 +1723,5 @@ mod tests {
         ])
         .expect_err("eval --roles should be rejected");
         assert_eq!(err.kind(), ErrorKind::UnknownArgument);
-    }
-    #[test]
-    fn parses_multi_turn_voice_config_for_fresh_and_rerun_commands() {
-        for (rerun, selector) in [(false, "--test-case-groups"), (true, "--evaluation-id")] {
-            let mut arguments = vec!["cbl", "--cbl-api-key", "test", "eval"];
-            if rerun {
-                arguments.push("re-run");
-            }
-            arguments.extend([
-                "multi-turn",
-                "--voice",
-                "--threshold",
-                "0.5",
-                "--max-turns",
-                "4",
-                selector,
-                if rerun { "123" } else { "test" },
-                "livekit",
-                "--config",
-                "voice.toml",
-            ]);
-            let args = super::Args::try_parse_from(arguments).unwrap();
-            args.validate().unwrap();
-        }
-    }
-
-    #[test]
-    fn parses_single_turn_voice_command() {
-        let args = super::Args::try_parse_from([
-            "cbl",
-            "--cbl-api-key",
-            "test",
-            "eval",
-            "single-turn",
-            "--voice",
-            "--threshold",
-            "0.5",
-            "--variations",
-            "2",
-            "--maximum-iteration-layers",
-            "1",
-            "--test-case-groups",
-            "test",
-            "livekit",
-            "--config",
-            "voice.toml",
-        ])
-        .expect("single-turn voice command should parse");
-        args.validate()
-            .expect("single-turn voice command should validate");
-        match args.command {
-            Some(super::Command::Eval {
-                evaluation: super::EvaluationCommand::SingleTurn { voice: true, .. },
-            }) => {}
-            _ => panic!("expected single-turn voice command"),
-        }
-    }
-
-    #[test]
-    fn keeps_text_provider_as_default() {
-        let args = super::Args::try_parse_from([
-            "cbl",
-            "--cbl-api-key",
-            "test",
-            "eval",
-            "single-turn",
-            "--threshold",
-            "0.5",
-            "--variations",
-            "2",
-            "--maximum-iteration-layers",
-            "1",
-            "--test-case-groups",
-            "test",
-            "openai",
-            "--api-key",
-            "openai-key",
-            "--model",
-            "model",
-        ])
-        .expect("text command should parse");
-        args.validate().expect("text command should validate");
-        match args.command {
-            Some(super::Command::Eval {
-                evaluation: super::EvaluationCommand::SingleTurn { voice: false, .. },
-            }) => {}
-            _ => panic!("expected default text command"),
-        }
-    }
-
-    #[test]
-    fn rejects_voice_without_livekit_provider() {
-        let args = super::Args::try_parse_from([
-            "cbl",
-            "--cbl-api-key",
-            "test",
-            "eval",
-            "multi-turn",
-            "--voice",
-            "--threshold",
-            "0.5",
-            "--max-turns",
-            "4",
-            "--test-case-groups",
-            "test",
-            "openai",
-            "--api-key",
-            "openai-key",
-            "--model",
-            "model",
-        ])
-        .expect("command should parse before semantic validation");
-        let error = args.validate().expect_err("voice should require livekit");
-        assert_eq!(error.kind(), ErrorKind::ArgumentConflict);
-    }
-
-    #[test]
-    fn rejects_livekit_for_single_turn_rerun() {
-        let args = super::Args::try_parse_from([
-            "cbl",
-            "--cbl-api-key",
-            "test",
-            "eval",
-            "re-run",
-            "single-turn",
-            "--threshold",
-            "0.5",
-            "--variations",
-            "2",
-            "--maximum-iteration-layers",
-            "1",
-            "--evaluation-id",
-            "123",
-            "livekit",
-            "--config",
-            "voice.toml",
-        ])
-        .expect("command should parse before semantic validation");
-        let error = args
-            .validate()
-            .expect_err("single-turn voice reruns should not be exposed");
-        assert_eq!(error.kind(), ErrorKind::ArgumentConflict);
     }
 }

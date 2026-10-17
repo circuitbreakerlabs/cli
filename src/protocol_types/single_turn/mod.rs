@@ -1,5 +1,10 @@
 use serde::{Deserialize, Serialize, de::Error};
 
+#[cfg(eval_targets)]
+pub use request::SingleTurnEvalRequest;
+#[cfg(eval_targets)]
+pub use request::SingleTurnRerunEvalRequest;
+
 mod optional;
 mod request;
 mod response;
@@ -7,8 +12,7 @@ mod response;
 use super::common::{CompletionRequest, ConversationComplete, ConversationError};
 pub use optional::{IterationComplete, IterationStart, OptionalSingleTurnMessage};
 pub use request::{
-    SingleTurnEvalRequest, SingleTurnEvaluationRequest, SingleTurnRequestEnvelope,
-    SingleTurnRerunEvalRequest, SingleTurnRerunRequestEnvelope,
+    SingleTurnEvaluationRequest, SingleTurnRequestEnvelope, SingleTurnRerunRequestEnvelope,
 };
 #[cfg(test)]
 pub use request::{SingleTurnRequest, SingleTurnRerunRequest};

@@ -19,6 +19,9 @@ pub fn endpoint_from_evaluation_type(eval: &crate::evaluations::EvaluationType) 
         crate::evaluations::EvaluationType::SingleTurnVoice => {
             singleturn::SINGLE_TURN_VOICE_ENDPOINT
         }
+        crate::evaluations::EvaluationType::SingleTurnVoiceRerun => {
+            singleturn::SINGLE_TURN_VOICE_RERUN_ENDPOINT
+        }
         crate::evaluations::EvaluationType::SingleTurn => singleturn::SINGLE_TURN_ENDPOINT,
         crate::evaluations::EvaluationType::SingleTurnRerun => {
             singleturn::SINGLE_TURN_RERUN_ENDPOINT

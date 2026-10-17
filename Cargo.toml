@@ -16,17 +16,17 @@ path = "./src/main.rs"
 pedantic = "deny"
 
 [dependencies]
-async-openai = { version = "0.32.4", default-features = false, features = ["chat-completion", "rustls"] }
-async-trait = "0.1.89"
+async-openai = { optional = true, version = "0.32.4", default-features = false, features = ["chat-completion", "rustls"] }
+async-trait = "0.1.92"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5.57", features = ["derive", "env"] }
 const_format = "0.2.35"
 env = "1.0.1"
 futures-util = "0.3.31"
-ollama-rs = { version = "0.3.4", default-features = false, features = ["headers", "rustls"] }
+ollama-rs = { optional = true, version = "0.3.4", default-features = false, features = ["headers", "rustls"] }
 ratatui = "0.30.0"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
-rhai = { version = "1.21", features = ["serde", "sync"] }
+rhai = { optional = true, version = "1.21", features = ["serde", "sync"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 tabled = "0.16"
@@ -37,7 +37,7 @@ tracing = "0.1.44"
 tracing-subscriber = "0.3.22"
 url = "2.5.8"
 update-informer = { version = "1.1", default-features = false, features = ["github", "reqwest", "rustls-tls"] }
-toml = "0.8"
+toml = { version = "0.8", optional = true }
 [target.'cfg(not(target_env = "musl"))'.dependencies]
 livekit = { version = "=0.8.4", optional = true, features = ["rustls-tls-native-roots"] }
 
@@ -52,4 +52,8 @@ inherits = "release"
 lto = "thin"
 
 [features]
-voice = ["dep:livekit"]
+default = ["openai", "ollama", "custom"]
+openai = ["dep:async-openai"]
+ollama = ["dep:ollama-rs"]
+custom = ["dep:rhai"]
+livekit = ["dep:livekit", "dep:rhai", "dep:toml"]

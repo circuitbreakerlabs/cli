@@ -1,4 +1,4 @@
-name: Set up native voice build
+name: Set up native LiveKit build
 description: Install build tools for the pinned LiveKit Rust SDK
 runs:
   using: composite
