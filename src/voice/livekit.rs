@@ -4,6 +4,7 @@ use super::{
     config::Config,
     hooks::{self, Action, Hooks},
     protocol::{Audio, AudioHeader, Command, FRAME_BYTES, Input, QUEUE_FRAMES},
+    session::{Output, VoiceSession, VoiceSessionProvider, emit},
 };
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -30,23 +31,8 @@ use tokio::{
     task::JoinSet,
     time::Instant,
 };
+
 use tokio_tungstenite::tungstenite::Message;
-
-pub type Output = mpsc::Sender<Message>;
-
-#[async_trait]
-pub trait VoiceSessionProvider: Send + Sync {
-    async fn connect(&self, session_id: i32, max_turns: u32) -> Result<Box<dyn VoiceSession>>;
-}
-#[async_trait]
-pub trait VoiceSession: Send {
-    async fn run(
-        self: Box<Self>,
-        input: mpsc::Receiver<Input>,
-        output: Output,
-        stop: watch::Receiver<bool>,
-    ) -> Result<()>;
-}
 
 pub struct Provider(pub Config);
 #[async_trait]
@@ -91,13 +77,6 @@ struct Session {
     max_turns: u32,
     external_session_id: Option<String>,
     nonce: String,
-}
-
-pub async fn emit(output: &Output, event: Value) -> Result<()> {
-    output
-        .send(Message::Text(event.to_string().into()))
-        .await
-        .map_err(|_| Error::Transport)
 }
 
 #[derive(Default)]
