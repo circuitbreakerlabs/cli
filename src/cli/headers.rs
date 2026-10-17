@@ -29,6 +29,7 @@ impl From<Headers> for HeaderMap {
     }
 }
 
+#[cfg(any(text_targets, test))]
 pub fn merge_headers(headers: &[Headers]) -> HeaderMap {
     headers
         .iter()

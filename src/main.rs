@@ -1,34 +1,63 @@
+// Shared evaluation infrastructure is retained for adapter-independent tests,
+// even when no selected target uses it in the binary.
 mod cli;
+#[cfg_attr(not(eval_targets), allow(dead_code))]
 mod consts;
+#[cfg_attr(not(eval_targets), allow(dead_code))]
 mod evaluation_output;
+#[cfg_attr(not(text_targets), allow(dead_code))]
 mod evaluations;
 mod http_api;
 mod protocol_types;
+#[cfg_attr(not(text_targets), allow(dead_code))]
 mod response_provider;
+#[cfg_attr(not(eval_targets), allow(dead_code))]
 mod tui;
 mod update_check;
+#[cfg_attr(not(feature = "livekit"), allow(dead_code))]
 mod voice;
+#[cfg_attr(not(eval_targets), allow(dead_code))]
 mod websockets;
 
+#[cfg(eval_targets)]
 use std::path::{Path, PathBuf};
+#[cfg(text_targets)]
 use std::sync::Arc;
 use update_check::print_update_warning_if_needed;
 
+#[cfg(eval_targets)]
 use chrono::Local;
 use clap::Parser;
+#[cfg(eval_targets)]
 use evaluation_output::{serialize_evaluation_output, serialize_rerun_evaluation_output};
-use protocol_types::{MultiTurnEvaluationRequest, SingleTurnEvaluationRequest};
+#[cfg(eval_targets)]
+use protocol_types::MultiTurnEvaluationRequest;
+#[cfg(text_targets)]
+use protocol_types::SingleTurnEvaluationRequest;
+#[cfg(eval_targets)]
 use ratatui::crossterm::style::{Attribute, Color, SetAttribute, SetForegroundColor};
-use response_provider::{CustomProvider, OllamaProvider, OpenAIProvider, ResponseProvider};
-use tui::{
-    MultiTurnProgressIndicatorMessage, SingleTurnProgressIndicatorMessage, multiturn, singleturn,
-};
+#[cfg(feature = "custom")]
+use response_provider::CustomProvider;
+#[cfg(feature = "ollama")]
+use response_provider::OllamaProvider;
+#[cfg(feature = "openai")]
+use response_provider::OpenAIProvider;
+#[cfg(text_targets)]
+use response_provider::ResponseProvider;
+#[cfg(text_targets)]
+use tui::{MultiTurnProgressIndicatorMessage, SingleTurnProgressIndicatorMessage};
+#[cfg(eval_targets)]
+use tui::{multiturn, singleturn};
+#[cfg(text_targets)]
 use websockets::WebSocketConnection;
 
+#[cfg(text_targets)]
 use evaluations::EvaluationError;
+#[cfg(text_targets)]
 use thiserror::Error;
 use tracing_subscriber::prelude::*;
 
+#[cfg(text_targets)]
 #[derive(Error, Debug)]
 enum RunEvaluationError {
     #[error("Evaluation error: {0}")]
@@ -41,10 +70,9 @@ enum RunEvaluationError {
     FileSave(#[from] std::io::Error),
 }
 
-#[allow(clippy::too_many_lines)] // Dispatch text and voice without changing existing command semantics.
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let cli_args = cli::Args::parse();
+    let mut cli_args = cli::Args::parse();
     cli_args.validate().unwrap_or_else(|e| e.exit());
 
     if cli_args.log_mode {
@@ -63,12 +91,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .init();
     }
 
-    let headers = cli_args.headers();
     let command = cli_args
         .command
+        .take()
         .expect("validated CLI args should include a subcommand");
 
-    let evaluation = match command {
+    match command {
         cli::Command::Api(api_command) => {
             http_api::handle(
                 api_command,
@@ -78,21 +106,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             )
             .await?;
             print_update_warning_if_needed(cli_args.log_mode).await;
-            return Ok(());
+            Ok(())
         }
-        cli::Command::Eval { evaluation } => evaluation,
-    };
+        #[cfg(eval_targets)]
+        cli::Command::Eval { evaluation } => run_evaluation(evaluation, cli_args).await,
+    }
+}
 
+#[cfg(eval_targets)]
+#[allow(clippy::too_many_lines)]
+async fn run_evaluation(
+    evaluation: cli::EvaluationCommand,
+    cli_args: cli::Args,
+) -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(feature = "livekit")]
     match evaluation {
         cli::EvaluationCommand::SingleTurn {
-            voice: true,
             provider: cli::ProviderCommand::Livekit { config },
             request,
         } => {
+            let target = voice::prepare_livekit(&config, 1).map_err(|error| error.to_string())?;
             return run_single_turn_voice_cli(
                 &cli_args.cbl_api_base_url,
                 &cli_args.cbl_api_key,
-                config,
+                target,
                 request.into(),
                 cli_args.log_mode,
                 cli_args.output_file,
@@ -100,15 +137,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .await;
         }
         cli::EvaluationCommand::MultiTurn {
-            voice: true,
             provider: cli::ProviderCommand::Livekit { config },
             request,
         } => {
+            let request: MultiTurnEvaluationRequest = request.into();
+            let target = voice::prepare_livekit(&config, request.max_turns())
+                .map_err(|error| error.to_string())?;
             return run_voice_cli(
                 &cli_args.cbl_api_base_url,
                 &cli_args.cbl_api_key,
-                config,
-                request.into(),
+                target,
+                request,
                 cli_args.log_mode,
                 cli_args.output_file,
             )
@@ -117,94 +156,65 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         cli::EvaluationCommand::ReRun {
             rerun:
                 cli::ReRunEvaluationCommand::MultiTurn {
-                    voice: true,
                     provider: cli::ProviderCommand::Livekit { config },
                     request,
                 },
         } => {
+            let request: MultiTurnEvaluationRequest = request.into();
+            let target = voice::prepare_livekit(&config, request.max_turns())
+                .map_err(|error| error.to_string())?;
             return run_voice_cli(
                 &cli_args.cbl_api_base_url,
                 &cli_args.cbl_api_key,
-                config,
-                request.into(),
+                target,
+                request,
                 cli_args.log_mode,
                 cli_args.output_file,
             )
             .await;
         }
+        #[cfg(text_targets)]
         _ => {}
     }
 
-    let provider_command = match &evaluation {
-        cli::EvaluationCommand::SingleTurn {
-            provider, voice, ..
-        }
-        | cli::EvaluationCommand::MultiTurn {
-            provider, voice, ..
-        } => {
-            if *voice {
-                unreachable!("voice dispatched above")
+    #[cfg(text_targets)]
+    {
+        let headers = cli_args.headers();
+        let provider_command = match &evaluation {
+            cli::EvaluationCommand::SingleTurn { provider, .. }
+            | cli::EvaluationCommand::MultiTurn { provider, .. } => provider.text(),
+            cli::EvaluationCommand::ReRun { rerun } => match rerun {
+                cli::ReRunEvaluationCommand::SingleTurn { provider, .. } => provider,
+                cli::ReRunEvaluationCommand::MultiTurn { provider, .. } => provider.text(),
+            },
+        };
+
+        let provider = match provider_command {
+            #[cfg(feature = "ollama")]
+            cli::TextProviderCommand::Ollama(config) => {
+                Arc::new(OllamaProvider::new(config.clone(), &headers)?)
+                    as Arc<dyn ResponseProvider>
             }
-            provider
-        }
-        cli::EvaluationCommand::ReRun { rerun } => match rerun {
-            cli::ReRunEvaluationCommand::SingleTurn { provider, .. } => provider,
-            cli::ReRunEvaluationCommand::MultiTurn {
-                provider, voice, ..
-            } => {
-                if *voice {
-                    unreachable!("voice dispatched above")
-                }
-                provider
+            #[cfg(feature = "openai")]
+            cli::TextProviderCommand::OpenAI(config) => {
+                Arc::new(OpenAIProvider::new(config.clone(), &headers)?)
+                    as Arc<dyn ResponseProvider>
             }
-        },
-    };
+            #[cfg(feature = "custom")]
+            cli::TextProviderCommand::Custom(config) => {
+                Arc::new(CustomProvider::new(config, &headers)?) as Arc<dyn ResponseProvider>
+            }
+        };
 
-    let provider = match provider_command {
-        cli::ProviderCommand::Ollama(config) => {
-            Arc::new(OllamaProvider::new(config.clone(), &headers)?) as Arc<dyn ResponseProvider>
-        }
-        cli::ProviderCommand::OpenAI(config) => {
-            Arc::new(OpenAIProvider::new(config.clone(), &headers)?) as Arc<dyn ResponseProvider>
-        }
-        cli::ProviderCommand::Custom(config) => {
-            Arc::new(CustomProvider::new(config, &headers)?) as Arc<dyn ResponseProvider>
-        }
-        cli::ProviderCommand::Livekit { .. } => {
-            unreachable!("voice provider dispatched above")
-        }
-    };
+        let websocket = websockets::connect(
+            &cli_args.cbl_api_base_url,
+            (&evaluation).into(),
+            &cli_args.cbl_api_key,
+        )
+        .await?;
 
-    let websocket = websockets::connect(
-        &cli_args.cbl_api_base_url,
-        (&evaluation).into(),
-        &cli_args.cbl_api_key,
-    )
-    .await?;
-
-    match evaluation {
-        cli::EvaluationCommand::SingleTurn { request, .. } => {
-            run_single_turn_evaluation(
-                websocket,
-                provider,
-                request.into(),
-                cli_args.log_mode,
-                cli_args.output_file,
-            )
-            .await?;
-        }
-        cli::EvaluationCommand::MultiTurn { request, .. } => {
-            run_multi_turn_evaluation(
-                websocket,
-                provider,
-                request.into(),
-                cli_args.log_mode,
-                cli_args.output_file,
-            )
-            .await?;
-        }
-        cli::EvaluationCommand::ReRun { rerun } => match rerun {
-            cli::ReRunEvaluationCommand::SingleTurn { request, .. } => {
+        match evaluation {
+            cli::EvaluationCommand::SingleTurn { request, .. } => {
                 run_single_turn_evaluation(
                     websocket,
                     provider,
@@ -214,7 +224,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 )
                 .await?;
             }
-            cli::ReRunEvaluationCommand::MultiTurn { request, .. } => {
+            cli::EvaluationCommand::MultiTurn { request, .. } => {
                 run_multi_turn_evaluation(
                     websocket,
                     provider,
@@ -224,12 +234,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 )
                 .await?;
             }
-        },
+            cli::EvaluationCommand::ReRun { rerun } => match rerun {
+                cli::ReRunEvaluationCommand::SingleTurn { request, .. } => {
+                    run_single_turn_evaluation(
+                        websocket,
+                        provider,
+                        request.into(),
+                        cli_args.log_mode,
+                        cli_args.output_file,
+                    )
+                    .await?;
+                }
+                cli::ReRunEvaluationCommand::MultiTurn { request, .. } => {
+                    run_multi_turn_evaluation(
+                        websocket,
+                        provider,
+                        request.into(),
+                        cli_args.log_mode,
+                        cli_args.output_file,
+                    )
+                    .await?;
+                }
+            },
+        }
     }
-
+    #[cfg(text_targets)]
     Ok(())
 }
 
+#[cfg(text_targets)]
 async fn run_single_turn_evaluation(
     websocket: WebSocketConnection,
     provider: Arc<dyn ResponseProvider>,
@@ -276,6 +309,7 @@ async fn run_single_turn_evaluation(
     Ok(())
 }
 
+#[cfg(text_targets)]
 async fn run_multi_turn_evaluation(
     websocket: WebSocketConnection,
     provider: Arc<dyn ResponseProvider>,
@@ -321,6 +355,7 @@ async fn run_multi_turn_evaluation(
     Ok(())
 }
 
+#[cfg(eval_targets)]
 fn print_success_message(log_mode: bool, turn_type: &str, filename: &Path) {
     if log_mode {
         tracing::info!(
@@ -342,37 +377,11 @@ fn print_success_message(log_mode: bool, turn_type: &str, filename: &Path) {
     }
 }
 
-#[cfg(not(all(feature = "voice", not(target_env = "musl"))))]
-#[allow(clippy::unused_async)] // Keep the same dispatch interface in text-only builds.
-async fn run_voice_cli(
-    _base_url: &str,
-    _key: &str,
-    _config: PathBuf,
-    _request: MultiTurnEvaluationRequest,
-    _log_mode: bool,
-    _output: Option<PathBuf>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    Err("This build does not include voice. Install the voice-enabled GNU Linux, macOS, or Windows build, or build with --features voice.".into())
-}
-
-#[cfg(not(all(feature = "voice", not(target_env = "musl"))))]
-#[allow(clippy::unused_async)]
-async fn run_single_turn_voice_cli(
-    _base_url: &str,
-    _key: &str,
-    _config: PathBuf,
-    _request: protocol_types::SingleTurnEvaluationRequest,
-    _log_mode: bool,
-    _output: Option<PathBuf>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    Err("This build does not include voice. Install the voice-enabled GNU Linux, macOS, or Windows build, or build with --features voice.".into())
-}
-
-#[cfg(all(feature = "voice", not(target_env = "musl")))]
+#[cfg(feature = "livekit")]
 async fn run_single_turn_voice_cli(
     base_url: &str,
     key: &str,
-    config: PathBuf,
+    target: voice::PreparedTarget,
     request: protocol_types::SingleTurnEvaluationRequest,
     log_mode: bool,
     output: Option<PathBuf>,
@@ -393,7 +402,7 @@ async fn run_single_turn_voice_cli(
             ))),
         )
     };
-    let result = voice::run_single(websocket, &config, request, progress).await;
+    let result = voice::run_single(websocket, target, request, progress).await;
     if let Some(render) = render {
         let _ = render.await;
     }
@@ -412,11 +421,11 @@ async fn run_single_turn_voice_cli(
     Ok(())
 }
 
-#[cfg(all(feature = "voice", not(target_env = "musl")))]
+#[cfg(feature = "livekit")]
 async fn run_voice_cli(
     base_url: &str,
     key: &str,
-    config: PathBuf,
+    target: voice::PreparedTarget,
     request: MultiTurnEvaluationRequest,
     log_mode: bool,
     output: Option<PathBuf>,
@@ -435,7 +444,7 @@ async fn run_voice_cli(
         let (tx, rx) = tokio::sync::mpsc::channel(128);
         (Some(tx), Some(tokio::spawn(multiturn::render_task(rx))))
     };
-    let result = voice::run(websocket, &config, request, progress).await;
+    let result = voice::run(websocket, target, request, progress).await;
     if let Some(render) = render {
         let _ = render.await;
     }

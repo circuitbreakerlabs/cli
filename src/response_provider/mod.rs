@@ -1,13 +1,19 @@
+#[cfg(feature = "custom")]
 pub mod custom;
 pub mod err;
+#[cfg(feature = "ollama")]
 pub mod ollama;
+#[cfg(feature = "openai")]
 pub mod openai;
 
 use crate::protocol_types;
 use async_trait::async_trait;
+#[cfg(feature = "custom")]
 pub use custom::{CustomProvider, CustomProviderConfig};
 pub use err::ProviderError;
+#[cfg(feature = "ollama")]
 pub use ollama::{OllamaProvider, OllamaProviderConfig};
+#[cfg(feature = "openai")]
 pub use openai::{OpenAIProvider, OpenAIProviderConfig};
 
 #[derive(Debug, Clone)]
