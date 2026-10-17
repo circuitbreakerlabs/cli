@@ -39,9 +39,22 @@
       {
         devShells =
           let
-            rustShell = pkgs.mkShell {
+            # LiveKit's prebuilt WebRTC requires Clang 21 or newer.
+            rustShell = (pkgs.mkShell.override { stdenv = pkgs.llvmPackages_21.stdenv; }) {
               name = "rust-development-shell";
-              nativeBuildInputs = rustBin ++ (with pkgs; [ rust-analyzer ]);
+              nativeBuildInputs =
+                rustBin
+                ++ (with pkgs; [
+                  rust-analyzer
+                  pkg-config
+                ]);
+              buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isLinux (
+                with pkgs;
+                [
+                  glib
+                  libjpeg
+                ]
+              );
             };
 
             nixShell = pkgs.mkShell {
