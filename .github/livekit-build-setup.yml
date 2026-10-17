@@ -1,0 +1,8 @@
+- name: Select release target features
+  shell: bash
+  env:
+    RELEASE_TARGETS: ${{ toJson(matrix.targets) }}
+  run: python3 .github/scripts/select-release-features.py
+- name: Set up native LiveKit build
+  if: ${{ !contains(join(matrix.targets, ','), 'musl') }}
+  uses: ./.github/actions/setup-livekit

@@ -1,3 +1,0 @@
-- name: Set up native voice build
-  if: ${{ !contains(join(matrix.targets, ','), 'musl') }}
-  uses: ./.github/actions/setup-voice
