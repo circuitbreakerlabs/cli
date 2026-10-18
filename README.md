@@ -12,12 +12,11 @@
 1. Copy the installation command for your preferred shell from the [releases page](https://github.com/circuitbreakerlabs/cli/releases).
 2. Verify `cbl` installed correctly with `cbl help`
 3. Set the Circuit Breaker Labs API key environment variable:
-   * **macOS/Linux:** `export CBL_API_KEY="<your_api_key_here>"`
-   * **Windows (PowerShell):** `$env:CBL_API_KEY="<your_api_key_here>"`
+   - **macOS/Linux:** `export CBL_API_KEY="<your_api_key_here>"`
+   - **Windows (PowerShell):** `$env:CBL_API_KEY="<your_api_key_here>"`
 4. Set the OpenAI API key environment variable (required for this example):
-   * **macOS/Linux:** `export OPENAI_API_KEY="<your_api_key_here>"`
-   * **Windows (PowerShell):** `$env:OPENAI_API_KEY="<your_api_key_here>"`
-
+   - **macOS/Linux:** `export OPENAI_API_KEY="<your_api_key_here>"`
+   - **Windows (PowerShell):** `$env:OPENAI_API_KEY="<your_api_key_here>"`
 
 Try a single-turn evaluation:
 
@@ -46,67 +45,31 @@ Pre-built executables and installation methods for Linux, Mac, and Windows are a
 
 Click [here](mailto:team@circuitbreakerlabs.ai?subject=Getting%20Set%20Up&body=I%27m%20interested%20in%20using%20the%20Circuit%20Breaker%20Labs%20CLI%20tool%20for%20autonomous%20red-teaming%20and%20would%20like%20to%20request%20an%20API%20access%20key.) to get an access key.
 
-## Usage
+## Usage reference
 
-### Flags and Options
+See the [CLI reference](https://api.circuitbreakerlabs.ai/v1/docs)
+in the API documentation for command syntax, evaluation options, custom model
+integration, and LiveKit setup and reruns.
 
-You can see the available options and flags for `cbl` with `cbl help`, for evaluation commands with `cbl eval help`, or for a specific evaluation type with `cbl eval <evaluation_type> help`.
+## Build features
 
-### Syntax
-
-The syntax for `cbl` is:
-
-```sh
-cbl --top-level-arg1 eval <evaluation_type> --evaluation-arg1 <provider> --provider-arg1
-```
-
-where `eval`, `<evaluation_type>`, and `<provider>` are subcommands.
-
-The available evaluation types are `single-turn` and `multi-turn`. The text
-providers are `ollama`, `openai`, and `custom`. Add `--voice` and use the
-`livekit` provider to run either evaluation type against a customer endpoint.
-
-#### Example
-
-The following would run a single-turn evaluation against a custom OpenAI finetune, and save the results to `result.json`. If you haven't already, set the `CBL_API_KEY` and `OPENAI_API_KEY` environment variables.
+Default builds enable the `openai`, `ollama`, and `custom` target features. Each
+feature controls its target's implementation, dependencies, and CLI commands.
+Disabled targets are absent from help and rejected by the command parser.
 
 ```sh
-cbl \
-    --output-file result.json \
-    eval \
-    single-turn \  # evaluation type
-    --threshold 0.3 \
-    --variations 3 \
-    --maximum-iteration-layers 2 \
-    --test-case-groups suicidal_ideation \
-    openai \       # provider
-    --temperature 1.2 \
-    --model $MY_FINETUNE_ID
+cargo build --release                            # All three text targets
+cargo build --release --features livekit          # Text targets plus LiveKit
+cargo build --release --no-default-features --features openai
+cargo build --release --no-default-features --features livekit
+cargo build --release --no-default-features       # API-only CLI, without eval
 ```
 
-### Integrating With a Custom Model Endpoint
-
-For APIs that aren't already supported or OpenAI compatible, `cbl` supports scripting. The `custom` provider expects a [Rhai](https://rhai.rs/) script that defines the translation between `cbl`'s and the custom endpoint's request/response schema. Examples scripts are available in [`examples/providers/`](https://github.com/circuitbreakerlabs/cli/tree/main/examples/providers).
-
-### Configuration Reference
-
-#### Safety Threshold
-
-The `--threshold` flag accepts a value from `0` to `1`. Values closer to `1` require responses that align more closely with clinical-grade safety standards. Lower values allow more permissive responses.
-
-#### Maximum Turns
-
-`--max-turns` must be an even number between `2` and `100` because each turn pairs one user message with one model response. [Contact us](mailto:team@circuitbreakerlabs.ai) if you need a higher limit for your environment.
-
-#### Test Packs
-
-CBL offers specialized test packs for different domains and risk scenarios. Pass one or more pack names with `--test-case-groups`, separated by commas.
+The `livekit` feature is incompatible with musl: builds combining them fail,
+including `--all-features`. Build musl binaries with the text features only.
+Release builds enable all four targets on GNU Linux, macOS, and Windows, and
+only the three text targets on musl.
 
 ---
 
 Questions? Feedback? Reach us at [team@circuitbreakerlabs.ai](mailto:team@circuitbreakerlabs.ai).
-
-## Voice evaluations
-
-Voice-enabled builds connect to customer LiveKit endpoints using local configuration
-and optional Rhai hooks. See [voice setup, examples, and protocol](docs/voice.md).

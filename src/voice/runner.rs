@@ -1,8 +1,8 @@
 use super::{
     Error, Result,
-    config::Config,
-    livekit::{Provider, VoiceSessionProvider, emit},
     protocol::{Audio, Command, Input, MAX_CONTROL_BYTES, QUEUE_FRAMES, VERSION},
+    session::emit,
+    target::PreparedTarget,
 };
 use crate::{
     protocol_types::{MultiTurnEvaluationRequest, SingleTurnEvaluationRequest},
@@ -13,8 +13,6 @@ use futures_util::{Sink, SinkExt, StreamExt};
 use serde_json::{Value, json};
 use std::{
     collections::{HashMap, HashSet},
-    path::Path,
-    sync::Arc,
     time::Duration,
 };
 use tokio::{
@@ -26,7 +24,7 @@ use tokio_tungstenite::tungstenite::Message;
 #[allow(clippy::too_many_lines)] // Central multiplexing loop and its cleanup share task ownership.
 pub async fn run(
     websocket: WebSocketConnection,
-    path: &Path,
+    target: PreparedTarget,
     request: MultiTurnEvaluationRequest,
     progress: Option<mpsc::Sender<MultiTurnProgressIndicatorMessage>>,
 ) -> Result<Value> {
@@ -38,7 +36,7 @@ pub async fn run(
     };
     run_inner(
         websocket,
-        path,
+        target,
         data.map_err(|_| Error::Protocol)?,
         kind,
         request.max_turns(),
@@ -50,7 +48,7 @@ pub async fn run(
 
 pub async fn run_single(
     websocket: WebSocketConnection,
-    path: &Path,
+    target: PreparedTarget,
     request: SingleTurnEvaluationRequest,
     progress: Option<mpsc::Sender<SingleTurnProgressIndicatorMessage>>,
 ) -> Result<Value> {
@@ -64,7 +62,7 @@ pub async fn run_single(
     };
     run_inner(
         websocket,
-        path,
+        target,
         data.map_err(|_| Error::Protocol)?,
         kind,
         1,
@@ -82,30 +80,15 @@ enum Progress {
 #[allow(clippy::too_many_lines)]
 async fn run_inner(
     websocket: WebSocketConnection,
-    path: &Path,
+    target: PreparedTarget,
     data: Value,
     kind: &str,
     max_turns: usize,
     progress: Progress,
     single: bool,
 ) -> Result<Value> {
-    let config = Config::load(path)?;
-    // Resolve secrets and compile hooks before asking the API to start paid work.
-    config.context(0, u32::try_from(max_turns).map_err(|_| Error::Protocol)?)?;
-    super::hooks::Hooks::new(&config)?;
-    if let Some(path) = &config.bootstrap_script {
-        super::hooks::Script::load(path)?;
-    } else {
-        super::config::read_secret(
-            config
-                .token_env
-                .as_deref()
-                .ok_or(Error::Configuration("missing token_env"))?,
-        )?;
-    }
-    let target =
-        json!({"label":config.label,"transport":"livekit","cli_version":env!("CARGO_PKG_VERSION")});
-    let provider: Arc<dyn VoiceSessionProvider> = Arc::new(Provider(config));
+    let PreparedTarget { provider, metadata } = target;
+    let target = json!({"label":metadata.label,"transport":metadata.transport,"cli_version":env!("CARGO_PKG_VERSION")});
     let (mut writer, mut reader) = websocket.split();
     writer
         .send(Message::Text(

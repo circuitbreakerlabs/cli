@@ -24,6 +24,8 @@ pub struct Audio {
 }
 
 impl Audio {
+    // Outbound audio is produced by adapters; portable builds currently have none.
+    #[cfg_attr(not(any(test, feature = "livekit")), allow(dead_code))]
     pub fn encode(&self) -> Result<Vec<u8>> {
         self.validate()?;
         let header = serde_json::to_vec(&self.header).map_err(|_| Error::Protocol)?;
@@ -137,7 +139,9 @@ mod tests {
             .as_str()
             .unwrap()
             .as_bytes()
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|hex| u8::from_str_radix(std::str::from_utf8(hex).unwrap(), 16).unwrap())
             .collect();
         let audio = Audio::decode(&wire).unwrap();

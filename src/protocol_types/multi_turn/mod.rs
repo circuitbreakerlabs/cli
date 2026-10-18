@@ -1,3 +1,8 @@
+#[cfg(eval_targets)]
+pub use request::MultiTurnEvalRequest;
+#[cfg(eval_targets)]
+pub use request::MultiTurnRerunEvalRequest;
+
 mod optional;
 mod request;
 mod response;
@@ -5,8 +10,7 @@ mod response;
 use crate::protocol_types::common::{CompletionRequest, ConversationComplete, ConversationError};
 pub use optional::{MultiTurnEvaluationStart, OptionalMultiTurnMessage};
 pub use request::{
-    MultiTurnEvalRequest, MultiTurnEvaluationRequest, MultiTurnRequestEnvelope,
-    MultiTurnRerunEvalRequest, MultiTurnRerunRequestEnvelope,
+    MultiTurnEvaluationRequest, MultiTurnRequestEnvelope, MultiTurnRerunRequestEnvelope,
 };
 #[cfg(test)]
 pub use request::{MultiTurnRequest, MultiTurnRerunRequest};

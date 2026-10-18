@@ -131,8 +131,13 @@ jobs:
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
             echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           fi
-      - name: "Set up native voice build"
-        uses: "./.github/actions/setup-voice"
+      - name: "Select release target features"
+        run: "python3 .github/scripts/select-release-features.py"
+        shell: "bash"
+        env:
+          "RELEASE_TARGETS": "${{ toJson(matrix.targets) }}"
+      - name: "Set up native LiveKit build"
+        uses: "./.github/actions/setup-livekit"
         if: "${{ !contains(join(matrix.targets, ','), 'musl') }}"
       - name: Install dist
         run: ${{ matrix.install_dist.run }}

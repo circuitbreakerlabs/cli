@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+// Providers construct different subsets of the shared error vocabulary.
+#[allow(dead_code)]
 #[derive(Error, Debug)]
 pub enum ProviderError {
     #[error("Configuration error: {0}")]
@@ -24,6 +26,7 @@ impl From<reqwest::Error> for ProviderError {
     }
 }
 
+#[cfg(feature = "custom")]
 impl From<rhai::EvalAltResult> for ProviderError {
     fn from(e: rhai::EvalAltResult) -> Self {
         ProviderError::Script(e.to_string())

@@ -30,6 +30,11 @@ jobs:
               - '**/*.rs'
               - 'Cargo.toml'
               - 'Cargo.lock'
+              - '.github/workflows/rust.yml'
+              - '.github/actions/setup-livekit/**'
+              - '.github/scripts/**'
+              - '.github/livekit-build-setup.yml'
+              - 'dist-workspace.toml'
 
   fmt:
     needs: detect_changes
@@ -48,6 +53,12 @@ jobs:
         run: cargo fmt --all -- --check
 
   rust:
+    strategy:
+      fail-fast: false
+      matrix:
+        features: [default, "", openai, ollama, custom]
+    env:
+      FEATURES: ${{ matrix.features }}
     needs: detect_changes
     if: needs.detect_changes.outputs.rust_files == 'true'
     runs-on: ubuntu-latest
@@ -71,41 +82,107 @@ jobs:
         uses: actions/cache@v5
         with:
           path: target
-          key: cargo-build-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'Cargo.toml') }}
+          key: cargo-build-${{ runner.os }}-${{ matrix.features }}-${{ hashFiles('Cargo.lock', 'Cargo.toml') }}
           restore-keys: cargo-build-${{ runner.os }}-
 
-      - name: Build with Cargo
-        run: cargo build --release
+      - name: Build, lint, and test selected targets
+        run: |
+          args=()
+          if [[ "$FEATURES" != default ]]; then
+            args=(--no-default-features --features "$FEATURES")
+          fi
+          cargo build --locked --release "${args[@]}"
+          cargo clippy --locked --all-targets "${args[@]}" -- -D warnings
+          cargo test --locked "${args[@]}"
+          cargo tree --locked "${args[@]}" --edges normal,build > dependencies.txt
+          python3 .github/scripts/check-target-dependencies.py
+      - name: Check release feature selection
+        run: python3 .github/scripts/test-release-features.py
 
-      - name: Clippy
-        run: cargo clippy --tests
-
-      - name: Test
-        run: cargo test
-
-  voice:
+  livekit:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-15, macos-15-intel, windows-latest]
+        features: ["openai,ollama,custom,livekit"]
+        include:
+          - os: ubuntu-24.04
+            features: livekit
+    env:
+      FEATURES: ${{ matrix.features }}
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - uses: ./.github/actions/setup-voice
-      - name: Build native voice release
-        run: cargo build --locked --release --features voice
-      - name: Lint native voice
-        run: cargo clippy --locked --tests --features voice
-      - name: Test native voice
-        run: cargo test --locked --features voice
+      - uses: ./.github/actions/setup-livekit
+      - name: Build native LiveKit release
+        shell: bash
+        run: cargo build --locked --release --no-default-features --features "$FEATURES"
+      - name: Lint native LiveKit
+        shell: bash
+        run: cargo clippy --locked --all-targets --no-default-features --features "$FEATURES" -- -D warnings
+      - name: Test native LiveKit
+        shell: bash
+        run: cargo test --locked --no-default-features --features "$FEATURES"
+      - name: Check target dependencies
+        shell: bash
+        run: |
+          cargo tree --locked --no-default-features --features "$FEATURES" --edges normal,build > dependencies.txt
+          python3 .github/scripts/check-target-dependencies.py
       - name: Check public voice help
         shell: bash
         run: |
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            target/x86_64-pc-windows-msvc/release/cbl.exe --cbl-api-key unused eval multi-turn --voice --help
+            target/x86_64-pc-windows-msvc/release/cbl.exe --cbl-api-key unused eval multi-turn --help
           else
-            target/release/cbl --cbl-api-key unused eval multi-turn --voice --help
+            target/release/cbl --cbl-api-key unused eval multi-turn --help
           fi
+
+  musl:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        features: [default, "", openai, ollama, custom]
+    env:
+      FEATURES: ${{ matrix.features }}
+      CC_x86_64_unknown_linux_musl: musl-gcc
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - name: Install musl toolchain
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Build and test portable targets
+        run: |
+          args=()
+          if [[ "$FEATURES" != default ]]; then
+            args=(--no-default-features --features "$FEATURES")
+          fi
+          cargo build --locked --release --target x86_64-unknown-linux-musl "${args[@]}"
+          cargo test --locked --target x86_64-unknown-linux-musl "${args[@]}"
+          cargo tree --locked --target x86_64-unknown-linux-musl "${args[@]}" --edges normal,build > dependencies.txt
+          python3 .github/scripts/check-target-dependencies.py
+          if grep -E '(livekit|libwebrtc|webrtc-sys) v[0-9]' dependencies.txt; then
+            echo "Native LiveKit dependencies found in musl build"
+            exit 1
+          fi
+          binary=target/x86_64-unknown-linux-musl/release/cbl
+          if readelf -l "$binary" | grep -q INTERP; then exit 1; fi
+          if readelf -d "$binary" | grep -q NEEDED; then exit 1; fi
+      - name: Reject LiveKit on musl
+        if: matrix.features == 'default'
+        run: |
+          for flags in '--no-default-features --features livekit' '--all-features'; do
+            read -r -a args <<< "$flags"
+            if cargo check --locked --target x86_64-unknown-linux-musl "${args[@]}" > incompatible.log 2>&1; then
+              echo "LiveKit unexpectedly built on musl"
+              exit 1
+            fi
+            cat incompatible.log
+            grep -F 'the livekit feature is incompatible with musl' incompatible.log
+          done
