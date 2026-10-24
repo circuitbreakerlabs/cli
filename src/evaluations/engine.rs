@@ -599,4 +599,39 @@ mod tests {
             }) if request_id == "req-2"
         ));
     }
+    #[tokio::test]
+    async fn reported_failure_preserves_reason_without_success_progress() {
+        struct ReportedFailure;
+        #[async_trait]
+        impl ResponseProvider for ReportedFailure {
+            async fn generate_response(
+                &self,
+                _history: &[protocol_types::Message],
+            ) -> Result<ProviderCompletion, ProviderError> {
+                Err(ProviderError::Reported {
+                    reason: protocol_types::common::CompletionErrorReason::ModelTimeout,
+                    message: "Rate auth key".to_string(),
+                })
+            }
+        }
+        let output = execute_completion_request(
+            protocol_types::CompletionRequest {
+                request_id: "reported-error".to_string(),
+                conversation_id: 1,
+                messages: vec![],
+            },
+            Arc::new(ReportedFailure),
+            TestMode,
+        )
+        .await;
+        assert_eq!(output.progress, [] as [String; 0]);
+        let text = serialize_outbound_protocol_message(output.outbound).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&text).unwrap(),
+            json!({
+                "type": "completion_error",
+                "data": {"request_id": "reported-error", "error_reason": "model_timeout"},
+            })
+        );
+    }
 }

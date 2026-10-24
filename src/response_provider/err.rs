@@ -13,6 +13,12 @@ pub enum ProviderError {
     #[error("API error: {0}")]
     Api(String),
 
+    #[error("Provider reported {reason:?}: {message}")]
+    Reported {
+        reason: crate::protocol_types::common::CompletionErrorReason,
+        message: String,
+    },
+
     #[error("Parsing error: {0}")]
     Parsing(String),
 
