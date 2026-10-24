@@ -1,7 +1,10 @@
 mod about;
 mod args;
 mod headers;
+mod help;
 mod version;
+
+pub(crate) use help::masked_api_key_help;
 
 #[cfg(feature = "livekit")]
 pub use args::ProviderCommand;
