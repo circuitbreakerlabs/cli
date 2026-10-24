@@ -548,14 +548,26 @@ mod tests {
     }
 
     #[test]
-    fn rejects_script_delay_outside_timer_range() {
+    fn script_delay_respects_platform_timer_range() {
         let value = rhai::Engine::new().eval::<rhai::Dynamic>(
             r#"#{type: "error", reason: "rate_limited", message: "busy", retry_after_seconds: 9223372036854775807}"#
         ).unwrap();
-        assert!(matches!(
-            super::ProviderCompletion::try_from(&value),
-            Err(ProviderError::Parsing(_))
-        ));
+        let delay = std::time::Duration::from_secs(i64::MAX.unsigned_abs());
+        let error = super::ProviderCompletion::try_from(&value).unwrap_err();
+        // Instant's range differs by platform; Windows can represent this delay.
+        if std::time::Instant::now().checked_add(delay).is_some() {
+            assert!(matches!(
+                error,
+                ProviderError::RateLimited { message, retry_after }
+                    if message == "busy" && retry_after == Some(delay)
+            ));
+        } else {
+            assert!(matches!(
+                error,
+                ProviderError::Parsing(message)
+                    if message.contains("exceeds the supported timer range")
+            ));
+        }
     }
 
     #[tokio::test]
