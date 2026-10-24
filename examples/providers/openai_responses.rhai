@@ -14,6 +14,9 @@ fn build_request(messages) {
 // response: #{status, headers, body, body_text, body_parse_error, url, elapsed_ms}
 // Header names are lowercase; values are arrays, e.g. response.headers["retry-after"][0].
 // Return a structured success or an error using a documented completion error reason.
+// Rate-limit errors may include retry_after_seconds (a nonnegative integer).
+// It overrides HTTP Retry-After; omit it to use the header or default schedule.
+// The retry loop still waits at least 2, 4, then 8 seconds for successive retries.
 fn parse_response(response) {
     let reason = "unknown";
     if response.status == 401 { reason = "authentication_failed"; }
@@ -32,7 +35,15 @@ fn parse_response(response) {
     }
     if response.status < 200 || response.status >= 300 || error_message != "" {
         if error_message == "" { error_message = "HTTP " + response.status.to_string(); }
-        return #{type: "error", reason: reason, message: error_message};
+        let error = #{type: "error", reason: reason, message: error_message};
+        // Adapt this optional body field to your endpoint, or set a custom delay:
+        // error.retry_after_seconds = 30;
+        if reason == "rate_limited" && type_of(body) == "map"
+            && body.contains("retry_after_seconds")
+            && type_of(body.retry_after_seconds) == "i64" && body.retry_after_seconds >= 0 {
+            error.retry_after_seconds = body.retry_after_seconds;
+        }
+        return error;
     }
     if response.body_parse_error != () {
         return #{type: "error", reason: "invalid_response", message: response.body_parse_error};
