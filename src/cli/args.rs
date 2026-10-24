@@ -27,7 +27,12 @@ use std::path::PathBuf;
 )]
 pub struct Args {
     /// Circuit Breaker Labs API key
-    #[arg(long, env = "CBL_API_KEY")]
+    #[arg(
+        long,
+        env = "CBL_API_KEY",
+        help = super::masked_api_key_help("Circuit Breaker Labs API key", "CBL_API_KEY"),
+        hide_env = true
+    )]
     pub cbl_api_key: String,
 
     /// Circuit Breaker Labs API base URL

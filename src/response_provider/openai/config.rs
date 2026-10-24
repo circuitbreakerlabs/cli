@@ -5,24 +5,17 @@ use std::collections::HashMap;
 
 const OPENAI_API_KEY: &str = "OPENAI_API_KEY";
 
-fn masked_api_key() -> String {
-    let var = std::env::var(OPENAI_API_KEY).ok();
-
-    let masked = match var {
-        Some(v) if v.len() > 4 => format!("****{}", &v[v.len() - 4..]),
-        Some(_) => "****".to_string(),
-        None => String::new(),
-    };
-
-    format!("[env: {OPENAI_API_KEY}={masked}]")
-}
-
 #[derive(Clone, Debug, clap::Args)]
 #[clap(next_help_heading = "Required Options")]
 pub struct RequiredOpenAIArgs {
     #[allow(clippy::doc_markdown)]
     /// OpenAI API key
-    #[arg(long, env = OPENAI_API_KEY, help = masked_api_key(), hide_env = true)]
+    #[arg(
+        long,
+        env = OPENAI_API_KEY,
+        help = crate::cli::masked_api_key_help("OpenAI API key", OPENAI_API_KEY),
+        hide_env = true
+    )]
     pub api_key: String,
 
     #[allow(clippy::doc_markdown)]
