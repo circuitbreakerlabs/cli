@@ -22,6 +22,7 @@ chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5.57", features = ["derive", "env"] }
 const_format = "0.2.35"
 env = "1.0.1"
+httpdate = "1.0"
 futures-util = "0.3.31"
 ollama-rs = { optional = true, version = "0.3.4", default-features = false, features = ["headers", "rustls"] }
 ratatui = "0.30.0"
@@ -57,3 +58,6 @@ openai = ["dep:async-openai"]
 ollama = ["dep:ollama-rs"]
 custom = ["dep:rhai"]
 livekit = ["dep:livekit", "dep:rhai", "dep:toml"]
+
+[dev-dependencies]
+tokio = { version = "1.49.0", features = ["test-util"] }
