@@ -1,6 +1,9 @@
 use super::config::OpenAIProviderConfig;
 use crate::protocol_types;
-use crate::response_provider::{ProviderCompletion, ProviderError, ResponseProvider};
+use crate::response_provider::{
+    ProviderApi, ProviderCompletion, ProviderError, ProviderRequest, ProviderResponse,
+};
+use async_openai::config::Config;
 use async_openai::types::chat::{
     ChatCompletionRequestAssistantMessage, ChatCompletionRequestMessage,
     ChatCompletionRequestSystemMessage, ChatCompletionRequestSystemMessageContent,
@@ -8,25 +11,21 @@ use async_openai::types::chat::{
     CreateChatCompletionResponse, FinishReason,
 };
 use async_trait::async_trait;
-use reqwest::header::HeaderMap;
 
 #[derive(Clone)]
 pub struct OpenAIProvider {
-    client: async_openai::Client<async_openai::config::OpenAIConfig>,
+    api_config: async_openai::config::OpenAIConfig,
     config: OpenAIProviderConfig,
 }
 
 impl OpenAIProvider {
-    pub fn new(config: OpenAIProviderConfig, headers: &HeaderMap) -> Result<Self, ProviderError> {
+    pub fn new(config: OpenAIProviderConfig) -> Self {
         let openai_config = config.build_openai_config();
 
-        let http_client = reqwest::Client::builder()
-            .default_headers(headers.clone())
-            .build()?;
-
-        let client = async_openai::Client::with_config(openai_config).with_http_client(http_client);
-
-        Ok(Self { client, config })
+        Self {
+            api_config: openai_config,
+            config,
+        }
     }
 
     fn convert_message(msg: &protocol_types::Message) -> ChatCompletionRequestMessage {
@@ -58,9 +57,47 @@ impl OpenAIProvider {
         }
     }
 
-    fn normalize_response(
-        response: CreateChatCompletionResponse,
+    fn finish_reason_name(reason: FinishReason) -> String {
+        match reason {
+            FinishReason::Stop => "stop",
+            FinishReason::Length => "length",
+            FinishReason::ToolCalls => "tool_calls",
+            FinishReason::ContentFilter => "content_filter",
+            FinishReason::FunctionCall => "function_call",
+        }
+        .to_string()
+    }
+}
+
+#[async_trait]
+impl ProviderApi for OpenAIProvider {
+    async fn build_request(
+        &self,
+        conversation_history: &[protocol_types::Message],
+    ) -> Result<ProviderRequest, ProviderError> {
+        let messages: Vec<ChatCompletionRequestMessage> = conversation_history
+            .iter()
+            .map(Self::convert_message)
+            .collect();
+
+        let request = self.config.build_request(messages);
+
+        let mut url = reqwest::Url::parse(&self.api_config.url("/chat/completions"))
+            .map_err(|error| ProviderError::Config(error.to_string()))?;
+        let query = self.api_config.query();
+        if !query.is_empty() {
+            url.query_pairs_mut().extend_pairs(query);
+        }
+        let mut request = ProviderRequest::json(url.to_string(), &request)?;
+        request.headers.extend(self.api_config.headers());
+        Ok(request)
+    }
+
+    async fn parse_response(
+        &self,
+        response: ProviderResponse,
     ) -> Result<ProviderCompletion, ProviderError> {
+        let response: CreateChatCompletionResponse = response.decode_json()?;
         let err_no_resp = "No response received from OpenAI";
         let choice = response
             .choices
@@ -83,41 +120,6 @@ impl OpenAIProvider {
             provider_response_id: Some(response.id),
         })
     }
-
-    fn finish_reason_name(reason: FinishReason) -> String {
-        match reason {
-            FinishReason::Stop => "stop",
-            FinishReason::Length => "length",
-            FinishReason::ToolCalls => "tool_calls",
-            FinishReason::ContentFilter => "content_filter",
-            FinishReason::FunctionCall => "function_call",
-        }
-        .to_string()
-    }
-}
-
-#[async_trait]
-impl ResponseProvider for OpenAIProvider {
-    async fn generate_response(
-        &self,
-        conversation_history: &[protocol_types::Message],
-    ) -> Result<ProviderCompletion, ProviderError> {
-        let messages: Vec<ChatCompletionRequestMessage> = conversation_history
-            .iter()
-            .map(Self::convert_message)
-            .collect();
-
-        let request = self.config.build_request(messages);
-
-        let response = self
-            .client
-            .chat()
-            .create(request)
-            .await
-            .map_err(|e| ProviderError::Api(e.to_string()))?;
-
-        Self::normalize_response(response)
-    }
 }
 
 #[cfg(test)]
@@ -130,9 +132,88 @@ mod tests {
     };
     use serde_json::json;
 
-    #[test]
-    fn normalizes_completion_metadata() {
-        let response = serde_json::from_value(json!({
+    use crate::response_provider::{ProviderApi, ProviderResponse};
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct Arguments {
+        #[command(flatten)]
+        config: super::OpenAIProviderConfig,
+    }
+
+    #[tokio::test]
+    async fn adapter_translates_requests_and_interprets_responses() {
+        for (status, body) in [
+            (429, "busy"),
+            (
+                200,
+                r#"{"id":"reply-id","object":"chat.completion","created":1,"model":"model","choices":[{"index":0,"message":{"role":"assistant","content":"reply"},"finish_reason":"stop"}]}"#,
+            ),
+            (503, "unavailable"),
+        ] {
+            let base_url = "https://example.test/v1";
+            let config = Arguments::try_parse_from([
+                "test",
+                "--model",
+                "model",
+                "--base-url",
+                base_url,
+                "--api-key",
+                "test-key",
+                "--org-id",
+                "test-org",
+                "--temperature",
+                "0.7",
+            ])
+            .unwrap()
+            .config;
+            let api = OpenAIProvider::new(config);
+            let request = api
+                .build_request(&[Message {
+                    role: Role::User,
+                    content: "hello".into(),
+                }])
+                .await
+                .unwrap();
+            assert_eq!(request.method, reqwest::Method::POST);
+            assert_eq!(request.url, "https://example.test/v1/chat/completions");
+            assert_eq!(request.headers["content-type"], "application/json");
+            assert_eq!(request.headers["authorization"], "Bearer test-key");
+            assert_eq!(request.headers["openai-organization"], "test-org");
+            let request: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+            let result = api
+                .parse_response(ProviderResponse {
+                    status: reqwest::StatusCode::from_u16(status).unwrap(),
+                    headers: reqwest::header::HeaderMap::new(),
+                    body: body.as_bytes().to_vec(),
+                    url: base_url.into(),
+                    elapsed: std::time::Duration::ZERO,
+                })
+                .await;
+            if status == 429 {
+                let error = result.unwrap_err();
+                assert!(matches!(
+                    error,
+                    crate::response_provider::ProviderError::RateLimited { .. }
+                ));
+                assert_eq!(error.retry_after(), None);
+            } else if status == 200 {
+                assert_eq!(result.unwrap().message.content, "reply");
+            } else {
+                assert!(matches!(
+                    result,
+                    Err(crate::response_provider::ProviderError::Api(_))
+                ));
+            }
+            assert_eq!(request["model"], "model");
+            assert_eq!(request["messages"][0]["content"], "hello");
+            assert!((request["temperature"].as_f64().unwrap() - 0.7).abs() < 0.0001);
+        }
+    }
+
+    #[tokio::test]
+    async fn parses_completion_metadata() {
+        let response = json!({
             "id": "chatcmpl-123",
             "object": "chat.completion",
             "created": 1_720_000_000,
@@ -152,11 +233,23 @@ mod tests {
                 "completion_tokens": 12,
                 "total_tokens": 42
             }
-        }))
-        .expect("OpenAI response fixture should deserialize");
+        });
 
-        let completion =
-            OpenAIProvider::normalize_response(response).expect("response should normalize");
+        let config =
+            Arguments::try_parse_from(["test", "--model", "model", "--api-key", "test-key"])
+                .unwrap()
+                .config;
+        let api = OpenAIProvider::new(config);
+        let completion = api
+            .parse_response(ProviderResponse {
+                status: reqwest::StatusCode::OK,
+                headers: reqwest::header::HeaderMap::new(),
+                body: serde_json::to_vec(&response).unwrap(),
+                url: "https://example.test/completion".into(),
+                elapsed: std::time::Duration::ZERO,
+            })
+            .await
+            .expect("response should parse");
 
         assert!(matches!(completion.message.role, Role::Assistant));
         assert_eq!(completion.message.content, "safe reply");

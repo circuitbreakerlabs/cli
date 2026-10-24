@@ -43,7 +43,7 @@ use response_provider::OllamaProvider;
 #[cfg(feature = "openai")]
 use response_provider::OpenAIProvider;
 #[cfg(text_targets)]
-use response_provider::ResponseProvider;
+use response_provider::{HttpResponseProvider, ProviderApi, ResponseProvider};
 #[cfg(text_targets)]
 use tui::{MultiTurnProgressIndicatorMessage, SingleTurnProgressIndicatorMessage};
 #[cfg(eval_targets)]
@@ -207,23 +207,21 @@ async fn run_evaluation(
             },
         };
 
-        let provider = match provider_command {
+        let api: Box<dyn ProviderApi> = match provider_command {
             #[cfg(feature = "ollama")]
             cli::TextProviderCommand::Ollama(config) => {
-                Arc::new(OllamaProvider::new(config.clone(), &headers)?)
-                    as Arc<dyn ResponseProvider>
+                Box::new(OllamaProvider::new(config.clone())?)
             }
             #[cfg(feature = "openai")]
             cli::TextProviderCommand::OpenAI(config) => {
-                Arc::new(OpenAIProvider::new(config.clone(), &headers)?)
-                    as Arc<dyn ResponseProvider>
+                Box::new(OpenAIProvider::new(config.clone()))
             }
             #[cfg(feature = "custom")]
-            cli::TextProviderCommand::Custom(config) => {
-                Arc::new(CustomProvider::new(config, &headers)?) as Arc<dyn ResponseProvider>
-            }
+            cli::TextProviderCommand::Custom(config) => Box::new(CustomProvider::new(config)?),
         };
 
+        let provider: Arc<dyn ResponseProvider> =
+            Arc::new(HttpResponseProvider::new(api, &headers)?);
         let websocket = websockets::connect(
             &cli_args.cbl_api_base_url,
             (&evaluation).into(),

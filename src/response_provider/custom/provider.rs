@@ -1,9 +1,10 @@
 use super::config::CustomProviderConfig;
 use crate::protocol_types;
 use crate::protocol_types::common::CompletionErrorReason;
-use crate::response_provider::{ProviderCompletion, ProviderError, ResponseProvider};
+use crate::response_provider::{
+    ProviderApi, ProviderCompletion, ProviderError, ProviderRequest, ProviderResponse,
+};
 use async_trait::async_trait;
-use reqwest::header::HeaderMap;
 use rhai::serde::to_dynamic;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
@@ -19,19 +20,16 @@ struct HttpResponse {
     elapsed_ms: i64,
 }
 
-impl HttpResponse {
-    async fn from_response(
-        response: reqwest::Response,
-        started: Instant,
-    ) -> Result<Self, ProviderError> {
-        let status = response.status().as_u16();
-        let url = response.url().to_string();
+impl From<ProviderResponse> for HttpResponse {
+    fn from(response: ProviderResponse) -> Self {
+        let status = response.status.as_u16();
+        let url = response.url;
         let headers: BTreeMap<String, Vec<String>> = response
-            .headers()
+            .headers
             .keys()
             .map(|name| {
                 let values = response
-                    .headers()
+                    .headers
                     .get_all(name)
                     .iter()
                     .map(|value| String::from_utf8_lossy(value.as_bytes()).into_owned())
@@ -39,13 +37,13 @@ impl HttpResponse {
                 (name.as_str().to_string(), values)
             })
             .collect();
-        let bytes = response.bytes().await?;
-        let elapsed_ms = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
+        let bytes = response.body;
+        let elapsed_ms = i64::try_from(response.elapsed.as_millis()).unwrap_or(i64::MAX);
         let (body, body_parse_error) = match serde_json::from_slice::<serde_json::Value>(&bytes) {
             Ok(body) => (body, None),
             Err(error) => (serde_json::Value::Null, Some(error.to_string())),
         };
-        Ok(Self {
+        Self {
             status,
             headers,
             body,
@@ -53,7 +51,7 @@ impl HttpResponse {
             body_parse_error,
             url,
             elapsed_ms,
-        })
+        }
     }
 }
 
@@ -66,6 +64,7 @@ enum ParsedResponse {
     Error {
         reason: CompletionErrorReason,
         message: String,
+        retry_after_seconds: Option<u64>,
     },
 }
 
@@ -74,7 +73,7 @@ impl TryFrom<&rhai::Dynamic> for ProviderCompletion {
 
     fn try_from(value: &rhai::Dynamic) -> Result<Self, Self::Error> {
         let result: ParsedResponse = rhai::serde::from_dynamic(value).map_err(|e| {
-            ProviderError::Parsing(format!("parse_response must return #{{type: \"success\", content: String}} or #{{type: \"error\", reason: valid error reason, message: String}}: {e}"))
+            ProviderError::Parsing(format!("parse_response must return #{{type: \"success\", content: String}} or #{{type: \"error\", reason: valid error reason, message: String, retry_after_seconds: optional nonnegative integer}}: {e}"))
         })?;
         match result {
             ParsedResponse::Success { content } if content.is_empty() => {
@@ -87,8 +86,27 @@ impl TryFrom<&rhai::Dynamic> for ProviderCompletion {
                 content,
             }
             .into()),
-            ParsedResponse::Error { reason, message } => {
-                Err(ProviderError::Reported { reason, message })
+            ParsedResponse::Error {
+                reason,
+                message,
+                retry_after_seconds,
+            } => {
+                if matches!(reason, CompletionErrorReason::RateLimited) {
+                    let retry_after = retry_after_seconds.map(std::time::Duration::from_secs);
+                    if retry_after.is_some_and(|delay| Instant::now().checked_add(delay).is_none())
+                    {
+                        return Err(ProviderError::Parsing(
+                            "parse_response retry_after_seconds exceeds the supported timer range"
+                                .into(),
+                        ));
+                    }
+                    Err(ProviderError::RateLimited {
+                        message,
+                        retry_after,
+                    })
+                } else {
+                    Err(ProviderError::Reported { reason, message })
+                }
             }
         }
     }
@@ -97,22 +115,17 @@ impl TryFrom<&rhai::Dynamic> for ProviderCompletion {
 pub struct CustomProvider {
     ast: Arc<rhai::AST>,
     engine: Arc<rhai::Engine>,
-    client: reqwest::Client,
     url: String,
 }
 
 impl CustomProvider {
-    pub fn new(config: &CustomProviderConfig, headers: &HeaderMap) -> Result<Self, ProviderError> {
+    pub fn new(config: &CustomProviderConfig) -> Result<Self, ProviderError> {
         let mut engine = rhai::Engine::new();
         let ast = Arc::new(
             engine
                 .compile_file(config.script.clone())
                 .map_err(|e| ProviderError::Script(e.to_string()))?,
         );
-        let client = reqwest::Client::builder()
-            .default_headers(headers.clone())
-            .build()?;
-
         engine.on_print(|s| tracing::info!("[rhai] {s}"));
         engine.on_debug(|s, src, pos| {
             tracing::debug!("[rhai] {s} @ {src:?}:{pos}");
@@ -121,18 +134,17 @@ impl CustomProvider {
         Ok(Self {
             engine: Arc::new(engine),
             ast,
-            client,
             url: config.url.clone(),
         })
     }
 }
 
 #[async_trait]
-impl ResponseProvider for CustomProvider {
-    async fn generate_response(
+impl ProviderApi for CustomProvider {
+    async fn build_request(
         &self,
         conversation_history: &[protocol_types::Message],
-    ) -> Result<ProviderCompletion, ProviderError> {
+    ) -> Result<ProviderRequest, ProviderError> {
         let messages_dynamic =
             to_dynamic(conversation_history).map_err(|e| ProviderError::Parsing(e.to_string()))?;
         let engine = self.engine.clone();
@@ -148,9 +160,14 @@ impl ResponseProvider for CustomProvider {
 
         let json_body = rhai::serde::from_dynamic::<serde_json::Value>(&request_body.into())
             .map_err(|e| ProviderError::Parsing(e.to_string()))?;
-        let started = Instant::now();
-        let response = self.client.post(&self.url).json(&json_body).send().await?;
-        let response = HttpResponse::from_response(response, started).await?;
+        ProviderRequest::json(self.url.clone(), &json_body)
+    }
+
+    async fn parse_response(
+        &self,
+        response: ProviderResponse,
+    ) -> Result<ProviderCompletion, ProviderError> {
+        let response = HttpResponse::from(response);
         let response_dynamic =
             to_dynamic(response).map_err(|e| ProviderError::Parsing(e.to_string()))?;
         let engine = self.engine.clone();
@@ -172,7 +189,7 @@ impl ResponseProvider for CustomProvider {
 mod tests {
     use super::CustomProvider;
     use crate::protocol_types::{Message, Role};
-    use crate::response_provider::{CustomProviderConfig, ProviderError, ResponseProvider};
+    use crate::response_provider::{CustomProviderConfig, HttpResponseProvider, ProviderError};
     use reqwest::header::HeaderMap;
     use serde_json::json;
     use std::path::PathBuf;
@@ -304,7 +321,7 @@ mod tests {
             script: path.clone(),
         };
 
-        let Err(err) = CustomProvider::new(&config, &HeaderMap::new()) else {
+        let Err(err) = CustomProvider::new(&config) else {
             panic!("invalid script should fail to compile")
         };
 
@@ -336,8 +353,11 @@ mod tests {
             url,
             script: path.clone(),
         };
-        let provider =
-            CustomProvider::new(&config, &HeaderMap::new()).expect("provider should build");
+        let provider = HttpResponseProvider::new(
+            Box::new(CustomProvider::new(&config).expect("provider should build")),
+            &HeaderMap::new(),
+        )
+        .unwrap();
         let messages = vec![
             Message {
                 role: Role::System,
@@ -350,7 +370,7 @@ mod tests {
         ];
 
         let response = provider
-            .generate_response(&messages)
+            .execute_once(&messages)
             .await
             .expect("response should be generated");
         let request_json = server_handle.await.expect("server task should complete");
@@ -385,11 +405,14 @@ mod tests {
             url: "http://127.0.0.1:9".to_string(),
             script: path.clone(),
         };
-        let provider =
-            CustomProvider::new(&config, &HeaderMap::new()).expect("provider should build");
+        let provider = HttpResponseProvider::new(
+            Box::new(CustomProvider::new(&config).expect("provider should build")),
+            &HeaderMap::new(),
+        )
+        .unwrap();
 
         let err = provider
-            .generate_response(&[Message {
+            .execute_once(&[Message {
                 role: Role::User,
                 content: "hello".to_string(),
             }])
@@ -420,11 +443,14 @@ mod tests {
             url,
             script: path.clone(),
         };
-        let provider =
-            CustomProvider::new(&config, &HeaderMap::new()).expect("provider should build");
+        let provider = HttpResponseProvider::new(
+            Box::new(CustomProvider::new(&config).expect("provider should build")),
+            &HeaderMap::new(),
+        )
+        .unwrap();
 
         let err = provider
-            .generate_response(&[Message {
+            .execute_once(&[Message {
                 role: Role::User,
                 content: "hello".to_string(),
             }])
@@ -455,11 +481,14 @@ mod tests {
             url,
             script: path.clone(),
         };
-        let provider =
-            CustomProvider::new(&config, &HeaderMap::new()).expect("provider should build");
+        let provider = HttpResponseProvider::new(
+            Box::new(CustomProvider::new(&config).expect("provider should build")),
+            &HeaderMap::new(),
+        )
+        .unwrap();
 
         let err = provider
-            .generate_response(&[Message {
+            .execute_once(&[Message {
                 role: Role::User,
                 content: "hello".to_string(),
             }])
@@ -476,17 +505,140 @@ mod tests {
         url: String,
     ) -> Result<crate::response_provider::ProviderCompletion, ProviderError> {
         let path = write_temp_script(script);
-        let provider = CustomProvider::new(
-            &CustomProviderConfig {
-                url,
-                script: path.clone(),
-            },
-            &HeaderMap::new(),
-        )
+        let api = CustomProvider::new(&CustomProviderConfig {
+            url,
+            script: path.clone(),
+        })
         .unwrap();
-        let result = provider.generate_response(&[]).await;
+        let provider = HttpResponseProvider::new(Box::new(api), &HeaderMap::new()).unwrap();
+        let result = provider.execute_once(&[]).await;
         std::fs::remove_file(path).unwrap();
         result
+    }
+
+    #[test]
+    fn script_rate_limits_map_optional_seconds_to_duration() {
+        for (field, expected) in [
+            ("", None),
+            (", retry_after_seconds: 0", Some(0)),
+            (", retry_after_seconds: 30", Some(30)),
+            (", retry_after_seconds: ()", None),
+        ] {
+            let value = rhai::Engine::new()
+                .eval::<rhai::Dynamic>(&format!(
+                    r#"#{{type: "error", reason: "rate_limited", message: "busy"{field}}}"#
+                ))
+                .unwrap();
+            let error = super::ProviderCompletion::try_from(&value).unwrap_err();
+            assert!(
+                matches!(error, ProviderError::RateLimited { ref message, retry_after }
+                if message == "busy" && retry_after == expected.map(std::time::Duration::from_secs))
+            );
+        }
+        let value = rhai::Engine::new().eval::<rhai::Dynamic>(
+            r#"#{type: "error", reason: "model_timeout", message: "busy", retry_after_seconds: 30}"#
+        ).unwrap();
+        assert!(matches!(
+            super::ProviderCompletion::try_from(&value),
+            Err(ProviderError::Reported {
+                reason: crate::protocol_types::common::CompletionErrorReason::ModelTimeout,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn script_delay_respects_platform_timer_range() {
+        let value = rhai::Engine::new().eval::<rhai::Dynamic>(
+            r#"#{type: "error", reason: "rate_limited", message: "busy", retry_after_seconds: 9223372036854775807}"#
+        ).unwrap();
+        let delay = std::time::Duration::from_secs(i64::MAX.unsigned_abs());
+        let error = super::ProviderCompletion::try_from(&value).unwrap_err();
+        // Instant's range differs by platform; Windows can represent this delay.
+        if std::time::Instant::now().checked_add(delay).is_some() {
+            assert!(matches!(
+                error,
+                ProviderError::RateLimited { message, retry_after }
+                    if message == "busy" && retry_after == Some(delay)
+            ));
+        } else {
+            assert!(matches!(
+                error,
+                ProviderError::Parsing(message)
+                    if message.contains("exceeds the supported timer range")
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn script_delay_overrides_header_including_zero() {
+        for (field, expected) in [
+            ("", 120),
+            (", retry_after_seconds: 0", 0),
+            (", retry_after_seconds: 12", 12),
+            (", retry_after_seconds: 240", 240),
+        ] {
+            let (url, server) = spawn_http_server(
+                429,
+                vec![("Retry-After".into(), b"120".to_vec())],
+                b"busy".to_vec(),
+            )
+            .await;
+            let script = format!(
+                r#"
+                fn build_request(messages) {{ #{{}} }}
+                fn parse_response(response) {{
+                    #{{type: "error", reason: "rate_limited", message: "busy"{field}}}
+                }}
+            "#
+            );
+            let error = run_script(&script, url).await.unwrap_err();
+            assert!(
+                matches!(&error, ProviderError::RateLimited { message, .. } if message == "busy")
+            );
+            assert_eq!(
+                error.retry_after(),
+                Some(std::time::Duration::from_secs(expected))
+            );
+            server.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn retry_header_attaches_only_to_script_reported_rate_limits() {
+        for reason in ["rate_limited", "authentication_failed"] {
+            let (url, server) = spawn_http_server(
+                429,
+                vec![("Retry-After".into(), b"120".to_vec())],
+                b"busy".to_vec(),
+            )
+            .await;
+            let script = format!(
+                r#"
+                fn build_request(messages) {{ #{{}} }}
+                fn parse_response(response) {{
+                    #{{type: "error", reason: "{reason}", message: "busy"}}
+                }}
+            "#
+            );
+            let error = run_script(&script, url).await.unwrap_err();
+            assert_eq!(
+                error.retry_after(),
+                if reason == "rate_limited" {
+                    Some(std::time::Duration::from_secs(120))
+                } else {
+                    None
+                }
+            );
+            assert_eq!(
+                serde_json::to_value(crate::protocol_types::common::CompletionErrorReason::from(
+                    &error
+                ))
+                .unwrap(),
+                json!(reason)
+            );
+            server.await.unwrap();
+        }
     }
 
     #[tokio::test]
@@ -564,6 +716,11 @@ mod tests {
             r#"#{type: "error", reason: "unknown"}"#,
             r#"#{type: "error", reason: "unknown", message: 42}"#,
             r#"#{type: "error", reason: "unknown", message: "failure", content: "reply"}"#,
+            r#"#{type: "error", reason: "rate_limited", message: "busy", retry_after_seconds: -1}"#,
+            r#"#{type: "error", reason: "rate_limited", message: "busy", retry_after_seconds: 1.5}"#,
+            r#"#{type: "error", reason: "rate_limited", message: "busy", retry_after_seconds: "30"}"#,
+            r#"#{type: "error", reason: "rate_limited", message: "busy", retry_after_seconds: true}"#,
+            r#"#{type: "success", content: "reply", retry_after_seconds: 30}"#,
         ] {
             let value = rhai::Engine::new()
                 .eval::<rhai::Dynamic>(expression)
@@ -601,7 +758,7 @@ mod tests {
             .await
             .unwrap_err();
             assert!(
-                matches!(&error, ProviderError::Reported { message, .. } if message == "Rate auth key")
+                matches!(&error, ProviderError::Reported { message, .. } | ProviderError::RateLimited { message, .. } if message == "Rate auth key")
             );
             assert_eq!(
                 serde_json::to_value(CompletionErrorReason::from(&error)).unwrap(),
@@ -649,6 +806,28 @@ mod tests {
             ),
         ];
         for (script, body) in fixtures {
+            for (body, expected) in [
+                (r#"{"error":"busy","retry_after_seconds":30}"#, 30),
+                (r#"{"error":"busy","retry_after_seconds":0}"#, 0),
+                (r#"{"error":"busy"}"#, 120),
+                (r#"{"error":"busy","retry_after_seconds":-1}"#, 120),
+                (r#"{"error":"busy","retry_after_seconds":1.5}"#, 120),
+                (r#"{"error":"busy","retry_after_seconds":"30"}"#, 120),
+            ] {
+                let (url, server) = spawn_http_server(
+                    429,
+                    vec![("Retry-After".into(), b"120".to_vec())],
+                    body.as_bytes().to_vec(),
+                )
+                .await;
+                let error = run_script(script, url).await.unwrap_err();
+                assert!(matches!(error, ProviderError::RateLimited { .. }));
+                assert_eq!(
+                    error.retry_after(),
+                    Some(std::time::Duration::from_secs(expected))
+                );
+                server.await.unwrap();
+            }
             let (url, server) = spawn_json_server(body).await;
             assert_eq!(
                 run_script(script, url).await.unwrap().message.content,
@@ -670,7 +849,13 @@ mod tests {
                 let (url, server) =
                     spawn_http_server(status, vec![], body.as_bytes().to_vec()).await;
                 let error = run_script(script, url).await.unwrap_err();
-                assert!(matches!(&error, ProviderError::Reported { .. }), "{error}");
+                assert!(
+                    matches!(
+                        &error,
+                        ProviderError::Reported { .. } | ProviderError::RateLimited { .. }
+                    ),
+                    "{error}"
+                );
                 assert_eq!(
                     serde_json::to_value(
                         crate::protocol_types::common::CompletionErrorReason::from(&error)

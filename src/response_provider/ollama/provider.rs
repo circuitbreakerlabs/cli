@@ -1,11 +1,11 @@
 use super::config::OllamaProviderConfig;
 use crate::protocol_types;
-use crate::response_provider::{ProviderCompletion, ProviderError, ResponseProvider};
+use crate::response_provider::{
+    ProviderApi, ProviderCompletion, ProviderError, ProviderRequest, ProviderResponse,
+};
 use async_trait::async_trait;
-use ollama_rs::Ollama;
 use ollama_rs::generation::chat::request::ChatMessageRequest;
 use ollama_rs::generation::chat::{ChatMessage as OllamaMessage, MessageRole as OllamaMessageRole};
-use reqwest::header::HeaderMap;
 
 impl TryFrom<&OllamaMessageRole> for protocol_types::Role {
     type Error = ProviderError;
@@ -24,16 +24,16 @@ impl TryFrom<&OllamaMessageRole> for protocol_types::Role {
 
 #[derive(Clone)]
 pub struct OllamaProvider {
-    client: Ollama,
+    url: String,
     config: OllamaProviderConfig,
 }
 
 impl OllamaProvider {
-    pub fn new(config: OllamaProviderConfig, headers: &HeaderMap) -> Result<Self, ProviderError> {
-        let mut client = Ollama::try_new(&config.optional.base_url)
+    pub fn new(config: OllamaProviderConfig) -> Result<Self, ProviderError> {
+        let endpoint = url::Url::parse(&config.optional.base_url)
             .map_err(|e| ProviderError::Config(e.to_string()))?;
-        client.set_headers(Some(headers.clone()));
-        Ok(Self { client, config })
+        let url = format!("{}api/chat", endpoint.as_str());
+        Ok(Self { url, config })
     }
 
     fn convert_message(msg: &protocol_types::Message) -> OllamaMessage {
@@ -45,10 +45,37 @@ impl OllamaProvider {
 
         OllamaMessage::new(role, msg.content.clone())
     }
+}
 
-    fn normalize_response(
-        response: ollama_rs::generation::chat::ChatMessageResponse,
+#[async_trait]
+impl ProviderApi for OllamaProvider {
+    async fn build_request(
+        &self,
+        conversation_history: &[protocol_types::Message],
+    ) -> Result<ProviderRequest, ProviderError> {
+        let messages: Vec<OllamaMessage> = conversation_history
+            .iter()
+            .map(Self::convert_message)
+            .collect();
+
+        let mut request = ChatMessageRequest::new(self.config.required.model.clone(), messages);
+
+        if let Some(options) = self.config.build_model_options() {
+            request = request.options(options);
+        }
+
+        if let Some(logprobs) = self.config.optional.logprobs {
+            request = request.logprobs(logprobs);
+        }
+
+        ProviderRequest::json(self.url.clone(), &request)
+    }
+
+    async fn parse_response(
+        &self,
+        response: ProviderResponse,
     ) -> Result<ProviderCompletion, ProviderError> {
+        let response: ollama_rs::generation::chat::ChatMessageResponse = response.decode_json()?;
         let tokens_used = response
             .final_data
             .map(|data| {
@@ -74,37 +101,6 @@ impl OllamaProvider {
     }
 }
 
-#[async_trait]
-impl ResponseProvider for OllamaProvider {
-    async fn generate_response(
-        &self,
-        conversation_history: &[protocol_types::Message],
-    ) -> Result<ProviderCompletion, ProviderError> {
-        let messages: Vec<OllamaMessage> = conversation_history
-            .iter()
-            .map(Self::convert_message)
-            .collect();
-
-        let mut request = ChatMessageRequest::new(self.config.required.model.clone(), messages);
-
-        if let Some(options) = self.config.build_model_options() {
-            request = request.options(options);
-        }
-
-        if let Some(logprobs) = self.config.optional.logprobs {
-            request = request.logprobs(logprobs);
-        }
-
-        let response = self
-            .client
-            .send_chat_messages(request)
-            .await
-            .map_err(|e| ProviderError::Api(e.to_string()))?;
-
-        Self::normalize_response(response)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::OllamaProvider;
@@ -114,8 +110,82 @@ mod tests {
         ChatMessageFinalResponseData, ChatMessageResponse, MessageRole as OllamaMessageRole,
     };
 
-    #[test]
-    fn normalizes_completion_metadata() {
+    use crate::response_provider::{ProviderApi, ProviderResponse};
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct Arguments {
+        #[command(flatten)]
+        config: super::OllamaProviderConfig,
+    }
+
+    #[tokio::test]
+    async fn adapter_translates_requests_and_interprets_responses() {
+        for (status, body) in [
+            (429, "busy"),
+            (
+                200,
+                r#"{"model":"model","created_at":"now","message":{"role":"assistant","content":"reply"},"done":true}"#,
+            ),
+            (503, "unavailable"),
+        ] {
+            let base_url = "http://example.test:11434";
+            let config = Arguments::try_parse_from([
+                "test",
+                "--model",
+                "model",
+                "--base-url",
+                base_url,
+                "--temperature",
+                "0.7",
+            ])
+            .unwrap()
+            .config;
+            let api = OllamaProvider::new(config).unwrap();
+            let request = api
+                .build_request(&[Message {
+                    role: Role::User,
+                    content: "hello".into(),
+                }])
+                .await
+                .unwrap();
+            assert_eq!(request.method, reqwest::Method::POST);
+            assert_eq!(request.url, "http://example.test:11434/api/chat");
+            assert_eq!(request.headers["content-type"], "application/json");
+            let request: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+            let result = api
+                .parse_response(ProviderResponse {
+                    status: reqwest::StatusCode::from_u16(status).unwrap(),
+                    headers: reqwest::header::HeaderMap::new(),
+                    body: body.as_bytes().to_vec(),
+                    url: base_url.into(),
+                    elapsed: std::time::Duration::ZERO,
+                })
+                .await;
+            if status == 429 {
+                let error = result.unwrap_err();
+                assert!(matches!(
+                    error,
+                    crate::response_provider::ProviderError::RateLimited { .. }
+                ));
+                assert_eq!(error.retry_after(), None);
+            } else if status == 200 {
+                assert_eq!(result.unwrap().message.content, "reply");
+            } else {
+                assert!(matches!(
+                    result,
+                    Err(crate::response_provider::ProviderError::Api(_))
+                ));
+            }
+            assert_eq!(request["model"], "model");
+            assert_eq!(request["messages"][0]["content"], "hello");
+            assert_eq!(request["stream"], false);
+            assert!((request["options"]["temperature"].as_f64().unwrap() - 0.7).abs() < 0.0001);
+        }
+    }
+
+    #[tokio::test]
+    async fn parses_completion_metadata() {
         let response = ChatMessageResponse {
             model: "llama3.2:latest".to_string(),
             created_at: "2026-09-07T12:00:00Z".to_string(),
@@ -135,8 +205,20 @@ mod tests {
             }),
         };
 
-        let completion =
-            OllamaProvider::normalize_response(response).expect("response should normalize");
+        let config = Arguments::try_parse_from(["test", "--model", "model"])
+            .unwrap()
+            .config;
+        let api = OllamaProvider::new(config).unwrap();
+        let completion = api
+            .parse_response(ProviderResponse {
+                status: reqwest::StatusCode::OK,
+                headers: reqwest::header::HeaderMap::new(),
+                body: serde_json::to_vec(&response).unwrap(),
+                url: "https://example.test/completion".into(),
+                elapsed: std::time::Duration::ZERO,
+            })
+            .await
+            .expect("response should parse");
 
         assert!(matches!(completion.message.role, Role::Assistant));
         assert_eq!(completion.message.content, "safe reply");

@@ -66,6 +66,7 @@ impl From<&ProviderError> for CompletionErrorReason {
     fn from(error: &ProviderError) -> Self {
         match error {
             ProviderError::Reported { reason, .. } => reason.clone(),
+            ProviderError::RateLimited { .. } => CompletionErrorReason::RateLimited,
             ProviderError::Network(_) => CompletionErrorReason::ModelUnreachable,
             ProviderError::Api(msg) => {
                 if msg.contains("rate") || msg.contains("Rate") {
