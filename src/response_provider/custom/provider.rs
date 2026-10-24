@@ -1,10 +1,98 @@
 use super::config::CustomProviderConfig;
 use crate::protocol_types;
+use crate::protocol_types::common::CompletionErrorReason;
 use crate::response_provider::{ProviderCompletion, ProviderError, ResponseProvider};
 use async_trait::async_trait;
 use reqwest::header::HeaderMap;
 use rhai::serde::to_dynamic;
-use std::sync::Arc;
+use serde::{Deserialize, Serialize};
+use std::{collections::BTreeMap, sync::Arc, time::Instant};
+
+#[derive(Serialize)]
+struct HttpResponse {
+    status: u16,
+    headers: BTreeMap<String, Vec<String>>,
+    body: serde_json::Value,
+    body_text: String,
+    body_parse_error: Option<String>,
+    url: String,
+    elapsed_ms: i64,
+}
+
+impl HttpResponse {
+    async fn from_response(
+        response: reqwest::Response,
+        started: Instant,
+    ) -> Result<Self, ProviderError> {
+        let status = response.status().as_u16();
+        let url = response.url().to_string();
+        let headers: BTreeMap<String, Vec<String>> = response
+            .headers()
+            .keys()
+            .map(|name| {
+                let values = response
+                    .headers()
+                    .get_all(name)
+                    .iter()
+                    .map(|value| String::from_utf8_lossy(value.as_bytes()).into_owned())
+                    .collect();
+                (name.as_str().to_string(), values)
+            })
+            .collect();
+        let bytes = response.bytes().await?;
+        let elapsed_ms = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
+        let (body, body_parse_error) = match serde_json::from_slice::<serde_json::Value>(&bytes) {
+            Ok(body) => (body, None),
+            Err(error) => (serde_json::Value::Null, Some(error.to_string())),
+        };
+        Ok(Self {
+            status,
+            headers,
+            body,
+            body_text: String::from_utf8_lossy(&bytes).into_owned(),
+            body_parse_error,
+            url,
+            elapsed_ms,
+        })
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+enum ParsedResponse {
+    Success {
+        content: String,
+    },
+    Error {
+        reason: CompletionErrorReason,
+        message: String,
+    },
+}
+
+impl TryFrom<&rhai::Dynamic> for ProviderCompletion {
+    type Error = ProviderError;
+
+    fn try_from(value: &rhai::Dynamic) -> Result<Self, Self::Error> {
+        let result: ParsedResponse = rhai::serde::from_dynamic(value).map_err(|e| {
+            ProviderError::Parsing(format!("parse_response must return #{{type: \"success\", content: String}} or #{{type: \"error\", reason: valid error reason, message: String}}: {e}"))
+        })?;
+        match result {
+            ParsedResponse::Success { content } if content.is_empty() => {
+                Err(ProviderError::Parsing(
+                    "parse_response returned an empty string for content".to_string(),
+                ))
+            }
+            ParsedResponse::Success { content } => Ok(protocol_types::Message {
+                role: protocol_types::Role::Assistant,
+                content,
+            }
+            .into()),
+            ParsedResponse::Error { reason, message } => {
+                Err(ProviderError::Reported { reason, message })
+            }
+        }
+    }
+}
 
 pub struct CustomProvider {
     ast: Arc<rhai::AST>,
@@ -60,39 +148,23 @@ impl ResponseProvider for CustomProvider {
 
         let json_body = rhai::serde::from_dynamic::<serde_json::Value>(&request_body.into())
             .map_err(|e| ProviderError::Parsing(e.to_string()))?;
-        let response_body: serde_json::Value = self
-            .client
-            .post(&self.url)
-            .json(&json_body)
-            .send()
-            .await?
-            .json()
-            .await?;
-
-        let response_body_dynamic =
-            to_dynamic(response_body).map_err(|e| ProviderError::Parsing(e.to_string()))?;
+        let started = Instant::now();
+        let response = self.client.post(&self.url).json(&json_body).send().await?;
+        let response = HttpResponse::from_response(response, started).await?;
+        let response_dynamic =
+            to_dynamic(response).map_err(|e| ProviderError::Parsing(e.to_string()))?;
         let engine = self.engine.clone();
         let ast = self.ast.clone();
-        let content = tokio::task::spawn_blocking(move || {
+        let result = tokio::task::spawn_blocking(move || {
             let mut scope = rhai::Scope::new();
             engine
-                .call_fn::<String>(&mut scope, &ast, "parse_response", (response_body_dynamic,))
+                .call_fn::<rhai::Dynamic>(&mut scope, &ast, "parse_response", (response_dynamic,))
                 .map_err(|e| ProviderError::Script(format!("parse_response: {e}")))
         })
         .await
         .map_err(|e| ProviderError::Script(format!("Spawn error: {e}")))??;
 
-        if content.is_empty() {
-            return Err(ProviderError::Parsing(
-                "parse_response returned an empty string".to_string(),
-            ));
-        }
-
-        Ok(protocol_types::Message {
-            role: protocol_types::Role::Assistant,
-            content,
-        }
-        .into())
+        ProviderCompletion::try_from(&result)
     }
 }
 
@@ -129,6 +201,19 @@ mod tests {
     async fn spawn_json_server(
         response_body: serde_json::Value,
     ) -> (String, tokio::task::JoinHandle<serde_json::Value>) {
+        spawn_http_server(
+            200,
+            vec![("Content-Type".into(), b"application/json".to_vec())],
+            serde_json::to_vec(&response_body).unwrap(),
+        )
+        .await
+    }
+
+    async fn spawn_http_server(
+        status: u16,
+        headers: Vec<(String, Vec<u8>)>,
+        response_body: Vec<u8>,
+    ) -> (String, tokio::task::JoinHandle<serde_json::Value>) {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("server should bind");
@@ -155,9 +240,9 @@ mod tests {
                 }
             }
 
-            let headers = std::str::from_utf8(&buffer[..header_end])
+            let request_headers = std::str::from_utf8(&buffer[..header_end])
                 .expect("request headers should be valid utf-8");
-            let content_length = headers
+            let content_length = request_headers
                 .lines()
                 .find_map(|line| {
                     let (name, value) = line.split_once(':')?;
@@ -187,15 +272,21 @@ mod tests {
             let request_json: serde_json::Value =
                 serde_json::from_slice(body).expect("request body should be valid json");
 
-            let response_json =
-                serde_json::to_string(&response_body).expect("response json should serialize");
-            let response = format!(
-                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
-                response_json.len(),
-                response_json
-            );
+            let mut response = format!(
+                "HTTP/1.1 {status} Test\r\ncontent-length: {}\r\nconnection: close\r\n",
+                response_body.len(),
+            )
+            .into_bytes();
+            for (name, value) in headers {
+                response.extend_from_slice(name.as_bytes());
+                response.extend_from_slice(b": ");
+                response.extend_from_slice(&value);
+                response.extend_from_slice(b"\r\n");
+            }
+            response.extend_from_slice(b"\r\n");
+            response.extend_from_slice(&response_body);
             socket
-                .write_all(response.as_bytes())
+                .write_all(&response)
                 .await
                 .expect("server should write response");
 
@@ -234,8 +325,8 @@ mod tests {
                     }
                 }
 
-                fn parse_response(body) {
-                    body["reply"].to_string()
+                fn parse_response(response) {
+                    #{type: "success", content: response.body["reply"]}
                 }
             "#,
         );
@@ -285,8 +376,8 @@ mod tests {
                     throw("bad request")
                 }
 
-                fn parse_response(body) {
-                    body["reply"].to_string()
+                fn parse_response(response) {
+                    #{type: "success", content: response.body["reply"]}
                 }
             "#,
         );
@@ -319,7 +410,7 @@ mod tests {
                     #{ "ok": true }
                 }
 
-                fn parse_response(body) {
+                fn parse_response(response) {
                     throw("bad response")
                 }
             "#,
@@ -354,8 +445,8 @@ mod tests {
                     #{ "ok": true }
                 }
 
-                fn parse_response(body) {
-                    ""
+                fn parse_response(response) {
+                    #{type: "success", content: ""}
                 }
             "#,
         );
@@ -379,5 +470,216 @@ mod tests {
         assert!(err.to_string().contains("empty string"));
 
         let _ = std::fs::remove_file(path);
+    }
+    async fn run_script(
+        script: &str,
+        url: String,
+    ) -> Result<crate::response_provider::ProviderCompletion, ProviderError> {
+        let path = write_temp_script(script);
+        let provider = CustomProvider::new(
+            &CustomProviderConfig {
+                url,
+                script: path.clone(),
+            },
+            &HeaderMap::new(),
+        )
+        .unwrap();
+        let result = provider.generate_response(&[]).await;
+        std::fs::remove_file(path).unwrap();
+        result
+    }
+
+    #[tokio::test]
+    async fn response_context_preserves_headers_status_text_and_redirect_url() {
+        let (destination, final_server) = spawn_http_server(
+            429,
+            vec![
+                ("Retry-After".into(), b"12".to_vec()),
+                ("X-Repeated".into(), b"first".to_vec()),
+                ("x-repeated".into(), b"second".to_vec()),
+                ("X-Bytes".into(), vec![0xff]),
+            ],
+            b"<html>busy</html>\xff".to_vec(),
+        )
+        .await;
+        let (url, redirect_server) = spawn_http_server(
+            307,
+            vec![("Location".into(), destination.as_bytes().to_vec())],
+            vec![],
+        )
+        .await;
+        let script = r#"
+            fn build_request(messages) { #{} }
+            fn parse_response(response) {
+                if response.status != 429 || response.headers["retry-after"] != ["12"]
+                    || response.headers["x-repeated"] != ["first", "second"]
+                    || response.headers.contains("missing") || response.headers.contains("Retry-After")
+                    || response.headers["x-bytes"] != ["�"]
+                    || response.body != () || type_of(response.body_parse_error) != "string"
+                    || response.body_text != "<html>busy</html>�" || response.elapsed_ms < 0 {
+                    throw "incorrect response context";
+                }
+                #{type: "success", content: response.url}
+            }
+        "#;
+        let completion = run_script(script, url).await.unwrap();
+        assert_eq!(completion.message.content, format!("{destination}/"));
+        redirect_server.await.unwrap();
+        final_server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn response_context_distinguishes_null_empty_and_malformed_bodies() {
+        for (body, valid_json) in [("null", true), ("", false), ("{bad", false)] {
+            let (url, server) = spawn_http_server(200, vec![], body.as_bytes().to_vec()).await;
+            let script = format!(
+                r#"
+                fn build_request(messages) {{ #{{}} }}
+                fn parse_response(response) {{
+                    if response.body != () || (response.body_parse_error == ()) != {valid_json} {{
+                        throw "incorrect JSON parse state";
+                    }}
+                    #{{type: "success", content: "checked:" + response.body_text}}
+                }}
+            "#
+            );
+            let completion = run_script(&script, url).await.unwrap();
+            assert_eq!(completion.message.content, format!("checked:{body}"));
+            server.await.unwrap();
+        }
+    }
+
+    #[test]
+    fn rejects_malformed_results_with_contract_diagnostics() {
+        for expression in [
+            r#""legacy string""#,
+            "()",
+            "42",
+            "#{}",
+            r#"#{type: "other", content: "reply"}"#,
+            r#"#{type: "success"}"#,
+            r#"#{type: "success", content: 42}"#,
+            r#"#{type: "success", content: "reply", extra: true}"#,
+            r#"#{type: "error", reason: "other", message: "failure"}"#,
+            r#"#{type: "error", reason: "unknown"}"#,
+            r#"#{type: "error", reason: "unknown", message: 42}"#,
+            r#"#{type: "error", reason: "unknown", message: "failure", content: "reply"}"#,
+        ] {
+            let value = rhai::Engine::new()
+                .eval::<rhai::Dynamic>(expression)
+                .unwrap();
+            let error = super::ProviderCompletion::try_from(&value).unwrap_err();
+            assert!(
+                matches!(error, ProviderError::Parsing(_)),
+                "{expression}: {error}"
+            );
+            assert!(error.to_string().contains("parse_response must return"));
+        }
+    }
+
+    #[tokio::test]
+    async fn reported_reasons_survive_http_and_rust_mapping() {
+        use crate::protocol_types::common::CompletionErrorReason;
+        for reason in [
+            "model_timeout",
+            "model_unreachable",
+            "invalid_response",
+            "rate_limited",
+            "authentication_failed",
+            "unknown",
+        ] {
+            let (url, server) = spawn_json_server(json!({"reason": reason})).await;
+            let error = run_script(
+                r#"
+                fn build_request(messages) { #{} }
+                fn parse_response(response) {
+                    #{type: "error", reason: response.body.reason, message: "Rate auth key"}
+                }
+            "#,
+                url,
+            )
+            .await
+            .unwrap_err();
+            assert!(
+                matches!(&error, ProviderError::Reported { message, .. } if message == "Rate auth key")
+            );
+            assert_eq!(
+                serde_json::to_value(CompletionErrorReason::from(&error)).unwrap(),
+                json!(reason)
+            );
+            server.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn rejects_positional_signature() {
+        let (url, server) = spawn_json_server(json!({})).await;
+        let error = run_script(
+            r#"
+            fn build_request(messages) { #{} }
+            fn parse_response(body, status) { #{type: "success", content: "old"} }
+        "#,
+            url,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(error, ProviderError::Script(_)));
+        assert!(error.to_string().contains("parse_response"));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn bundled_scripts_handle_success_and_error_responses() {
+        let fixtures = [
+            (
+                include_str!("../../../examples/providers/ollama_chat.rhai"),
+                json!({"message":{"content":"hello"}}),
+            ),
+            (
+                include_str!("../../../examples/providers/ollama_completions.rhai"),
+                json!({"choices":[{"message":{"content":"hello"}}]}),
+            ),
+            (
+                include_str!("../../../examples/providers/openai_completions.rhai"),
+                json!({"choices":[{"message":{"content":"hello"}}]}),
+            ),
+            (
+                include_str!("../../../examples/providers/openai_responses.rhai"),
+                json!({"output":[{"content":[{"text":"hello"}]}]}),
+            ),
+        ];
+        for (script, body) in fixtures {
+            let (url, server) = spawn_json_server(body).await;
+            assert_eq!(
+                run_script(script, url).await.unwrap().message.content,
+                "hello"
+            );
+            server.await.unwrap();
+            for (status, body, expected) in [
+                (401, "", "authentication_failed"),
+                (429, "busy", "rate_limited"),
+                (408, "", "model_timeout"),
+                (504, "<html>gateway</html>", "model_timeout"),
+                (500, "{}", "unknown"),
+                (200, r#"{"error":{"message":"oops"}}"#, "unknown"),
+                (200, r#"{"error":"oops"}"#, "unknown"),
+                (200, "invalid", "invalid_response"),
+                (200, "{}", "invalid_response"),
+                (200, "null", "invalid_response"),
+            ] {
+                let (url, server) =
+                    spawn_http_server(status, vec![], body.as_bytes().to_vec()).await;
+                let error = run_script(script, url).await.unwrap_err();
+                assert!(matches!(&error, ProviderError::Reported { .. }), "{error}");
+                assert_eq!(
+                    serde_json::to_value(
+                        crate::protocol_types::common::CompletionErrorReason::from(&error)
+                    )
+                    .unwrap(),
+                    json!(expected)
+                );
+                server.await.unwrap();
+            }
+        }
     }
 }
