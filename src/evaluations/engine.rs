@@ -126,7 +126,13 @@ async fn execute_completion_request<M: EvaluationMode>(
     provider: Arc<dyn ResponseProvider>,
     mode: M,
 ) -> CompletionTaskOutput<M::ProgressMessage> {
-    match provider.generate_response(&request.messages).await {
+    use tracing::Instrument;
+    let span = tracing::warn_span!("target_completion", request_id = %request.request_id);
+    match provider
+        .generate_response(&request.messages)
+        .instrument(span)
+        .await
+    {
         Ok(completion) => CompletionTaskOutput {
             progress: mode.progress_on_completion_success(&request),
             outbound: OutboundProtocolMessage::CompletionResponse(
@@ -633,5 +639,99 @@ mod tests {
                 "data": {"request_id": "reported-error", "error_reason": "model_timeout"},
             })
         );
+    }
+    #[tokio::test]
+    async fn retry_success_emits_one_response_and_one_progress_update() {
+        use crate::response_provider::{
+            HttpResponseProvider,
+            test_support::{StubApi, serve_responses},
+        };
+        let (url, server) =
+            serve_responses(vec![(429, None, "busy".into()), (200, None, "{}".into())]).await;
+        let api = StubApi::new(
+            url,
+            vec![
+                Err(ProviderError::Reported {
+                    reason: protocol_types::common::CompletionErrorReason::RateLimited,
+                    message: "busy".into(),
+                }),
+                SuccessProvider.generate_response(&[]).await,
+            ],
+        );
+        let builds = api.builds.clone();
+        let provider = Arc::new(
+            HttpResponseProvider::new(Box::new(api), &reqwest::header::HeaderMap::new()).unwrap(),
+        );
+        let output = execute_completion_request(
+            protocol_types::CompletionRequest {
+                request_id: "retry-id".into(),
+                conversation_id: 1,
+                messages: vec![],
+            },
+            provider.clone(),
+            TestMode,
+        )
+        .await;
+        assert_eq!(builds.lock().unwrap().len(), 2);
+        assert_eq!(server.await.unwrap().len(), 2);
+        assert_eq!(output.progress, vec!["api"]);
+        assert!(
+            matches!(output.outbound, OutboundProtocolMessage::CompletionResponse(response)
+            if response.request_id == "retry-id" && response.tokens_used == Some(42))
+        );
+    }
+
+    #[tokio::test]
+    async fn websocket_responds_during_retry_and_shutdown_cancels_wait() {
+        use crate::response_provider::{
+            HttpResponseProvider,
+            test_support::{StubApi, serve_responses},
+        };
+        use futures_util::{SinkExt, StreamExt};
+        let (url, http_server) =
+            serve_responses(vec![(429, Some("3600".into()), "busy".into())]).await;
+        let api = StubApi::new(
+            url,
+            vec![Err(ProviderError::RateLimited {
+                message: "busy".into(),
+                retry_after: None,
+            })],
+        );
+        let called = api.parsed.clone();
+        let builds = api.builds.clone();
+        let provider = Arc::new(
+            HttpResponseProvider::new(Box::new(api), &reqwest::header::HeaderMap::new()).unwrap(),
+        );
+        let (websocket, server) = crate::evaluations::test_support::spawn_websocket_server(
+            move |mut socket| async move {
+                socket.next().await.unwrap().unwrap();
+                socket
+                    .send(Message::Text(r#"{"kind":"completion"}"#.into()))
+                    .await
+                    .unwrap();
+                called.notified().await;
+                socket.send(Message::Ping(vec![1, 2].into())).await.unwrap();
+                assert!(matches!(
+                    socket.next().await.unwrap().unwrap(),
+                    Message::Pong(_)
+                ));
+                socket
+                    .send(Message::Text(r#"{"kind":"final"}"#.into()))
+                    .await
+                    .unwrap();
+            },
+        )
+        .await;
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            super::run_evaluation(websocket, provider.clone(), (), None, TestMode),
+        )
+        .await
+        .expect("evaluation must not wait for retry on shutdown")
+        .unwrap();
+        assert_eq!(response.status, "done");
+        server.await.unwrap();
+        assert_eq!(builds.lock().unwrap().len(), 1);
+        assert_eq!(http_server.await.unwrap().len(), 1);
     }
 }
