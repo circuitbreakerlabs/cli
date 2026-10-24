@@ -1,9 +1,10 @@
 use super::config::CustomProviderConfig;
 use crate::protocol_types;
 use crate::protocol_types::common::CompletionErrorReason;
-use crate::response_provider::{ProviderCompletion, ProviderError, ResponseProvider};
+use crate::response_provider::{
+    ProviderApi, ProviderCompletion, ProviderError, ProviderRequest, ProviderResponse,
+};
 use async_trait::async_trait;
-use reqwest::header::HeaderMap;
 use rhai::serde::to_dynamic;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
@@ -19,19 +20,16 @@ struct HttpResponse {
     elapsed_ms: i64,
 }
 
-impl HttpResponse {
-    async fn from_response(
-        response: reqwest::Response,
-        started: Instant,
-    ) -> Result<Self, ProviderError> {
-        let status = response.status().as_u16();
-        let url = response.url().to_string();
+impl From<ProviderResponse> for HttpResponse {
+    fn from(response: ProviderResponse) -> Self {
+        let status = response.status.as_u16();
+        let url = response.url;
         let headers: BTreeMap<String, Vec<String>> = response
-            .headers()
+            .headers
             .keys()
             .map(|name| {
                 let values = response
-                    .headers()
+                    .headers
                     .get_all(name)
                     .iter()
                     .map(|value| String::from_utf8_lossy(value.as_bytes()).into_owned())
@@ -39,13 +37,13 @@ impl HttpResponse {
                 (name.as_str().to_string(), values)
             })
             .collect();
-        let bytes = response.bytes().await?;
-        let elapsed_ms = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
+        let bytes = response.body;
+        let elapsed_ms = i64::try_from(response.elapsed.as_millis()).unwrap_or(i64::MAX);
         let (body, body_parse_error) = match serde_json::from_slice::<serde_json::Value>(&bytes) {
             Ok(body) => (body, None),
             Err(error) => (serde_json::Value::Null, Some(error.to_string())),
         };
-        Ok(Self {
+        Self {
             status,
             headers,
             body,
@@ -53,7 +51,7 @@ impl HttpResponse {
             body_parse_error,
             url,
             elapsed_ms,
-        })
+        }
     }
 }
 
@@ -117,22 +115,17 @@ impl TryFrom<&rhai::Dynamic> for ProviderCompletion {
 pub struct CustomProvider {
     ast: Arc<rhai::AST>,
     engine: Arc<rhai::Engine>,
-    client: reqwest::Client,
     url: String,
 }
 
 impl CustomProvider {
-    pub fn new(config: &CustomProviderConfig, headers: &HeaderMap) -> Result<Self, ProviderError> {
+    pub fn new(config: &CustomProviderConfig) -> Result<Self, ProviderError> {
         let mut engine = rhai::Engine::new();
         let ast = Arc::new(
             engine
                 .compile_file(config.script.clone())
                 .map_err(|e| ProviderError::Script(e.to_string()))?,
         );
-        let client = reqwest::Client::builder()
-            .default_headers(headers.clone())
-            .build()?;
-
         engine.on_print(|s| tracing::info!("[rhai] {s}"));
         engine.on_debug(|s, src, pos| {
             tracing::debug!("[rhai] {s} @ {src:?}:{pos}");
@@ -141,18 +134,17 @@ impl CustomProvider {
         Ok(Self {
             engine: Arc::new(engine),
             ast,
-            client,
             url: config.url.clone(),
         })
     }
 }
 
 #[async_trait]
-impl ResponseProvider for CustomProvider {
-    async fn generate_response(
+impl ProviderApi for CustomProvider {
+    async fn build_request(
         &self,
         conversation_history: &[protocol_types::Message],
-    ) -> Result<ProviderCompletion, ProviderError> {
+    ) -> Result<ProviderRequest, ProviderError> {
         let messages_dynamic =
             to_dynamic(conversation_history).map_err(|e| ProviderError::Parsing(e.to_string()))?;
         let engine = self.engine.clone();
@@ -168,13 +160,14 @@ impl ResponseProvider for CustomProvider {
 
         let json_body = rhai::serde::from_dynamic::<serde_json::Value>(&request_body.into())
             .map_err(|e| ProviderError::Parsing(e.to_string()))?;
-        let started = Instant::now();
-        let response = self.client.post(&self.url).json(&json_body).send().await?;
-        let retry_after = super::super::retry::parse_retry_after(
-            response.headers(),
-            std::time::SystemTime::now(),
-        );
-        let response = HttpResponse::from_response(response, started).await?;
+        ProviderRequest::json(self.url.clone(), &json_body)
+    }
+
+    async fn parse_response(
+        &self,
+        response: ProviderResponse,
+    ) -> Result<ProviderCompletion, ProviderError> {
+        let response = HttpResponse::from(response);
         let response_dynamic =
             to_dynamic(response).map_err(|e| ProviderError::Parsing(e.to_string()))?;
         let engine = self.engine.clone();
@@ -188,8 +181,7 @@ impl ResponseProvider for CustomProvider {
         .await
         .map_err(|e| ProviderError::Script(format!("Spawn error: {e}")))??;
 
-        // Explicit script delays take precedence; HTTP Retry-After is a fallback.
-        ProviderCompletion::try_from(&result).map_err(|error| error.with_retry_after(retry_after))
+        ProviderCompletion::try_from(&result)
     }
 }
 
@@ -197,7 +189,7 @@ impl ResponseProvider for CustomProvider {
 mod tests {
     use super::CustomProvider;
     use crate::protocol_types::{Message, Role};
-    use crate::response_provider::{CustomProviderConfig, ProviderError, ResponseProvider};
+    use crate::response_provider::{CustomProviderConfig, HttpResponseProvider, ProviderError};
     use reqwest::header::HeaderMap;
     use serde_json::json;
     use std::path::PathBuf;
@@ -329,7 +321,7 @@ mod tests {
             script: path.clone(),
         };
 
-        let Err(err) = CustomProvider::new(&config, &HeaderMap::new()) else {
+        let Err(err) = CustomProvider::new(&config) else {
             panic!("invalid script should fail to compile")
         };
 
@@ -361,8 +353,11 @@ mod tests {
             url,
             script: path.clone(),
         };
-        let provider =
-            CustomProvider::new(&config, &HeaderMap::new()).expect("provider should build");
+        let provider = HttpResponseProvider::new(
+            Box::new(CustomProvider::new(&config).expect("provider should build")),
+            &HeaderMap::new(),
+        )
+        .unwrap();
         let messages = vec![
             Message {
                 role: Role::System,
@@ -375,7 +370,7 @@ mod tests {
         ];
 
         let response = provider
-            .generate_response(&messages)
+            .execute_once(&messages)
             .await
             .expect("response should be generated");
         let request_json = server_handle.await.expect("server task should complete");
@@ -410,11 +405,14 @@ mod tests {
             url: "http://127.0.0.1:9".to_string(),
             script: path.clone(),
         };
-        let provider =
-            CustomProvider::new(&config, &HeaderMap::new()).expect("provider should build");
+        let provider = HttpResponseProvider::new(
+            Box::new(CustomProvider::new(&config).expect("provider should build")),
+            &HeaderMap::new(),
+        )
+        .unwrap();
 
         let err = provider
-            .generate_response(&[Message {
+            .execute_once(&[Message {
                 role: Role::User,
                 content: "hello".to_string(),
             }])
@@ -445,11 +443,14 @@ mod tests {
             url,
             script: path.clone(),
         };
-        let provider =
-            CustomProvider::new(&config, &HeaderMap::new()).expect("provider should build");
+        let provider = HttpResponseProvider::new(
+            Box::new(CustomProvider::new(&config).expect("provider should build")),
+            &HeaderMap::new(),
+        )
+        .unwrap();
 
         let err = provider
-            .generate_response(&[Message {
+            .execute_once(&[Message {
                 role: Role::User,
                 content: "hello".to_string(),
             }])
@@ -480,11 +481,14 @@ mod tests {
             url,
             script: path.clone(),
         };
-        let provider =
-            CustomProvider::new(&config, &HeaderMap::new()).expect("provider should build");
+        let provider = HttpResponseProvider::new(
+            Box::new(CustomProvider::new(&config).expect("provider should build")),
+            &HeaderMap::new(),
+        )
+        .unwrap();
 
         let err = provider
-            .generate_response(&[Message {
+            .execute_once(&[Message {
                 role: Role::User,
                 content: "hello".to_string(),
             }])
@@ -501,15 +505,13 @@ mod tests {
         url: String,
     ) -> Result<crate::response_provider::ProviderCompletion, ProviderError> {
         let path = write_temp_script(script);
-        let provider = CustomProvider::new(
-            &CustomProviderConfig {
-                url,
-                script: path.clone(),
-            },
-            &HeaderMap::new(),
-        )
+        let api = CustomProvider::new(&CustomProviderConfig {
+            url,
+            script: path.clone(),
+        })
         .unwrap();
-        let result = provider.generate_response(&[]).await;
+        let provider = HttpResponseProvider::new(Box::new(api), &HeaderMap::new()).unwrap();
+        let result = provider.execute_once(&[]).await;
         std::fs::remove_file(path).unwrap();
         result
     }
