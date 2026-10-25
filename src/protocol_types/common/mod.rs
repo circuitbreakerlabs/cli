@@ -15,3 +15,8 @@ pub use optional::{ConversationComplete, ConversationError};
 
 #[cfg(any(text_targets, test))]
 pub use common::Role;
+
+/// Default execution limit; test-case generation is controlled by the server.
+pub(crate) const fn default_max_concurrent_test_case_executions() -> u8 {
+    30
+}
