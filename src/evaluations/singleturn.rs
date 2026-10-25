@@ -331,6 +331,7 @@ mod tests {
             websocket,
             provider,
             SingleTurnEvaluationRequest::Standard(SingleTurnRequest {
+                max_concurrent_test_case_executions: 7,
                 threshold: 0.5,
                 variations: 2,
                 maximum_iteration_layers: 1,
@@ -382,6 +383,7 @@ mod tests {
             websocket,
             provider,
             SingleTurnEvaluationRequest::Rerun(SingleTurnRerunRequest {
+                max_concurrent_test_case_executions: 7,
                 selector: crate::protocol_types::common::RerunSelector::TestResultIds {
                     test_result_ids: vec![42, 43],
                 },
@@ -435,6 +437,7 @@ mod tests {
             websocket,
             provider,
             SingleTurnEvaluationRequest::Standard(SingleTurnRequest {
+                max_concurrent_test_case_executions: 7,
                 threshold: 0.5,
                 variations: 2,
                 maximum_iteration_layers: 1,
@@ -510,6 +513,7 @@ mod tests {
             websocket,
             provider,
             SingleTurnEvaluationRequest::Standard(SingleTurnRequest {
+                max_concurrent_test_case_executions: 7,
                 threshold: 0.5,
                 variations: 2,
                 maximum_iteration_layers: 1,
@@ -552,6 +556,7 @@ mod tests {
             websocket,
             provider,
             SingleTurnEvaluationRequest::Standard(SingleTurnRequest {
+                max_concurrent_test_case_executions: 7,
                 threshold: 0.5,
                 variations: 2,
                 maximum_iteration_layers: 1,
