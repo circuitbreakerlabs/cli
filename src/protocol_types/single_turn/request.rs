@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use super::super::common::{
-    EvaluationId, RerunSelector, TestCaseGroup, TestResultIds, parse_evaluation_id,
-    parse_test_case_group, parse_test_result_ids,
+    EvaluationId, RerunSelector, TestCaseGroup, TestResultIds,
+    default_max_concurrent_test_case_executions, parse_evaluation_id, parse_test_case_group,
+    parse_test_result_ids,
 };
 
 pub(crate) fn parse_threshold(value: &str) -> Result<f32, String> {
@@ -46,6 +47,9 @@ pub(crate) fn parse_maximum_iteration_layers(value: &str) -> Result<i32, String>
 
 #[derive(Debug, Clone, clap::Args)]
 pub struct SingleTurnEvalRequest {
+    /// Maximum concurrent test case executions (1-30)
+    #[arg(long, default_value_t = default_max_concurrent_test_case_executions(), value_parser = clap::value_parser!(u8).range(1..=30), allow_hyphen_values = true)]
+    pub max_concurrent_test_case_executions: u8,
     /// Responses below this safety score threshold will fail
     #[arg(short, long, value_parser = parse_threshold, allow_hyphen_values = true)]
     pub threshold: f32,
@@ -73,6 +77,9 @@ pub struct SingleTurnEvalRequest {
         .args(["test_result_ids", "evaluation_id"])
 ))]
 pub struct SingleTurnRerunEvalRequest {
+    /// Maximum concurrent test case executions (1-30)
+    #[arg(long, default_value_t = default_max_concurrent_test_case_executions(), value_parser = clap::value_parser!(u8).range(1..=30), allow_hyphen_values = true)]
+    pub max_concurrent_test_case_executions: u8,
     /// Responses below this safety score threshold will fail
     #[arg(short, long, value_parser = parse_threshold, allow_hyphen_values = true)]
     pub threshold: f32,
@@ -103,6 +110,9 @@ pub struct SingleTurnRerunEvalRequest {
 /// Payload for `SingleTurnRequestEnvelope` messages (Client -> Server).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SingleTurnRequest {
+    /// Maximum concurrent test case executions per evaluation (1-30).
+    #[serde(default = "default_max_concurrent_test_case_executions")]
+    pub max_concurrent_test_case_executions: u8,
     /// Responses below this safety score threshold will fail
     pub threshold: f32,
     /// Number of variations per unsafe case
@@ -115,6 +125,9 @@ pub struct SingleTurnRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SingleTurnRerunRequest {
+    /// Maximum concurrent test case executions per evaluation (1-30).
+    #[serde(default = "default_max_concurrent_test_case_executions")]
+    pub max_concurrent_test_case_executions: u8,
     #[serde(flatten)]
     pub selector: RerunSelector,
     pub threshold: f32,
@@ -164,6 +177,7 @@ impl SingleTurnEvaluationRequest {
 impl From<SingleTurnEvalRequest> for SingleTurnEvaluationRequest {
     fn from(request: SingleTurnEvalRequest) -> Self {
         SingleTurnEvaluationRequest::Standard(SingleTurnRequest {
+            max_concurrent_test_case_executions: request.max_concurrent_test_case_executions,
             threshold: request.threshold,
             variations: request.variations,
             maximum_iteration_layers: request.maximum_iteration_layers,
@@ -176,6 +190,7 @@ impl From<SingleTurnRerunEvalRequest> for SingleTurnEvaluationRequest {
     fn from(request: SingleTurnRerunEvalRequest) -> Self {
         SingleTurnEvaluationRequest::Rerun(SingleTurnRerunRequest {
             selector: RerunSelector::from_parts(request.test_result_ids, request.evaluation_id),
+            max_concurrent_test_case_executions: request.max_concurrent_test_case_executions,
             threshold: request.threshold,
             variations: request.variations,
             maximum_iteration_layers: request.maximum_iteration_layers,
@@ -234,6 +249,7 @@ mod tests {
     #[test]
     fn single_turn_request_envelope_serializes_to_protocol_shape() {
         let envelope = SingleTurnRequestEnvelope::from(SingleTurnRequest {
+            max_concurrent_test_case_executions: 7,
             threshold: 0.5,
             variations: 3,
             maximum_iteration_layers: 2,
@@ -248,6 +264,7 @@ mod tests {
                 "version": crate::consts::version::PROTOCOL_VERSION,
                 "type": "single_turn_request",
                 "data": {
+                    "max_concurrent_test_case_executions": 7,
                     "threshold": 0.5,
                     "variations": 3,
                     "maximum_iteration_layers": 2,
@@ -266,6 +283,7 @@ mod tests {
             selector: crate::protocol_types::common::RerunSelector::TestResultIds {
                 test_result_ids: vec![42, 43],
             },
+            max_concurrent_test_case_executions: 7,
             threshold: 0.5,
             variations: 3,
             maximum_iteration_layers: 2,
@@ -280,6 +298,7 @@ mod tests {
                 "type": "single_turn_rerun_request",
                 "data": {
                     "test_result_ids": [42, 43],
+                    "max_concurrent_test_case_executions": 7,
                     "threshold": 0.5,
                     "variations": 3,
                     "maximum_iteration_layers": 2
@@ -294,6 +313,7 @@ mod tests {
             selector: crate::protocol_types::common::RerunSelector::EvaluationId {
                 evaluation_id: 123,
             },
+            max_concurrent_test_case_executions: 7,
             threshold: 0.5,
             variations: 3,
             maximum_iteration_layers: 2,
@@ -308,6 +328,7 @@ mod tests {
                 "type": "single_turn_rerun_request",
                 "data": {
                     "evaluation_id": 123,
+                    "max_concurrent_test_case_executions": 7,
                     "threshold": 0.5,
                     "variations": 3,
                     "maximum_iteration_layers": 2
