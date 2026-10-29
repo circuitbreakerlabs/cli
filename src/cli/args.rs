@@ -195,6 +195,15 @@ pub enum EvaluationCommand {
         request: SingleTurnEvalRequest,
     },
 
+    /// Run a multi-party pack evaluation with isolated conversations.
+    #[cfg(text_targets)]
+    MultiParty {
+        #[command(subcommand)]
+        provider: TextProviderCommand,
+        #[command(flatten)]
+        request: crate::protocol_types::multi_party::MultiPartyEvalRequest,
+    },
+
     /// Run multi-turn evaluation
     MultiTurn {
         #[command(subcommand)]
@@ -343,10 +352,9 @@ mod tests {
                     assert_eq!(request.maximum_iteration_layers, 2);
                     assert_eq!(request.test_case_groups, vec!["suicidal_ideation"]);
                 }
-                super::EvaluationCommand::MultiTurn { .. } => {
-                    panic!("expected single-turn command")
-                }
-                super::EvaluationCommand::ReRun { .. } => panic!("expected single-turn command"),
+                super::EvaluationCommand::MultiParty { .. }
+                | super::EvaluationCommand::MultiTurn { .. }
+                | super::EvaluationCommand::ReRun { .. } => panic!("expected single-turn command"),
             },
             _ => panic!("expected eval command"),
         }
@@ -544,10 +552,9 @@ mod tests {
                 super::EvaluationCommand::SingleTurn { request, .. } => {
                     assert_eq!(request.maximum_iteration_layers, 0);
                 }
-                super::EvaluationCommand::MultiTurn { .. } => {
-                    panic!("expected single-turn command")
-                }
-                super::EvaluationCommand::ReRun { .. } => panic!("expected single-turn command"),
+                super::EvaluationCommand::MultiParty { .. }
+                | super::EvaluationCommand::MultiTurn { .. }
+                | super::EvaluationCommand::ReRun { .. } => panic!("expected single-turn command"),
             },
             _ => panic!("expected eval command"),
         }
@@ -648,10 +655,9 @@ mod tests {
                     assert_eq!(request.max_turns, 4);
                     assert_eq!(request.test_case_groups, vec!["suicidal_ideation"]);
                 }
-                super::EvaluationCommand::SingleTurn { .. } => {
-                    panic!("expected multi-turn command")
-                }
-                super::EvaluationCommand::ReRun { .. } => panic!("expected multi-turn command"),
+                super::EvaluationCommand::MultiParty { .. }
+                | super::EvaluationCommand::SingleTurn { .. }
+                | super::EvaluationCommand::ReRun { .. } => panic!("expected multi-turn command"),
             },
             _ => panic!("expected eval command"),
         }
@@ -716,10 +722,9 @@ mod tests {
                 super::EvaluationCommand::MultiTurn { request, .. } => {
                     assert_eq!(request.max_turns, 100);
                 }
-                super::EvaluationCommand::SingleTurn { .. } => {
-                    panic!("expected multi-turn command")
-                }
-                super::EvaluationCommand::ReRun { .. } => panic!("expected multi-turn command"),
+                super::EvaluationCommand::MultiParty { .. }
+                | super::EvaluationCommand::SingleTurn { .. }
+                | super::EvaluationCommand::ReRun { .. } => panic!("expected multi-turn command"),
             },
             _ => panic!("expected multi-turn eval command"),
         }
@@ -858,7 +863,8 @@ mod tests {
                         panic!("expected single-turn rerun command")
                     }
                 },
-                super::EvaluationCommand::SingleTurn { .. }
+                super::EvaluationCommand::MultiParty { .. }
+                | super::EvaluationCommand::SingleTurn { .. }
                 | super::EvaluationCommand::MultiTurn { .. } => panic!("expected rerun command"),
             },
             _ => panic!("expected eval command"),
@@ -968,7 +974,8 @@ mod tests {
                         panic!("expected single-turn rerun command")
                     }
                 },
-                super::EvaluationCommand::SingleTurn { .. }
+                super::EvaluationCommand::MultiParty { .. }
+                | super::EvaluationCommand::SingleTurn { .. }
                 | super::EvaluationCommand::MultiTurn { .. } => panic!("expected rerun command"),
             },
             _ => panic!("expected eval command"),
@@ -1102,7 +1109,8 @@ mod tests {
                         panic!("expected multi-turn rerun command")
                     }
                 },
-                super::EvaluationCommand::SingleTurn { .. }
+                super::EvaluationCommand::MultiParty { .. }
+                | super::EvaluationCommand::SingleTurn { .. }
                 | super::EvaluationCommand::MultiTurn { .. } => panic!("expected rerun command"),
             },
             _ => panic!("expected eval command"),
@@ -1144,7 +1152,8 @@ mod tests {
                         panic!("expected multi-turn rerun command")
                     }
                 },
-                super::EvaluationCommand::SingleTurn { .. }
+                super::EvaluationCommand::MultiParty { .. }
+                | super::EvaluationCommand::SingleTurn { .. }
                 | super::EvaluationCommand::MultiTurn { .. } => panic!("expected rerun command"),
             },
             _ => panic!("expected eval command"),

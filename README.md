@@ -39,6 +39,16 @@ cbl eval multi-turn \
     openai --model gpt-4.1-nano
 ```
 
+Try a multi-party evaluation:
+
+```sh
+cbl eval multi-party \
+    --threshold 0.95 \
+    --max-turns 8 \
+    --test-case-groups household,couples \
+    openai --model gpt-4.1-nano
+```
+
 ## Installation
 
 Pre-built executables and installation methods for Linux, Mac, and Windows are automatically generated and available with each [release](https://github.com/circuitbreakerlabs/cli/releases).

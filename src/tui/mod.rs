@@ -1,5 +1,6 @@
 mod common;
 pub mod err;
+pub mod multiparty;
 pub mod multiturn;
 pub mod singleturn;
 

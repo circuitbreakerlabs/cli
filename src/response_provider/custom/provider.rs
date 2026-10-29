@@ -625,7 +625,7 @@ mod tests {
             assert_eq!(
                 error.retry_after(),
                 if reason == "rate_limited" {
-                    Some(std::time::Duration::from_secs(120))
+                    Some(std::time::Duration::from_mins(2))
                 } else {
                     None
                 }
