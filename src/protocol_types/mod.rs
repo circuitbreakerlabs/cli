@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 pub mod common;
+pub mod multi_party;
 pub mod multi_turn;
 pub mod single_turn;
 

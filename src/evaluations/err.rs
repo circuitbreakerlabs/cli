@@ -5,6 +5,9 @@ use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 
 #[derive(Error, Debug)]
 pub enum EvaluationError {
+    #[error("{0} conversations had execution errors; results saved")]
+    EpisodesFailed(usize),
+
     #[error("WebSocket error: {0}")]
     WebSocket(#[from] tokio_tungstenite::tungstenite::Error),
 

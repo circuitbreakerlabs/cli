@@ -1,5 +1,7 @@
 mod common;
 pub mod err;
+#[cfg(text_targets)]
+pub mod multiparty;
 pub mod multiturn;
 pub mod singleturn;
 
