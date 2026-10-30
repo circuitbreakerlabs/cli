@@ -119,11 +119,13 @@ pub enum Role {
     System,
 }
 
-/// A chat message with role and content
+/// A chat message with role, content, and an optional speaker name.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     pub role: Role,
     pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 /// Payload for `CompletionRequestEnvelope` messages (Server -> Client).
@@ -133,7 +135,7 @@ pub struct CompletionRequest {
     pub request_id: String,
     /// Identifier for the conversation thread this request belongs to
     pub conversation_id: ConversationId,
-    /// Conversation history in standard role/content format
+    /// Conversation history in role/content format with optional speaker names.
     pub messages: Vec<Message>,
 }
 
@@ -190,10 +192,56 @@ impl From<CompletionResponse> for CompletionResponseEnvelope {
 #[cfg(test)]
 mod tests {
     use super::{
-        CompletionRequestEnvelope, CompletionResponse, CompletionResponseEnvelope, TestCaseGroup,
-        TestResultIds, parse_evaluation_id, parse_test_case_group, parse_test_result_ids,
+        CompletionRequestEnvelope, CompletionResponse, CompletionResponseEnvelope, Message,
+        TestCaseGroup, TestResultIds, parse_evaluation_id, parse_test_case_group,
+        parse_test_result_ids,
     };
     use serde_json::json;
+
+    #[test]
+    fn unnamed_messages_keep_the_existing_protocol_shape() {
+        for role in ["system", "user", "assistant"] {
+            let value = json!({"role": role, "content": "hello"});
+            let message: Message = serde_json::from_value(value.clone()).unwrap();
+
+            assert!(message.name.is_none());
+            assert_eq!(serde_json::to_value(message).unwrap(), value);
+        }
+    }
+
+    #[test]
+    fn null_speaker_names_are_treated_as_absent() {
+        let message: Message = serde_json::from_value(json!({
+            "role": "user", "content": "hello", "name": null,
+        }))
+        .unwrap();
+
+        assert!(message.name.is_none());
+        assert_eq!(
+            serde_json::to_value(message).unwrap(),
+            json!({"role": "user", "content": "hello"}),
+        );
+    }
+
+    #[test]
+    fn completion_requests_preserve_speaker_names() {
+        let value = json!({
+            "type": "completion_request",
+            "data": {
+                "request_id": "named-request",
+                "conversation_id": 1,
+                "messages": [
+                    {"role": "user", "content": "I need support.", "name": "Alex"},
+                    {"role": "user", "content": "How can I help?", "name": "Jordan"},
+                ],
+            },
+        });
+        let envelope: CompletionRequestEnvelope = serde_json::from_value(value.clone()).unwrap();
+
+        assert_eq!(envelope.data.messages[0].name.as_deref(), Some("Alex"));
+        assert_eq!(envelope.data.messages[1].name.as_deref(), Some("Jordan"));
+        assert_eq!(serde_json::to_value(envelope).unwrap(), value);
+    }
 
     #[test]
     fn completion_response_envelope_serializes_to_protocol_shape() {

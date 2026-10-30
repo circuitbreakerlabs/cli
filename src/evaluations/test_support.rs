@@ -55,6 +55,7 @@ impl ResponseProvider for ControlledProvider {
         }?;
 
         Ok(protocol_types::Message {
+            name: None,
             role: Role::Assistant,
             content,
         }

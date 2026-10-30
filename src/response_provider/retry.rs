@@ -97,6 +97,7 @@ mod tests {
 
     fn history() -> Vec<Message> {
         vec![Message {
+            name: None,
             role: crate::protocol_types::Role::User,
             content: "unchanged".into(),
         }]
@@ -112,6 +113,7 @@ mod tests {
     fn success() -> ProviderCompletion {
         ProviderCompletion {
             message: Message {
+                name: None,
                 role: crate::protocol_types::Role::Assistant,
                 content: "reply".into(),
             },

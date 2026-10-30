@@ -43,7 +43,12 @@ impl OllamaProvider {
             protocol_types::Role::System => OllamaMessageRole::System,
         };
 
-        OllamaMessage::new(role, msg.content.clone())
+        // The Ollama chat schema has no speaker name field.
+        let content = msg.name.as_ref().map_or_else(
+            || msg.content.clone(),
+            |name| format!("{name}: {}", msg.content),
+        );
+        OllamaMessage::new(role, content)
     }
 }
 
@@ -90,6 +95,7 @@ impl ProviderApi for OllamaProvider {
 
         Ok(ProviderCompletion {
             message: protocol_types::Message {
+                name: None,
                 role,
                 content: response.message.content,
             },
@@ -112,11 +118,43 @@ mod tests {
 
     use crate::response_provider::{ProviderApi, ProviderResponse};
     use clap::Parser;
+    use serde_json::json;
 
     #[derive(Parser)]
     struct Arguments {
         #[command(flatten)]
         config: super::OllamaProviderConfig,
+    }
+
+    #[tokio::test]
+    async fn requests_label_named_messages_and_preserve_unnamed_content() {
+        let config = Arguments::try_parse_from(["test", "--model", "model"])
+            .unwrap()
+            .config;
+        let provider = OllamaProvider::new(config).unwrap();
+
+        for role in ["system", "user", "assistant"] {
+            for name in [None, Some("Alex")] {
+                let message: Message = serde_json::from_value(json!({
+                    "role": role, "content": "hello", "name": name,
+                }))
+                .unwrap();
+                let request = provider
+                    .build_request(std::slice::from_ref(&message))
+                    .await
+                    .unwrap();
+                let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+                let expected = if name.is_some() {
+                    "Alex: hello"
+                } else {
+                    "hello"
+                };
+
+                assert_eq!(body["messages"][0]["role"], role);
+                assert_eq!(body["messages"][0]["content"], expected);
+                assert_eq!(message.content, "hello");
+            }
+        }
     }
 
     #[tokio::test]
@@ -144,6 +182,7 @@ mod tests {
             let api = OllamaProvider::new(config).unwrap();
             let request = api
                 .build_request(&[Message {
+                    name: None,
                     role: Role::User,
                     content: "hello".into(),
                 }])
@@ -231,6 +270,7 @@ mod tests {
     #[test]
     fn converts_protocol_message_to_ollama_shape() {
         let message = Message {
+            name: None,
             role: Role::User,
             content: "hello".to_string(),
         };

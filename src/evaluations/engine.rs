@@ -397,6 +397,7 @@ mod tests {
                         request_id: "req-1".to_string(),
                         conversation_id: 7,
                         messages: vec![protocol_types::Message {
+                            name: None,
                             role: Role::User,
                             content: "hello".to_string(),
                         }],
@@ -457,6 +458,7 @@ mod tests {
         ) -> Result<ProviderCompletion, ProviderError> {
             Ok(ProviderCompletion {
                 message: protocol_types::Message {
+                    name: None,
                     role: Role::Assistant,
                     content: "safe reply".to_string(),
                 },
@@ -552,6 +554,7 @@ mod tests {
                 request_id: "req-1".to_string(),
                 conversation_id: 9,
                 messages: vec![protocol_types::Message {
+                    name: None,
                     role: Role::User,
                     content: "hello".to_string(),
                 }],
@@ -587,6 +590,7 @@ mod tests {
                 request_id: "req-2".to_string(),
                 conversation_id: 11,
                 messages: vec![protocol_types::Message {
+                    name: None,
                     role: Role::User,
                     content: "hello".to_string(),
                 }],

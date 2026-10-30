@@ -82,6 +82,7 @@ impl TryFrom<&rhai::Dynamic> for ProviderCompletion {
                 ))
             }
             ParsedResponse::Success { content } => Ok(protocol_types::Message {
+                name: None,
                 role: protocol_types::Role::Assistant,
                 content,
             }
@@ -189,7 +190,9 @@ impl ProviderApi for CustomProvider {
 mod tests {
     use super::CustomProvider;
     use crate::protocol_types::{Message, Role};
-    use crate::response_provider::{CustomProviderConfig, HttpResponseProvider, ProviderError};
+    use crate::response_provider::{
+        CustomProviderConfig, HttpResponseProvider, ProviderApi, ProviderError,
+    };
     use reqwest::header::HeaderMap;
     use serde_json::json;
     use std::path::PathBuf;
@@ -213,6 +216,34 @@ mod tests {
         let path = std::env::temp_dir().join(unique);
         std::fs::write(&path, contents).expect("test script should be written");
         path
+    }
+
+    #[tokio::test]
+    async fn rhai_scripts_receive_optional_speaker_names() {
+        let path = write_temp_script(
+            r"
+                fn build_request(messages) {
+                    #{messages: messages}
+                }
+            ",
+        );
+        let provider = CustomProvider::new(&CustomProviderConfig {
+            url: "http://example.test".into(),
+            script: path.clone(),
+        })
+        .unwrap();
+        let values = json!([
+            {"role": "system", "content": "be helpful"},
+            {"role": "user", "content": "I need support.", "name": "Alex"},
+            {"role": "user", "content": "How can I help?", "name": "Jordan"},
+            {"role": "assistant", "content": "Let's talk."},
+        ]);
+        let messages: Vec<Message> = serde_json::from_value(values.clone()).unwrap();
+        let request = provider.build_request(&messages).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+
+        assert_eq!(body["messages"], values);
+        std::fs::remove_file(path).unwrap();
     }
 
     async fn spawn_json_server(
@@ -360,10 +391,12 @@ mod tests {
         .unwrap();
         let messages = vec![
             Message {
+                name: None,
                 role: Role::System,
                 content: "be safe".to_string(),
             },
             Message {
+                name: None,
                 role: Role::User,
                 content: "hello".to_string(),
             },
@@ -413,6 +446,7 @@ mod tests {
 
         let err = provider
             .execute_once(&[Message {
+                name: None,
                 role: Role::User,
                 content: "hello".to_string(),
             }])
@@ -451,6 +485,7 @@ mod tests {
 
         let err = provider
             .execute_once(&[Message {
+                name: None,
                 role: Role::User,
                 content: "hello".to_string(),
             }])
@@ -489,6 +524,7 @@ mod tests {
 
         let err = provider
             .execute_once(&[Message {
+                name: None,
                 role: Role::User,
                 content: "hello".to_string(),
             }])

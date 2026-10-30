@@ -78,6 +78,7 @@ mod tests {
 
     fn completion() -> ProviderCompletion {
         Message {
+            name: None,
             role: Role::Assistant,
             content: "reply".into(),
         }
@@ -104,6 +105,7 @@ mod tests {
         let builds = api.builds.clone();
         let provider = HttpResponseProvider::new(Box::new(api), &HeaderMap::new()).unwrap();
         let messages = vec![Message {
+            name: None,
             role: Role::User,
             content: "unchanged".into(),
         }];
