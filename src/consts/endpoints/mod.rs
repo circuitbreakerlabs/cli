@@ -8,7 +8,10 @@ mod singleturn;
 mod test_case_groups;
 
 pub use baseurl::CBL_BASE_URL;
-pub use evaluations::{MULTI_TURN_EVALUATIONS_ENDPOINT, SINGLE_TURN_EVALUATIONS_ENDPOINT};
+pub use evaluations::{
+    MULTI_PARTY_EVALUATIONS_ENDPOINT, MULTI_TURN_EVALUATIONS_ENDPOINT,
+    SINGLE_TURN_EVALUATIONS_ENDPOINT,
+};
 pub use monthly_quota::MONTHLY_QUOTA_ENDPOINT;
 pub use roles::ROLES_ENDPOINT;
 pub use test_case_groups::TEST_CASE_GROUPS_ENDPOINT;

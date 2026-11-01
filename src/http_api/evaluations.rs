@@ -109,6 +109,11 @@ pub async fn run(
             consts::endpoints::MULTI_TURN_EVALUATIONS_ENDPOINT,
             "multi-turn",
         )
+    } else if command.multi_party {
+        (
+            consts::endpoints::MULTI_PARTY_EVALUATIONS_ENDPOINT,
+            "multi-party",
+        )
     } else {
         unreachable!("clap requires one evaluation type");
     };
@@ -145,6 +150,67 @@ pub async fn run(
 mod tests {
     use super::{HistoricEvaluationSummary, build_historic_evaluations_table, truncate_for_table};
     use crate::http_api::build_http_url_with_pagination;
+
+    #[tokio::test]
+    async fn multiparty_history_requests_summary_endpoint_with_pagination() {
+        use clap::Parser;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0; 1024];
+            while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                let count = socket.read(&mut buffer).await.unwrap();
+                assert_ne!(count, 0);
+                request.extend_from_slice(&buffer[..count]);
+            }
+            let request = String::from_utf8(request).unwrap();
+            assert!(
+                request
+                    .starts_with("GET /v1/multiparty_evaluations?limit=20&offset=5 HTTP/1.1\r\n")
+            );
+            assert!(request.to_lowercase().contains("cbl-api-key: test-key\r\n"));
+            let body = r#"[{"test_result_id":42,"evaluation_id":7,"test_case_id":3,"initial_user_input":"hello","passed":true,"score":0.9,"model_response":"hi","created_at":"2026-11-01T12:00:00Z"}]"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+        });
+        let args = crate::cli::Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "test-key",
+            "api",
+            "evaluations",
+            "--multiparty",
+            "--limit",
+            "20",
+            "--offset",
+            "5",
+            "--json",
+        ])
+        .unwrap();
+        let Some(crate::cli::Command::Api(api)) = args.command else {
+            panic!("expected API command");
+        };
+        let Some(crate::cli::ApiSubcommand::Evaluations(command)) = api.command else {
+            panic!("expected history command");
+        };
+        super::run(
+            &command,
+            &format!("http://{address}/v1"),
+            "test-key",
+            false,
+            true,
+        )
+        .await
+        .unwrap();
+        server.await.unwrap();
+    }
 
     #[test]
     fn builds_paginated_http_url_with_defaults() {

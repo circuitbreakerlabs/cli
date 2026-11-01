@@ -163,7 +163,7 @@ pub enum ApiSubcommand {
 #[derive(clap::Args, Debug)]
 #[command(group(
     ArgGroup::new("evaluation_type")
-        .args(["single_turn", "multi_turn"])
+        .args(["single_turn", "multi_turn", "multi_party"])
         .required(true)
 ))]
 pub struct ApiEvaluationsCommand {
@@ -174,6 +174,10 @@ pub struct ApiEvaluationsCommand {
     /// List historic multi-turn evaluation results
     #[arg(long = "multi-turn")]
     pub multi_turn: bool,
+
+    /// List historic multi-party evaluation results
+    #[arg(long = "multiparty", visible_alias = "multi-party")]
+    pub multi_party: bool,
 
     /// Maximum number of historic evaluation results to return
     #[arg(long, value_parser = clap::value_parser!(u16).range(1..=100))]
@@ -1420,6 +1424,55 @@ mod tests {
                 _ => panic!("expected api evaluations command"),
             },
             _ => panic!("expected api command"),
+        }
+    }
+
+    #[test]
+    fn parses_api_multiparty_history_with_pagination_and_json() {
+        for flag in ["--multiparty", "--multi-party"] {
+            let args = Args::try_parse_from([
+                "cbl",
+                "--cbl-api-key",
+                "key",
+                "api",
+                "evaluations",
+                flag,
+                "--limit",
+                "20",
+                "--offset",
+                "5",
+                "--json",
+            ])
+            .expect("multiparty history should parse");
+            args.validate().expect("history command should validate");
+            let Some(super::Command::Api(api)) = args.command else {
+                panic!("expected API command");
+            };
+            assert!(api.json);
+            let Some(super::ApiSubcommand::Evaluations(history)) = api.command else {
+                panic!("expected evaluation history");
+            };
+            assert!(history.multi_party);
+            assert!(!history.single_turn && !history.multi_turn);
+            assert_eq!(history.limit, Some(20));
+            assert_eq!(history.offset, Some(5));
+        }
+    }
+
+    #[test]
+    fn rejects_multiparty_history_with_other_evaluation_types() {
+        for flag in ["--single-turn", "--multi-turn"] {
+            let err = Args::try_parse_from([
+                "cbl",
+                "--cbl-api-key",
+                "key",
+                "api",
+                "evaluations",
+                "--multiparty",
+                flag,
+            ])
+            .expect_err("history types should conflict");
+            assert_eq!(err.kind(), ErrorKind::ArgumentConflict);
         }
     }
 
