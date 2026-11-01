@@ -120,6 +120,7 @@ mod tests {
     use std::collections::HashMap;
 
     #[tokio::test]
+    #[allow(clippy::too_many_lines)]
     async fn multiparty_routes_completions_and_parses_sanitized_results() {
         let (websocket, server) = spawn_websocket_server(|socket| async move {
             let (mut write, mut read) = socket.split();
