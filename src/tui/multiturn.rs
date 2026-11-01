@@ -17,8 +17,6 @@ use super::common::{ConversationStatus, WaitingFor, get_status_indicator_spans};
 use crate::protocol_types::ConversationId;
 use crate::protocol_types::common::{ConversationComplete, ConversationError};
 
-const PROGRESS_BAR_WIDTH: usize = 32;
-
 pub enum MultiTurnProgressIndicatorMessage {
     EvaluationStart {
         conversation_ids: Vec<i32>,
@@ -230,25 +228,12 @@ async fn handle_message(
 }
 
 fn get_progress_bar_spans(conv: &ConversationState) -> Vec<Span<'_>> {
-    let progress_len = if matches!(conv.status, ConversationStatus::Waiting(_)) {
-        (conv.current_turn * PROGRESS_BAR_WIDTH)
-            .checked_div(conv.max_turns)
-            .unwrap_or(0)
+    let current = if matches!(conv.status, ConversationStatus::Waiting(_)) {
+        conv.current_turn
     } else {
-        PROGRESS_BAR_WIDTH
+        conv.max_turns
     };
-
-    let progress_bar_filled = "=".repeat(progress_len);
-    let progress_bar_empty = " ".repeat(PROGRESS_BAR_WIDTH - progress_len);
-    vec![
-        Span::raw("["),
-        Span::styled(
-            progress_bar_filled,
-            Style::default().add_modifier(ratatui::style::Modifier::BOLD),
-        ),
-        Span::raw(progress_bar_empty),
-        Span::raw("]"),
-    ]
+    super::common::get_progress_bar_spans(current, conv.max_turns)
 }
 
 fn get_numeric_progress_spans(conv: &ConversationState) -> Option<Vec<Span<'_>>> {

@@ -534,10 +534,12 @@ async fn run_multi_party_evaluation(
     });
     std::fs::write(&filename, serialize_evaluation_output(&result, &groups)?)?;
     print_success_message(log_mode, "multi-party", &filename);
-    println!(
-        "Passed: {}, failed: {}, inconclusive: {}, errors: {}",
-        result.total_passed, result.total_failed, result.total_inconclusive, result.total_errors
-    );
+    if log_mode {
+        println!(
+            "Passed: {}, failed: {}, errors: {}",
+            result.total_passed, result.total_failed, result.total_errors
+        );
+    }
     if result.total_errors > 0 {
         return Err(EvaluationError::EpisodesFailed(result.total_errors).into());
     }
