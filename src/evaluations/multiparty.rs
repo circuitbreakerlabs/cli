@@ -116,6 +116,7 @@ mod tests {
             let initial = recv_text_json(&mut read).await;
             assert_eq!(initial["data"]["test_case_groups"], json!(["pack"]));
             assert_eq!(initial["data"]["max_concurrent_test_case_executions"], 2);
+            assert!(initial["data"].get("capture_trace").is_none());
             send_json(&mut write, json!({"type":"multiparty_evaluation_start","data":{"conversation_ids":[1,2],"max_turns":7}})).await;
             for id in [1, 2] {
                 send_json(&mut write, json!({"type":"completion_request", "data":{"request_id":format!("r{id}"), "conversation_id":id, "messages":[{"role":"user","content":format!("history-{id}")}]}})).await;
@@ -150,7 +151,6 @@ mod tests {
                 max_concurrent_test_case_executions: 2,
                 threshold: 0.5,
                 max_turns: 7,
-                capture_trace: false,
             },
             Some(tx),
         )

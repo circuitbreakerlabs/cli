@@ -16,9 +16,6 @@ pub struct MultiPartyEvalRequest {
     /// Maximum utterances across all speakers, including the customer (1-100).
     #[arg(short, long, value_parser = clap::value_parser!(u8).range(1..=100))]
     pub max_turns: u8,
-    /// Capture a separate server-side trace for each conversation.
-    #[arg(long)]
-    pub capture_trace: bool,
 }
 
 /// Payload for `multiparty_request` messages (Client -> Server).
@@ -28,7 +25,6 @@ pub struct MultiPartyRequest {
     pub max_concurrent_test_case_executions: u8,
     pub threshold: f32,
     pub max_turns: u8,
-    pub capture_trace: bool,
 }
 
 impl From<MultiPartyEvalRequest> for MultiPartyRequest {
@@ -38,7 +34,6 @@ impl From<MultiPartyEvalRequest> for MultiPartyRequest {
             max_concurrent_test_case_executions: request.max_concurrent_test_case_executions,
             threshold: request.threshold,
             max_turns: request.max_turns,
-            capture_trace: request.capture_trace,
         }
     }
 }
@@ -50,7 +45,7 @@ mod tests {
     use clap::Parser;
 
     #[test]
-    fn multiparty_accepts_odd_turns_and_rejects_legacy_selectors() {
+    fn multiparty_request_matches_api_and_rejects_removed_options() {
         let argv = [
             "cbl",
             "--cbl-api-key",
@@ -84,12 +79,16 @@ mod tests {
                 "max_concurrent_test_case_executions": 30,
                 "threshold": 0.5,
                 "max_turns": 7,
-                "capture_trace": false,
             })
         );
         let mut invalid = argv.to_vec();
         invalid.extend(["--multiparty-test-case-id", "7"]);
         assert!(Args::try_parse_from(invalid).is_err());
+        let mut invalid = argv.to_vec();
+        invalid.insert(11, "--capture-trace");
+        let error =
+            Args::try_parse_from(invalid).expect_err("trace capture was removed from the API");
+        assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
         for value in ["0", "31", "-1"] {
             let mut invalid = argv[..11].to_vec();
             invalid.extend(["--max-concurrent-test-case-executions", value]);
