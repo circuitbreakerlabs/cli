@@ -873,10 +873,8 @@ mod tests {
                         assert_eq!(request.variations, 2);
                         assert_eq!(request.maximum_iteration_layers, 1);
                     }
-                    super::ReRunEvaluationCommand::MultiTurn { .. } => {
-                        panic!("expected single-turn rerun command")
-                    }
-                    super::ReRunEvaluationCommand::MultiParty { .. } => {
+                    super::ReRunEvaluationCommand::MultiTurn { .. }
+                    | super::ReRunEvaluationCommand::MultiParty { .. } => {
                         panic!("expected single-turn rerun command")
                     }
                 },
@@ -987,10 +985,8 @@ mod tests {
                         assert!(request.test_result_ids.is_none());
                         assert_eq!(request.evaluation_id, Some(123));
                     }
-                    super::ReRunEvaluationCommand::MultiTurn { .. } => {
-                        panic!("expected single-turn rerun command")
-                    }
-                    super::ReRunEvaluationCommand::MultiParty { .. } => {
+                    super::ReRunEvaluationCommand::MultiTurn { .. }
+                    | super::ReRunEvaluationCommand::MultiParty { .. } => {
                         panic!("expected single-turn rerun command")
                     }
                 },
@@ -1125,10 +1121,8 @@ mod tests {
                         assert!((request.threshold - 0.5).abs() < f32::EPSILON);
                         assert_eq!(request.max_turns, 4);
                     }
-                    super::ReRunEvaluationCommand::SingleTurn { .. } => {
-                        panic!("expected multi-turn rerun command")
-                    }
-                    super::ReRunEvaluationCommand::MultiParty { .. } => {
+                    super::ReRunEvaluationCommand::SingleTurn { .. }
+                    | super::ReRunEvaluationCommand::MultiParty { .. } => {
                         panic!("expected multi-turn rerun command")
                     }
                 },
@@ -1171,10 +1165,8 @@ mod tests {
                         assert!(request.test_result_ids.is_none());
                         assert_eq!(request.evaluation_id, Some(123));
                     }
-                    super::ReRunEvaluationCommand::SingleTurn { .. } => {
-                        panic!("expected multi-turn rerun command")
-                    }
-                    super::ReRunEvaluationCommand::MultiParty { .. } => {
+                    super::ReRunEvaluationCommand::SingleTurn { .. }
+                    | super::ReRunEvaluationCommand::MultiParty { .. } => {
                         panic!("expected multi-turn rerun command")
                     }
                 },
