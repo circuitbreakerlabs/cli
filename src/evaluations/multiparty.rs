@@ -110,7 +110,7 @@ mod tests {
     use std::collections::HashMap;
 
     #[tokio::test]
-    async fn multiparty_routes_completions_and_preserves_partial_results() {
+    async fn multiparty_routes_completions_and_parses_sanitized_results() {
         let (websocket, server) = spawn_websocket_server(|socket| async move {
             let (mut write, mut read) = socket.split();
             let initial = recv_text_json(&mut read).await;
@@ -130,7 +130,7 @@ mod tests {
             assert_eq!(replies["r2"], "answer-2");
             send_json(&mut write, json!({"type":"multiparty_turn","data":{"conversation_id":1,"turns":5}})).await;
             send_json(&mut write, json!({"type":"multiparty_conversation_complete","data":{"conversation_id":1,"status":"error"}})).await;
-            send_json(&mut write, json!({"type":"multiparty_response","data":{"evaluation_id":42,"total_passed":1,"total_failed":0,"total_errors":1,"results":[{"error":{"error":"evaluation_failure","partial_result":{"events":[{"speaker_id":"alex","content":"partial"}]}}}]}})).await;
+            send_json(&mut write, json!({"type":"multiparty_response","data":{"evaluation_id":42,"total_passed":0,"total_failed":0,"total_errors":1,"results":[{"conversation_id":1,"multiparty_test_case_id":7,"status":"error","turns":1,"min_safe_response_score":null,"passed":null,"conversation":[{"role":"user","name":"Alex","content":"partial"}],"participant_results":[{"participant_id":"alex","test_case_id":9,"test_result_id":null,"status":"error","safe_response_score":null,"passed":null}],"error_code":"evaluation_failure"}]}})).await;
         }).await;
         let provider = Arc::new(ControlledProvider::new(HashMap::from([
             (
@@ -158,9 +158,16 @@ mod tests {
         .unwrap();
         assert_eq!(result.evaluation_id, 42);
         assert_eq!(result.total_errors, 1);
-        assert_eq!(result.results[0]["error"]["error"], "evaluation_failure");
         assert_eq!(
-            result.results[0]["error"]["partial_result"]["events"][0]["speaker_id"],
+            result.results[0].error_code,
+            Some(crate::protocol_types::multi_party::MultiPartyErrorCode::EvaluationFailure)
+        );
+        assert_eq!(
+            result.results[0].conversation[0].name.as_deref(),
+            Some("Alex")
+        );
+        assert_eq!(
+            result.results[0].participant_results[0].participant_id,
             "alex"
         );
         let mut messages = Vec::new();
