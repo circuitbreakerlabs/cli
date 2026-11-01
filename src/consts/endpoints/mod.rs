@@ -19,6 +19,9 @@ pub use test_case_groups::TEST_CASE_GROUPS_ENDPOINT;
 pub fn endpoint_from_evaluation_type(eval: &crate::evaluations::EvaluationType) -> &str {
     match eval {
         crate::evaluations::EvaluationType::MultiParty => multiparty::MULTI_PARTY_ENDPOINT,
+        crate::evaluations::EvaluationType::MultiPartyRerun => {
+            multiparty::MULTI_PARTY_RERUN_ENDPOINT
+        }
         crate::evaluations::EvaluationType::Voice => "/ws/multiturn_voice_evaluation",
         crate::evaluations::EvaluationType::VoiceRerun => "/ws/multiturn_voice_rerun_evaluation",
         crate::evaluations::EvaluationType::SingleTurnVoice => {
@@ -46,6 +49,10 @@ mod tests {
         assert_eq!(
             endpoint_from_evaluation_type(&EvaluationType::MultiParty),
             "/ws/multiparty_evaluation"
+        );
+        assert_eq!(
+            endpoint_from_evaluation_type(&EvaluationType::MultiPartyRerun),
+            "/ws/multiparty_rerun_evaluation"
         );
         assert_eq!(
             endpoint_from_evaluation_type(&EvaluationType::SingleTurn),

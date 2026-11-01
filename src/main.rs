@@ -203,6 +203,7 @@ async fn run_evaluation(
             cli::EvaluationCommand::SingleTurn { provider, .. }
             | cli::EvaluationCommand::MultiTurn { provider, .. } => provider.text(),
             cli::EvaluationCommand::ReRun { rerun } => match rerun {
+                cli::ReRunEvaluationCommand::MultiParty { provider, .. } => provider,
                 cli::ReRunEvaluationCommand::SingleTurn { provider, .. }
                 | cli::ReRunEvaluationCommand::MultiTurn { provider, .. } => provider.text(),
             },
@@ -262,6 +263,16 @@ async fn run_evaluation(
                 .await?;
             }
             cli::EvaluationCommand::ReRun { rerun } => match rerun {
+                cli::ReRunEvaluationCommand::MultiParty { request, .. } => {
+                    run_multi_party_evaluation(
+                        websocket,
+                        provider,
+                        request.into(),
+                        cli_args.log_mode,
+                        cli_args.output_file,
+                    )
+                    .await?;
+                }
                 cli::ReRunEvaluationCommand::SingleTurn { request, .. } => {
                     run_single_turn_evaluation(
                         websocket,
@@ -504,11 +515,12 @@ async fn run_voice_cli(
 async fn run_multi_party_evaluation(
     websocket: WebSocketConnection,
     provider: Arc<dyn ResponseProvider>,
-    request: protocol_types::multi_party::MultiPartyRequest,
+    request: protocol_types::multi_party::MultiPartyEvaluationRequest,
     log_mode: bool,
     output_file: Option<PathBuf>,
 ) -> Result<(), RunEvaluationError> {
-    let groups = request.test_case_groups.clone();
+    let groups = request.test_case_groups().map(<[_]>::to_vec);
+    let rerun_selector = request.rerun_selector();
     let (tx, rx) = tokio::sync::mpsc::channel(128);
     let render = if log_mode {
         None
@@ -532,7 +544,15 @@ async fn run_multi_party_evaluation(
             Local::now().format("%Y%m%d_%H%M%S")
         ))
     });
-    std::fs::write(&filename, serialize_evaluation_output(&result, &groups)?)?;
+    let json = if let Some(selector) = rerun_selector {
+        serialize_rerun_evaluation_output(&result, &selector)?
+    } else {
+        serialize_evaluation_output(
+            &result,
+            &groups.expect("standard evaluation includes test case groups"),
+        )?
+    };
+    std::fs::write(&filename, json)?;
     print_success_message(log_mode, "multi-party", &filename);
     if log_mode {
         println!(

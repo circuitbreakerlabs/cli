@@ -3,7 +3,8 @@ use super::headers::Headers;
 use crate::protocol_types::SingleTurnRerunEvalRequest;
 #[cfg(eval_targets)]
 use crate::protocol_types::{
-    MultiTurnEvalRequest, MultiTurnRerunEvalRequest, SingleTurnEvalRequest,
+    MultiPartyRerunEvalRequest, MultiTurnEvalRequest, MultiTurnRerunEvalRequest,
+    SingleTurnEvalRequest,
 };
 #[cfg(feature = "custom")]
 use crate::response_provider::CustomProviderConfig;
@@ -226,6 +227,15 @@ pub enum EvaluationCommand {
 #[cfg(eval_targets)]
 #[derive(Subcommand, Debug)]
 pub enum ReRunEvaluationCommand {
+    /// Re-run historic multi-party conversations
+    #[cfg(text_targets)]
+    MultiParty {
+        #[command(subcommand)]
+        provider: TextProviderCommand,
+        #[command(flatten)]
+        request: MultiPartyRerunEvalRequest,
+    },
+
     /// Re-run a historic single-turn evaluation result
     SingleTurn {
         #[command(subcommand)]
@@ -866,6 +876,9 @@ mod tests {
                     super::ReRunEvaluationCommand::MultiTurn { .. } => {
                         panic!("expected single-turn rerun command")
                     }
+                    super::ReRunEvaluationCommand::MultiParty { .. } => {
+                        panic!("expected single-turn rerun command")
+                    }
                 },
                 super::EvaluationCommand::MultiParty { .. }
                 | super::EvaluationCommand::SingleTurn { .. }
@@ -975,6 +988,9 @@ mod tests {
                         assert_eq!(request.evaluation_id, Some(123));
                     }
                     super::ReRunEvaluationCommand::MultiTurn { .. } => {
+                        panic!("expected single-turn rerun command")
+                    }
+                    super::ReRunEvaluationCommand::MultiParty { .. } => {
                         panic!("expected single-turn rerun command")
                     }
                 },
@@ -1112,6 +1128,9 @@ mod tests {
                     super::ReRunEvaluationCommand::SingleTurn { .. } => {
                         panic!("expected multi-turn rerun command")
                     }
+                    super::ReRunEvaluationCommand::MultiParty { .. } => {
+                        panic!("expected multi-turn rerun command")
+                    }
                 },
                 super::EvaluationCommand::MultiParty { .. }
                 | super::EvaluationCommand::SingleTurn { .. }
@@ -1153,6 +1172,9 @@ mod tests {
                         assert_eq!(request.evaluation_id, Some(123));
                     }
                     super::ReRunEvaluationCommand::SingleTurn { .. } => {
+                        panic!("expected multi-turn rerun command")
+                    }
+                    super::ReRunEvaluationCommand::MultiParty { .. } => {
                         panic!("expected multi-turn rerun command")
                     }
                 },

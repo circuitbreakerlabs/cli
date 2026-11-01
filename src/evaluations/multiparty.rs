@@ -5,14 +5,19 @@ use super::{
 use crate::{
     protocol_types::{
         CompletionRequest,
-        multi_party::{MultiPartyRequest, MultiPartyResponse},
+        multi_party::{
+            MultiPartyEvaluationRequest, MultiPartyRequestEnvelope, MultiPartyRerunRequestEnvelope,
+            MultiPartyResponse,
+        },
     },
     response_provider::ResponseProvider,
     tui::{WaitingFor, multiparty::MultiPartyProgressIndicatorMessage},
     websockets::WebSocketConnection,
 };
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(test)]
+use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -26,14 +31,19 @@ struct Envelope {
 }
 
 impl EvaluationMode for Mode {
-    type Request = MultiPartyRequest;
+    type Request = MultiPartyEvaluationRequest;
     type FinalResponse = MultiPartyResponse;
     type OptionalMessage = MultiPartyProgressIndicatorMessage;
     type ProgressMessage = MultiPartyProgressIndicatorMessage;
     fn serialize_request(&self, request: &Self::Request) -> Result<String, serde_json::Error> {
-        serde_json::to_string(
-            &json!({"type":"multiparty_request", "version":crate::consts::version::PROTOCOL_VERSION, "data": request}),
-        )
+        match request {
+            MultiPartyEvaluationRequest::Standard(request) => {
+                serde_json::to_string(&MultiPartyRequestEnvelope::from(request.clone()))
+            }
+            MultiPartyEvaluationRequest::Rerun(request) => {
+                serde_json::to_string(&MultiPartyRerunRequestEnvelope::from(request.clone()))
+            }
+        }
     }
     fn parse_text(
         &self,
@@ -94,7 +104,7 @@ impl EvaluationMode for Mode {
 pub async fn run_evaluation(
     websocket: WebSocketConnection,
     provider: Arc<dyn ResponseProvider>,
-    request: MultiPartyRequest,
+    request: MultiPartyEvaluationRequest,
     progress: Option<mpsc::Sender<MultiPartyProgressIndicatorMessage>>,
 ) -> Result<MultiPartyResponse, EvaluationError> {
     engine::run_evaluation(websocket, provider, request, progress, Mode).await
@@ -146,12 +156,14 @@ mod tests {
         let result = run_evaluation(
             websocket,
             provider,
-            MultiPartyRequest {
-                test_case_groups: vec!["pack".into()],
-                max_concurrent_test_case_executions: 2,
-                threshold: 0.5,
-                max_turns: 7,
-            },
+            MultiPartyEvaluationRequest::Standard(
+                crate::protocol_types::multi_party::MultiPartyRequest {
+                    test_case_groups: vec!["pack".into()],
+                    max_concurrent_test_case_executions: 2,
+                    threshold: 0.5,
+                    max_turns: 7,
+                },
+            ),
             Some(tx),
         )
         .await
@@ -212,6 +224,54 @@ mod tests {
                 status: crate::tui::multiparty::ConversationOutcome::Error,
             }
         )));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn multiparty_rerun_sends_rerun_envelope_and_parses_response() {
+        let (websocket, server) = spawn_websocket_server(|socket| async move {
+            let (mut write, mut read) = socket.split();
+            let initial = recv_text_json(&mut read).await;
+            assert_eq!(initial["type"], "multiparty_rerun_request");
+            assert_eq!(initial["version"], crate::consts::version::PROTOCOL_VERSION);
+            assert_eq!(initial["data"]["test_result_ids"], json!([42, 43]));
+            assert_eq!(initial["data"]["threshold"], 0.75);
+            assert_eq!(initial["data"]["max_turns"], 9);
+            assert!(initial["data"].get("test_case_groups").is_none());
+            send_json(
+                &mut write,
+                json!({
+                    "type": "multiparty_response",
+                    "data": {
+                        "evaluation_id": 99,
+                        "total_passed": 0,
+                        "total_failed": 0,
+                        "total_errors": 0,
+                        "results": []
+                    }
+                }),
+            )
+            .await;
+        })
+        .await;
+        let result = run_evaluation(
+            websocket,
+            Arc::new(ControlledProvider::new(HashMap::new())),
+            MultiPartyEvaluationRequest::Rerun(
+                crate::protocol_types::multi_party::MultiPartyRerunRequest {
+                    selector: crate::protocol_types::common::RerunSelector::TestResultIds {
+                        test_result_ids: vec![42, 43],
+                    },
+                    max_concurrent_test_case_executions: 2,
+                    threshold: 0.75,
+                    max_turns: 9,
+                },
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.evaluation_id, 99);
         server.await.unwrap();
     }
 

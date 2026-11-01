@@ -18,6 +18,7 @@ pub enum EvaluationType {
     SingleTurnRerun,
     MultiTurn,
     MultiParty,
+    MultiPartyRerun,
     MultiTurnRerun,
 }
 
@@ -42,6 +43,10 @@ impl From<&crate::cli::EvaluationCommand> for EvaluationType {
                 }
             }
             crate::cli::EvaluationCommand::ReRun { rerun } => match rerun {
+                #[cfg(text_targets)]
+                crate::cli::ReRunEvaluationCommand::MultiParty { .. } => {
+                    EvaluationType::MultiPartyRerun
+                }
                 crate::cli::ReRunEvaluationCommand::SingleTurn { provider, .. } => {
                     if provider.is_voice() {
                         EvaluationType::SingleTurnVoiceRerun
