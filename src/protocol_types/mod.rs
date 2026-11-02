@@ -8,7 +8,7 @@ pub mod single_turn;
 #[cfg(any(text_targets, test))]
 pub use common::Role;
 pub use common::{CompletionError, CompletionRequest, CompletionResponse, ConversationId, Message};
-#[cfg(eval_targets)]
+#[cfg(text_targets)]
 pub use multi_party::MultiPartyRerunEvalRequest;
 pub use multi_turn::MultiTurnEvaluationRequest;
 #[cfg(eval_targets)]

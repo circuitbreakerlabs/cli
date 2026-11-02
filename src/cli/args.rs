@@ -1,10 +1,11 @@
 use super::headers::Headers;
+#[cfg(text_targets)]
+use crate::protocol_types::MultiPartyRerunEvalRequest;
 #[cfg(eval_targets)]
 use crate::protocol_types::SingleTurnRerunEvalRequest;
 #[cfg(eval_targets)]
 use crate::protocol_types::{
-    MultiPartyRerunEvalRequest, MultiTurnEvalRequest, MultiTurnRerunEvalRequest,
-    SingleTurnEvalRequest,
+    MultiTurnEvalRequest, MultiTurnRerunEvalRequest, SingleTurnEvalRequest,
 };
 #[cfg(feature = "custom")]
 use crate::response_provider::CustomProviderConfig;
