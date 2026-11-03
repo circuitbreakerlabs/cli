@@ -90,6 +90,35 @@ fn command_surface_matches_enabled_targets() {
 
 #[cfg(eval_targets)]
 #[test]
+fn multiparty_commands_require_text_targets() {
+    for path in [vec!["eval"], vec!["eval", "re-run"]] {
+        let mut args = path.clone();
+        args.push("--help");
+        let output = help(&args);
+        assert_eq!(
+            output
+                .lines()
+                .any(|line| line.split_whitespace().next() == Some("multi-party")),
+            cfg!(text_targets),
+            "{path:?}"
+        );
+
+        let mut args = path;
+        args.extend(["multi-party", "--help"]);
+        let output = cli(&args);
+        assert_eq!(output.status.success(), cfg!(text_targets));
+        if !cfg!(text_targets) {
+            assert_eq!(output.status.code(), Some(2));
+            assert!(
+                String::from_utf8_lossy(&output.stderr)
+                    .contains("unrecognized subcommand 'multi-party'")
+            );
+        }
+    }
+}
+
+#[cfg(eval_targets)]
+#[test]
 fn removed_voice_option_is_rejected_before_network_access() {
     let output = cli(&["eval", "multi-turn", "--voice"]);
     assert_eq!(output.status.code(), Some(2));

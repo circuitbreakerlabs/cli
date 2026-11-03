@@ -1,4 +1,6 @@
 use super::headers::Headers;
+#[cfg(text_targets)]
+use crate::protocol_types::MultiPartyRerunEvalRequest;
 #[cfg(eval_targets)]
 use crate::protocol_types::SingleTurnRerunEvalRequest;
 #[cfg(eval_targets)]
@@ -163,7 +165,7 @@ pub enum ApiSubcommand {
 #[derive(clap::Args, Debug)]
 #[command(group(
     ArgGroup::new("evaluation_type")
-        .args(["single_turn", "multi_turn"])
+        .args(["single_turn", "multi_turn", "multi_party"])
         .required(true)
 ))]
 pub struct ApiEvaluationsCommand {
@@ -174,6 +176,10 @@ pub struct ApiEvaluationsCommand {
     /// List historic multi-turn evaluation results
     #[arg(long = "multi-turn")]
     pub multi_turn: bool,
+
+    /// List historic multi-party evaluation results
+    #[arg(long = "multiparty", visible_alias = "multi-party")]
+    pub multi_party: bool,
 
     /// Maximum number of historic evaluation results to return
     #[arg(long, value_parser = clap::value_parser!(u16).range(1..=100))]
@@ -195,6 +201,15 @@ pub enum EvaluationCommand {
         request: SingleTurnEvalRequest,
     },
 
+    /// Run a multi-party pack evaluation with isolated conversations.
+    #[cfg(text_targets)]
+    MultiParty {
+        #[command(subcommand)]
+        provider: TextProviderCommand,
+        #[command(flatten)]
+        request: crate::protocol_types::multi_party::MultiPartyEvalRequest,
+    },
+
     /// Run multi-turn evaluation
     MultiTurn {
         #[command(subcommand)]
@@ -213,6 +228,15 @@ pub enum EvaluationCommand {
 #[cfg(eval_targets)]
 #[derive(Subcommand, Debug)]
 pub enum ReRunEvaluationCommand {
+    /// Re-run historic multi-party conversations
+    #[cfg(text_targets)]
+    MultiParty {
+        #[command(subcommand)]
+        provider: TextProviderCommand,
+        #[command(flatten)]
+        request: MultiPartyRerunEvalRequest,
+    },
+
     /// Re-run a historic single-turn evaluation result
     SingleTurn {
         #[command(subcommand)]
@@ -343,10 +367,9 @@ mod tests {
                     assert_eq!(request.maximum_iteration_layers, 2);
                     assert_eq!(request.test_case_groups, vec!["suicidal_ideation"]);
                 }
-                super::EvaluationCommand::MultiTurn { .. } => {
-                    panic!("expected single-turn command")
-                }
-                super::EvaluationCommand::ReRun { .. } => panic!("expected single-turn command"),
+                super::EvaluationCommand::MultiParty { .. }
+                | super::EvaluationCommand::MultiTurn { .. }
+                | super::EvaluationCommand::ReRun { .. } => panic!("expected single-turn command"),
             },
             _ => panic!("expected eval command"),
         }
@@ -544,10 +567,9 @@ mod tests {
                 super::EvaluationCommand::SingleTurn { request, .. } => {
                     assert_eq!(request.maximum_iteration_layers, 0);
                 }
-                super::EvaluationCommand::MultiTurn { .. } => {
-                    panic!("expected single-turn command")
-                }
-                super::EvaluationCommand::ReRun { .. } => panic!("expected single-turn command"),
+                super::EvaluationCommand::MultiParty { .. }
+                | super::EvaluationCommand::MultiTurn { .. }
+                | super::EvaluationCommand::ReRun { .. } => panic!("expected single-turn command"),
             },
             _ => panic!("expected eval command"),
         }
@@ -648,10 +670,9 @@ mod tests {
                     assert_eq!(request.max_turns, 4);
                     assert_eq!(request.test_case_groups, vec!["suicidal_ideation"]);
                 }
-                super::EvaluationCommand::SingleTurn { .. } => {
-                    panic!("expected multi-turn command")
-                }
-                super::EvaluationCommand::ReRun { .. } => panic!("expected multi-turn command"),
+                super::EvaluationCommand::MultiParty { .. }
+                | super::EvaluationCommand::SingleTurn { .. }
+                | super::EvaluationCommand::ReRun { .. } => panic!("expected multi-turn command"),
             },
             _ => panic!("expected eval command"),
         }
@@ -716,10 +737,9 @@ mod tests {
                 super::EvaluationCommand::MultiTurn { request, .. } => {
                     assert_eq!(request.max_turns, 100);
                 }
-                super::EvaluationCommand::SingleTurn { .. } => {
-                    panic!("expected multi-turn command")
-                }
-                super::EvaluationCommand::ReRun { .. } => panic!("expected multi-turn command"),
+                super::EvaluationCommand::MultiParty { .. }
+                | super::EvaluationCommand::SingleTurn { .. }
+                | super::EvaluationCommand::ReRun { .. } => panic!("expected multi-turn command"),
             },
             _ => panic!("expected multi-turn eval command"),
         }
@@ -854,11 +874,13 @@ mod tests {
                         assert_eq!(request.variations, 2);
                         assert_eq!(request.maximum_iteration_layers, 1);
                     }
-                    super::ReRunEvaluationCommand::MultiTurn { .. } => {
+                    super::ReRunEvaluationCommand::MultiTurn { .. }
+                    | super::ReRunEvaluationCommand::MultiParty { .. } => {
                         panic!("expected single-turn rerun command")
                     }
                 },
-                super::EvaluationCommand::SingleTurn { .. }
+                super::EvaluationCommand::MultiParty { .. }
+                | super::EvaluationCommand::SingleTurn { .. }
                 | super::EvaluationCommand::MultiTurn { .. } => panic!("expected rerun command"),
             },
             _ => panic!("expected eval command"),
@@ -964,11 +986,13 @@ mod tests {
                         assert!(request.test_result_ids.is_none());
                         assert_eq!(request.evaluation_id, Some(123));
                     }
-                    super::ReRunEvaluationCommand::MultiTurn { .. } => {
+                    super::ReRunEvaluationCommand::MultiTurn { .. }
+                    | super::ReRunEvaluationCommand::MultiParty { .. } => {
                         panic!("expected single-turn rerun command")
                     }
                 },
-                super::EvaluationCommand::SingleTurn { .. }
+                super::EvaluationCommand::MultiParty { .. }
+                | super::EvaluationCommand::SingleTurn { .. }
                 | super::EvaluationCommand::MultiTurn { .. } => panic!("expected rerun command"),
             },
             _ => panic!("expected eval command"),
@@ -1098,11 +1122,13 @@ mod tests {
                         assert!((request.threshold - 0.5).abs() < f32::EPSILON);
                         assert_eq!(request.max_turns, 4);
                     }
-                    super::ReRunEvaluationCommand::SingleTurn { .. } => {
+                    super::ReRunEvaluationCommand::SingleTurn { .. }
+                    | super::ReRunEvaluationCommand::MultiParty { .. } => {
                         panic!("expected multi-turn rerun command")
                     }
                 },
-                super::EvaluationCommand::SingleTurn { .. }
+                super::EvaluationCommand::MultiParty { .. }
+                | super::EvaluationCommand::SingleTurn { .. }
                 | super::EvaluationCommand::MultiTurn { .. } => panic!("expected rerun command"),
             },
             _ => panic!("expected eval command"),
@@ -1140,11 +1166,13 @@ mod tests {
                         assert!(request.test_result_ids.is_none());
                         assert_eq!(request.evaluation_id, Some(123));
                     }
-                    super::ReRunEvaluationCommand::SingleTurn { .. } => {
+                    super::ReRunEvaluationCommand::SingleTurn { .. }
+                    | super::ReRunEvaluationCommand::MultiParty { .. } => {
                         panic!("expected multi-turn rerun command")
                     }
                 },
-                super::EvaluationCommand::SingleTurn { .. }
+                super::EvaluationCommand::MultiParty { .. }
+                | super::EvaluationCommand::SingleTurn { .. }
                 | super::EvaluationCommand::MultiTurn { .. } => panic!("expected rerun command"),
             },
             _ => panic!("expected eval command"),
@@ -1411,6 +1439,55 @@ mod tests {
                 _ => panic!("expected api evaluations command"),
             },
             _ => panic!("expected api command"),
+        }
+    }
+
+    #[test]
+    fn parses_api_multiparty_history_with_pagination_and_json() {
+        for flag in ["--multiparty", "--multi-party"] {
+            let args = Args::try_parse_from([
+                "cbl",
+                "--cbl-api-key",
+                "key",
+                "api",
+                "evaluations",
+                flag,
+                "--limit",
+                "20",
+                "--offset",
+                "5",
+                "--json",
+            ])
+            .expect("multiparty history should parse");
+            args.validate().expect("history command should validate");
+            let Some(super::Command::Api(api)) = args.command else {
+                panic!("expected API command");
+            };
+            assert!(api.json);
+            let Some(super::ApiSubcommand::Evaluations(history)) = api.command else {
+                panic!("expected evaluation history");
+            };
+            assert!(history.multi_party);
+            assert!(!history.single_turn && !history.multi_turn);
+            assert_eq!(history.limit, Some(20));
+            assert_eq!(history.offset, Some(5));
+        }
+    }
+
+    #[test]
+    fn rejects_multiparty_history_with_other_evaluation_types() {
+        for flag in ["--single-turn", "--multi-turn"] {
+            let err = Args::try_parse_from([
+                "cbl",
+                "--cbl-api-key",
+                "key",
+                "api",
+                "evaluations",
+                "--multiparty",
+                flag,
+            ])
+            .expect_err("history types should conflict");
+            assert_eq!(err.kind(), ErrorKind::ArgumentConflict);
         }
     }
 

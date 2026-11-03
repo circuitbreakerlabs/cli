@@ -33,13 +33,13 @@ impl OpenAIProvider {
             protocol_types::Role::System => {
                 ChatCompletionRequestMessage::System(ChatCompletionRequestSystemMessage {
                     content: ChatCompletionRequestSystemMessageContent::Text(msg.content.clone()),
-                    name: None,
+                    name: msg.name.clone(),
                 })
             }
             protocol_types::Role::User => {
                 ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
                     content: ChatCompletionRequestUserMessageContent::Text(msg.content.clone()),
-                    name: None,
+                    name: msg.name.clone(),
                 })
             }
             protocol_types::Role::Assistant => {
@@ -47,7 +47,7 @@ impl OpenAIProvider {
                     content: Some(async_openai::types::chat::ChatCompletionRequestAssistantMessageContent::Text(
                         msg.content.clone(),
                     )),
-                    name: None,
+                    name: msg.name.clone(),
                     tool_calls: None,
                     refusal: None,
                     audio: None,
@@ -111,6 +111,7 @@ impl ProviderApi for OpenAIProvider {
 
         Ok(ProviderCompletion {
             message: protocol_types::Message {
+                name: None,
                 role: protocol_types::Role::Assistant,
                 content,
             },
@@ -142,6 +143,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn requests_preserve_optional_speaker_names_and_message_roles() {
+        let config =
+            Arguments::try_parse_from(["test", "--model", "model", "--api-key", "test-key"])
+                .unwrap()
+                .config;
+        let provider = OpenAIProvider::new(config);
+
+        for role in ["system", "user", "assistant"] {
+            for name in [None, Some("Alex")] {
+                let message: Message = serde_json::from_value(json!({
+                    "role": role, "content": "hello", "name": name,
+                }))
+                .unwrap();
+                let request = provider.build_request(&[message]).await.unwrap();
+                let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+                let sent = &body["messages"][0];
+
+                assert_eq!(sent["role"], role);
+                assert_eq!(sent["content"], "hello");
+                assert_eq!(sent.get("name"), name.map(|name| json!(name)).as_ref());
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn adapter_translates_requests_and_interprets_responses() {
         for (status, body) in [
             (429, "busy"),
@@ -170,6 +196,7 @@ mod tests {
             let api = OpenAIProvider::new(config);
             let request = api
                 .build_request(&[Message {
+                    name: None,
                     role: Role::User,
                     content: "hello".into(),
                 }])
@@ -265,6 +292,7 @@ mod tests {
     #[test]
     fn converts_system_message_to_openai_shape() {
         let message = Message {
+            name: None,
             role: Role::System,
             content: "system prompt".to_string(),
         };
@@ -286,6 +314,7 @@ mod tests {
     #[test]
     fn converts_user_message_to_openai_shape() {
         let message = Message {
+            name: None,
             role: Role::User,
             content: "hello".to_string(),
         };
@@ -307,6 +336,7 @@ mod tests {
     #[test]
     fn converts_assistant_message_to_openai_shape() {
         let message = Message {
+            name: None,
             role: Role::Assistant,
             content: "assistant reply".to_string(),
         };

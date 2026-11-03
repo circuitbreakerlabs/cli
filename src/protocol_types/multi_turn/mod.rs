@@ -4,7 +4,7 @@ pub use request::MultiTurnEvalRequest;
 pub use request::MultiTurnRerunEvalRequest;
 
 mod optional;
-mod request;
+pub(crate) mod request;
 mod response;
 
 use crate::protocol_types::common::{CompletionRequest, ConversationComplete, ConversationError};

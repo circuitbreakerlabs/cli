@@ -1,5 +1,6 @@
 mod engine;
 pub mod err;
+pub mod multiparty;
 pub mod multiturn;
 pub mod singleturn;
 #[cfg(test)]
@@ -16,6 +17,8 @@ pub enum EvaluationType {
     SingleTurn,
     SingleTurnRerun,
     MultiTurn,
+    MultiParty,
+    MultiPartyRerun,
     MultiTurnRerun,
 }
 
@@ -23,6 +26,8 @@ pub enum EvaluationType {
 impl From<&crate::cli::EvaluationCommand> for EvaluationType {
     fn from(cmd: &crate::cli::EvaluationCommand) -> Self {
         match cmd {
+            #[cfg(text_targets)]
+            crate::cli::EvaluationCommand::MultiParty { .. } => EvaluationType::MultiParty,
             crate::cli::EvaluationCommand::SingleTurn { provider, .. } => {
                 if provider.is_voice() {
                     EvaluationType::SingleTurnVoice
@@ -38,6 +43,10 @@ impl From<&crate::cli::EvaluationCommand> for EvaluationType {
                 }
             }
             crate::cli::EvaluationCommand::ReRun { rerun } => match rerun {
+                #[cfg(text_targets)]
+                crate::cli::ReRunEvaluationCommand::MultiParty { .. } => {
+                    EvaluationType::MultiPartyRerun
+                }
                 crate::cli::ReRunEvaluationCommand::SingleTurn { provider, .. } => {
                     if provider.is_voice() {
                         EvaluationType::SingleTurnVoiceRerun

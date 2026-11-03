@@ -1,4 +1,4 @@
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
 
 #[derive(Clone, Debug)]
@@ -10,10 +10,30 @@ pub enum WaitingFor {
 
 #[derive(Clone, Debug)]
 pub enum ConversationStatus {
+    Queued,
     Waiting(WaitingFor),
     Passed,
     Failed,
     Warning,
+}
+
+const PROGRESS_BAR_WIDTH: usize = 32;
+
+pub fn get_progress_bar_spans(current: usize, maximum: usize) -> Vec<Span<'static>> {
+    let filled = current
+        .min(maximum)
+        .saturating_mul(PROGRESS_BAR_WIDTH)
+        .checked_div(maximum)
+        .unwrap_or(0);
+    vec![
+        Span::raw("["),
+        Span::styled(
+            "=".repeat(filled),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" ".repeat(PROGRESS_BAR_WIDTH - filled)),
+        Span::raw("]"),
+    ]
 }
 
 pub const SPINNER_PHASE_SPREAD: usize = 4;
@@ -27,6 +47,7 @@ pub fn get_status_indicator_spans(
     elapsed_spinner_frames: usize,
 ) -> Vec<Span<'_>> {
     let (status_char, status_color) = match status {
+        ConversationStatus::Queued => ('·', Color::DarkGray),
         ConversationStatus::Waiting(waiting_for) => {
             let phase_offset = usize::try_from(conversation_id).unwrap_or(0) * SPINNER_PHASE_SPREAD;
             match waiting_for {

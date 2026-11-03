@@ -1,5 +1,7 @@
 mod common;
 pub mod err;
+#[cfg_attr(not(text_targets), allow(dead_code))]
+pub mod multiparty;
 pub mod multiturn;
 pub mod singleturn;
 

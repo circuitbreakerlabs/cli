@@ -177,6 +177,7 @@ mod tests {
             request_id: "req-1".to_string(),
             conversation_id: 12,
             messages: vec![protocol_types::Message {
+                name: None,
                 role: Role::User,
                 content: "hello".to_string(),
             }],

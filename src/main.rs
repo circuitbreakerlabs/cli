@@ -199,9 +199,11 @@ async fn run_evaluation(
     {
         let headers = cli_args.headers();
         let provider_command = match &evaluation {
+            cli::EvaluationCommand::MultiParty { provider, .. } => provider,
             cli::EvaluationCommand::SingleTurn { provider, .. }
             | cli::EvaluationCommand::MultiTurn { provider, .. } => provider.text(),
             cli::EvaluationCommand::ReRun { rerun } => match rerun {
+                cli::ReRunEvaluationCommand::MultiParty { provider, .. } => provider,
                 cli::ReRunEvaluationCommand::SingleTurn { provider, .. }
                 | cli::ReRunEvaluationCommand::MultiTurn { provider, .. } => provider.text(),
             },
@@ -230,6 +232,16 @@ async fn run_evaluation(
         .await?;
 
         match evaluation {
+            cli::EvaluationCommand::MultiParty { request, .. } => {
+                run_multi_party_evaluation(
+                    websocket,
+                    provider,
+                    request.into(),
+                    cli_args.log_mode,
+                    cli_args.output_file,
+                )
+                .await?;
+            }
             cli::EvaluationCommand::SingleTurn { request, .. } => {
                 run_single_turn_evaluation(
                     websocket,
@@ -251,6 +263,16 @@ async fn run_evaluation(
                 .await?;
             }
             cli::EvaluationCommand::ReRun { rerun } => match rerun {
+                cli::ReRunEvaluationCommand::MultiParty { request, .. } => {
+                    run_multi_party_evaluation(
+                        websocket,
+                        provider,
+                        request.into(),
+                        cli_args.log_mode,
+                        cli_args.output_file,
+                    )
+                    .await?;
+                }
                 cli::ReRunEvaluationCommand::SingleTurn { request, .. } => {
                     run_single_turn_evaluation(
                         websocket,
@@ -486,5 +508,60 @@ async fn run_voice_cli(
     });
     std::fs::write(&filename, json)?;
     print_success_message(log_mode, "multi-turn voice", &filename);
+    Ok(())
+}
+
+#[cfg(text_targets)]
+async fn run_multi_party_evaluation(
+    websocket: WebSocketConnection,
+    provider: Arc<dyn ResponseProvider>,
+    request: protocol_types::multi_party::MultiPartyEvaluationRequest,
+    log_mode: bool,
+    output_file: Option<PathBuf>,
+) -> Result<(), RunEvaluationError> {
+    let groups = request.test_case_groups().map(<[_]>::to_vec);
+    let rerun_selector = request.rerun_selector();
+    let (tx, rx) = tokio::sync::mpsc::channel(128);
+    let render = if log_mode {
+        None
+    } else {
+        Some(tokio::spawn(tui::multiparty::render_task(rx)))
+    };
+    let result = evaluations::multiparty::run_evaluation(
+        websocket,
+        provider,
+        request,
+        if log_mode { None } else { Some(tx) },
+    )
+    .await;
+    if let Some(render) = render {
+        let _ = render.await;
+    }
+    let result = result?;
+    let filename = output_file.unwrap_or_else(|| {
+        PathBuf::from(format!(
+            "circuit_breaker_labs_multi_party_evaluation_{}.json",
+            Local::now().format("%Y%m%d_%H%M%S")
+        ))
+    });
+    let json = if let Some(selector) = rerun_selector {
+        serialize_rerun_evaluation_output(&result, &selector)?
+    } else {
+        serialize_evaluation_output(
+            &result,
+            &groups.expect("standard evaluation includes test case groups"),
+        )?
+    };
+    std::fs::write(&filename, json)?;
+    print_success_message(log_mode, "multi-party", &filename);
+    if log_mode {
+        println!(
+            "Passed: {}, failed: {}, errors: {}",
+            result.total_passed, result.total_failed, result.total_errors
+        );
+    }
+    if result.total_errors > 0 {
+        return Err(EvaluationError::EpisodesFailed(result.total_errors).into());
+    }
     Ok(())
 }
