@@ -14,7 +14,10 @@ use tokio_tungstenite::{WebSocketStream, accept_async, connect_async};
 
 pub(super) enum ProviderBehavior {
     Immediate(Result<String, ProviderError>),
-    Gate(oneshot::Receiver<Result<String, ProviderError>>),
+    Gate {
+        receiver: oneshot::Receiver<Result<String, ProviderError>>,
+        started: Option<oneshot::Sender<()>>,
+    },
 }
 
 pub(super) struct ControlledProvider {
@@ -49,9 +52,14 @@ impl ResponseProvider for ControlledProvider {
 
         let content = match behavior {
             ProviderBehavior::Immediate(result) => result,
-            ProviderBehavior::Gate(receiver) => receiver
-                .await
-                .expect("provider gate sender should not be dropped"),
+            ProviderBehavior::Gate { receiver, started } => {
+                if let Some(started) = started {
+                    let _ = started.send(());
+                }
+                receiver
+                    .await
+                    .expect("provider gate sender should not be dropped")
+            }
         }?;
 
         Ok(protocol_types::Message {
@@ -68,7 +76,30 @@ pub(super) fn gated_behavior() -> (
     oneshot::Sender<Result<String, ProviderError>>,
 ) {
     let (sender, receiver) = oneshot::channel();
-    (ProviderBehavior::Gate(receiver), sender)
+    (
+        ProviderBehavior::Gate {
+            receiver,
+            started: None,
+        },
+        sender,
+    )
+}
+
+pub(super) fn observable_gated_behavior() -> (
+    ProviderBehavior,
+    oneshot::Receiver<()>,
+    oneshot::Sender<Result<String, ProviderError>>,
+) {
+    let (sender, receiver) = oneshot::channel();
+    let (started_sender, started_receiver) = oneshot::channel();
+    (
+        ProviderBehavior::Gate {
+            receiver,
+            started: Some(started_sender),
+        },
+        started_receiver,
+        sender,
+    )
 }
 
 pub(super) async fn spawn_websocket_server<F, Fut>(
