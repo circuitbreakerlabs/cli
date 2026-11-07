@@ -90,9 +90,6 @@ pub struct MultiTurnRerunEvalRequest {
 /// Payload for `MultiTurnRequestEnvelope` messages (Client -> Server).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MultiTurnRequest {
-    /// Maximum concurrent test case executions per evaluation (1-30).
-    #[serde(default = "default_max_concurrent_test_case_executions")]
-    pub max_concurrent_test_case_executions: u8,
     /// Responses below this safety score threshold will fail
     pub threshold: f32,
     /// Maximum number of turns in the conversation. Should be a multiple of two.
@@ -103,9 +100,6 @@ pub struct MultiTurnRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MultiTurnRerunRequest {
-    /// Maximum concurrent test case executions per evaluation (1-30).
-    #[serde(default = "default_max_concurrent_test_case_executions")]
-    pub max_concurrent_test_case_executions: u8,
     #[serde(flatten)]
     pub selector: RerunSelector,
     pub threshold: f32,
@@ -154,7 +148,6 @@ impl MultiTurnEvaluationRequest {
 impl From<MultiTurnEvalRequest> for MultiTurnEvaluationRequest {
     fn from(request: MultiTurnEvalRequest) -> Self {
         MultiTurnEvaluationRequest::Standard(MultiTurnRequest {
-            max_concurrent_test_case_executions: request.max_concurrent_test_case_executions,
             threshold: request.threshold,
             max_turns: request.max_turns,
             test_case_groups: request.test_case_groups,
@@ -166,7 +159,6 @@ impl From<MultiTurnRerunEvalRequest> for MultiTurnEvaluationRequest {
     fn from(request: MultiTurnRerunEvalRequest) -> Self {
         MultiTurnEvaluationRequest::Rerun(MultiTurnRerunRequest {
             selector: RerunSelector::from_parts(request.test_result_ids, request.evaluation_id),
-            max_concurrent_test_case_executions: request.max_concurrent_test_case_executions,
             threshold: request.threshold,
             max_turns: request.max_turns,
         })
@@ -224,7 +216,6 @@ mod tests {
     #[test]
     fn multi_turn_request_envelope_serializes_to_protocol_shape() {
         let envelope = MultiTurnRequestEnvelope::from(MultiTurnRequest {
-            max_concurrent_test_case_executions: 7,
             threshold: 0.5,
             max_turns: 6,
             test_case_groups: vec!["suicidal_ideation".to_string(), "custom_group".to_string()],
@@ -238,7 +229,6 @@ mod tests {
                 "version": crate::consts::version::PROTOCOL_VERSION,
                 "type": "multi_turn_request",
                 "data": {
-                    "max_concurrent_test_case_executions": 7,
                     "threshold": 0.5,
                     "max_turns": 6,
                     "test_case_groups": [
@@ -256,7 +246,6 @@ mod tests {
             selector: crate::protocol_types::common::RerunSelector::TestResultIds {
                 test_result_ids: vec![42, 43],
             },
-            max_concurrent_test_case_executions: 7,
             threshold: 0.5,
             max_turns: 6,
         });
@@ -270,7 +259,6 @@ mod tests {
                 "type": "multi_turn_rerun_request",
                 "data": {
                     "test_result_ids": [42, 43],
-                    "max_concurrent_test_case_executions": 7,
                     "threshold": 0.5,
                     "max_turns": 6
                 }
@@ -284,7 +272,6 @@ mod tests {
             selector: crate::protocol_types::common::RerunSelector::EvaluationId {
                 evaluation_id: 123,
             },
-            max_concurrent_test_case_executions: 7,
             threshold: 0.5,
             max_turns: 6,
         });
@@ -298,7 +285,6 @@ mod tests {
                 "type": "multi_turn_rerun_request",
                 "data": {
                     "evaluation_id": 123,
-                    "max_concurrent_test_case_executions": 7,
                     "threshold": 0.5,
                     "max_turns": 6
                 }

@@ -55,7 +55,6 @@ pub struct MultiPartyRerunEvalRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MultiPartyRequest {
     pub test_case_groups: Vec<String>,
-    pub max_concurrent_test_case_executions: u8,
     pub threshold: f32,
     pub max_turns: u8,
 }
@@ -64,7 +63,6 @@ impl From<MultiPartyEvalRequest> for MultiPartyRequest {
     fn from(request: MultiPartyEvalRequest) -> Self {
         Self {
             test_case_groups: request.test_case_groups,
-            max_concurrent_test_case_executions: request.max_concurrent_test_case_executions,
             threshold: request.threshold,
             max_turns: request.max_turns,
         }
@@ -75,7 +73,6 @@ impl From<MultiPartyEvalRequest> for MultiPartyRequest {
 pub struct MultiPartyRerunRequest {
     #[serde(flatten)]
     pub selector: RerunSelector,
-    pub max_concurrent_test_case_executions: u8,
     pub threshold: f32,
     pub max_turns: u8,
 }
@@ -112,7 +109,6 @@ impl From<MultiPartyRerunEvalRequest> for MultiPartyEvaluationRequest {
     fn from(request: MultiPartyRerunEvalRequest) -> Self {
         MultiPartyEvaluationRequest::Rerun(MultiPartyRerunRequest {
             selector: RerunSelector::from_parts(request.test_result_ids, request.evaluation_id),
-            max_concurrent_test_case_executions: request.max_concurrent_test_case_executions,
             threshold: request.threshold,
             max_turns: request.max_turns,
         })
@@ -194,7 +190,6 @@ mod tests {
             serde_json::to_value(request).unwrap(),
             serde_json::json!({
                 "test_case_groups": ["a", "b"],
-                "max_concurrent_test_case_executions": 30,
                 "threshold": 0.5,
                 "max_turns": 7,
             })
@@ -266,7 +261,6 @@ mod tests {
                 "type": "multiparty_rerun_request",
                 "data": {
                     "test_result_ids": [42, 43],
-                    "max_concurrent_test_case_executions": 30,
                     "threshold": 0.5,
                     "max_turns": 7
                 }
