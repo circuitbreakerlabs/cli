@@ -105,9 +105,18 @@ pub async fn run_evaluation(
     websocket: WebSocketConnection,
     provider: Arc<dyn ResponseProvider>,
     request: MultiPartyEvaluationRequest,
+    max_concurrent_test_case_executions: u8,
     progress: Option<mpsc::Sender<MultiPartyProgressIndicatorMessage>>,
 ) -> Result<MultiPartyResponse, EvaluationError> {
-    engine::run_evaluation(websocket, provider, request, progress, Mode).await
+    engine::run_evaluation(
+        websocket,
+        provider,
+        request,
+        max_concurrent_test_case_executions,
+        progress,
+        Mode,
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -126,7 +135,11 @@ mod tests {
             let (mut write, mut read) = socket.split();
             let initial = recv_text_json(&mut read).await;
             assert_eq!(initial["data"]["test_case_groups"], json!(["pack"]));
-            assert_eq!(initial["data"]["max_concurrent_test_case_executions"], 2);
+            assert!(
+                initial["data"]
+                    .get("max_concurrent_test_case_executions")
+                    .is_none()
+            );
             assert!(initial["data"].get("capture_trace").is_none());
             send_json(&mut write, json!({"type":"multiparty_evaluation_start","data":{"conversation_ids":[1,2],"max_turns":7}})).await;
             for id in [1, 2] {
@@ -160,11 +173,11 @@ mod tests {
             MultiPartyEvaluationRequest::Standard(
                 crate::protocol_types::multi_party::MultiPartyRequest {
                     test_case_groups: vec!["pack".into()],
-                    max_concurrent_test_case_executions: 2,
                     threshold: 0.5,
                     max_turns: 7,
                 },
             ),
+            2,
             Some(tx),
         )
         .await
@@ -263,11 +276,11 @@ mod tests {
                     selector: crate::protocol_types::common::RerunSelector::TestResultIds {
                         test_result_ids: vec![42, 43],
                     },
-                    max_concurrent_test_case_executions: 2,
                     threshold: 0.75,
                     max_turns: 9,
                 },
             ),
+            2,
             None,
         )
         .await

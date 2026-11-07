@@ -134,6 +134,7 @@ pub async fn run_evaluation(
     websocket_connection: WebSocketConnection,
     provider: Arc<dyn ResponseProvider>,
     request: MultiTurnEvaluationRequest,
+    max_concurrent_test_case_executions: u8,
     progress_indicator: Option<mpsc::Sender<MultiTurnProgressIndicatorMessage>>,
 ) -> Result<MultiTurnResponse, EvaluationError> {
     let mode = MultiTurnMode {
@@ -144,6 +145,7 @@ pub async fn run_evaluation(
         websocket_connection,
         provider,
         request,
+        max_concurrent_test_case_executions,
         progress_indicator,
         mode,
     )
@@ -319,11 +321,11 @@ mod tests {
             websocket,
             provider,
             MultiTurnEvaluationRequest::Standard(MultiTurnRequest {
-                max_concurrent_test_case_executions: 7,
                 threshold: 0.5,
                 max_turns: 4,
                 test_case_groups: vec!["suicidal_ideation".to_string()],
             }),
+            7,
             None,
         )
         .await
@@ -349,9 +351,10 @@ mod tests {
             assert_eq!(initial_request["type"], "multi_turn_rerun_request");
             assert_eq!(initial_request["data"]["test_result_ids"], json!([42, 43]));
             assert_eq!(initial_request["data"]["max_turns"], 4);
-            assert_eq!(
-                initial_request["data"]["max_concurrent_test_case_executions"],
-                7
+            assert!(
+                initial_request["data"]
+                    .get("max_concurrent_test_case_executions")
+                    .is_none()
             );
 
             send_json(
@@ -374,13 +377,13 @@ mod tests {
             websocket,
             provider,
             MultiTurnEvaluationRequest::Rerun(MultiTurnRerunRequest {
-                max_concurrent_test_case_executions: 7,
                 selector: crate::protocol_types::common::RerunSelector::TestResultIds {
                     test_result_ids: vec![42, 43],
                 },
                 threshold: 0.5,
                 max_turns: 4,
             }),
+            7,
             None,
         )
         .await
@@ -435,11 +438,11 @@ mod tests {
             websocket,
             provider,
             MultiTurnEvaluationRequest::Standard(MultiTurnRequest {
-                max_concurrent_test_case_executions: 7,
                 threshold: 0.5,
                 max_turns: 4,
                 test_case_groups: vec!["suicidal_ideation".to_string()],
             }),
+            7,
             None,
         )
         .await
