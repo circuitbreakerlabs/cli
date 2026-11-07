@@ -1,4 +1,5 @@
 use super::EvaluationError;
+use crate::execution_queue::ExecutionQueue;
 use crate::protocol_types::common::{CompletionErrorEnvelope, CompletionResponseEnvelope};
 use crate::protocol_types::{self};
 use crate::response_provider::ResponseProvider;
@@ -165,6 +166,7 @@ pub(super) async fn run_evaluation<M>(
     websocket_connection: WebSocketConnection,
     provider: Arc<dyn ResponseProvider>,
     request: M::Request,
+    max_concurrent_test_case_executions: u8,
     progress_indicator: Option<mpsc::Sender<M::ProgressMessage>>,
     mode: M,
 ) -> Result<M::FinalResponse, EvaluationError>
@@ -177,6 +179,7 @@ where
         .await?;
 
     let mut completion_tasks = JoinSet::<CompletionTaskOutput<M::ProgressMessage>>::new();
+    let mut completion_queue = ExecutionQueue::new(max_concurrent_test_case_executions);
     let progress_indicator_ref = progress_indicator.as_ref();
 
     let session_result = async {
@@ -187,6 +190,13 @@ where
                         let output = join_result?;
                         emit_progress(progress_indicator_ref, output.progress).await?;
                         send_outbound(&mut write, OutboundEvent::Protocol(output.outbound)).await?;
+                        start_queued_completions(
+                            &mut completion_queue,
+                            &mut completion_tasks,
+                            provider.clone(),
+                            &mode,
+                            progress_indicator_ref,
+                        ).await?;
                     }
                 }
                 message = read.next() => {
@@ -206,6 +216,7 @@ where
                                 provider.clone(),
                                 progress_indicator_ref,
                                 &mut completion_tasks,
+                                &mut completion_queue,
                             )
                             .await?
                             {
@@ -263,19 +274,22 @@ async fn handle_text_message<M>(
     provider: Arc<dyn ResponseProvider>,
     progress_indicator: Option<&mpsc::Sender<M::ProgressMessage>>,
     completion_tasks: &mut JoinSet<CompletionTaskOutput<M::ProgressMessage>>,
+    completion_queue: &mut ExecutionQueue<protocol_types::CompletionRequest>,
 ) -> Result<Option<M::FinalResponse>, EvaluationError>
 where
     M: EvaluationMode,
 {
     match mode.parse_text(&text) {
         Ok(ParsedIncoming::CompletionRequest(request)) => {
-            emit_progress(
+            completion_queue.push(request);
+            start_queued_completions(
+                completion_queue,
+                completion_tasks,
+                provider,
+                mode,
                 progress_indicator,
-                mode.progress_on_completion_start(&request),
             )
             .await?;
-
-            completion_tasks.spawn(execute_completion_request(request, provider, mode.clone()));
             Ok(None)
         }
         Ok(ParsedIncoming::FinalResponse(response)) => {
@@ -303,6 +317,30 @@ where
             Err(EvaluationError::WebSocketClosed(reason))
         }
     }
+}
+
+async fn start_queued_completions<M: EvaluationMode>(
+    completion_queue: &mut ExecutionQueue<protocol_types::CompletionRequest>,
+    completion_tasks: &mut JoinSet<CompletionTaskOutput<M::ProgressMessage>>,
+    provider: Arc<dyn ResponseProvider>,
+    mode: &M,
+    progress_indicator: Option<&mpsc::Sender<M::ProgressMessage>>,
+) -> Result<(), EvaluationError> {
+    while let Some(admitted) = completion_queue.take_ready() {
+        emit_progress(
+            progress_indicator,
+            mode.progress_on_completion_start(&admitted.item),
+        )
+        .await?;
+
+        let provider = provider.clone();
+        let mode = mode.clone();
+        completion_tasks.spawn(async move {
+            let _permit = admitted.permit;
+            execute_completion_request(admitted.item, provider, mode).await
+        });
+    }
+    Ok(())
 }
 
 async fn emit_progress<ProgressMessage>(
@@ -728,7 +766,7 @@ mod tests {
         .await;
         let response = tokio::time::timeout(
             std::time::Duration::from_secs(2),
-            super::run_evaluation(websocket, provider.clone(), (), None, TestMode),
+            super::run_evaluation(websocket, provider.clone(), (), 30, None, TestMode),
         )
         .await
         .expect("evaluation must not wait for retry on shutdown")
