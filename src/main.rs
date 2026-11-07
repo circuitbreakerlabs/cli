@@ -7,6 +7,8 @@ mod consts;
 mod evaluation_output;
 #[cfg_attr(not(text_targets), allow(dead_code))]
 mod evaluations;
+#[cfg_attr(not(text_targets), allow(dead_code))]
+mod execution_queue;
 mod http_api;
 mod protocol_types;
 #[cfg_attr(not(text_targets), allow(dead_code))]
@@ -208,18 +210,22 @@ async fn run_evaluation(
                 | cli::ReRunEvaluationCommand::MultiTurn { provider, .. } => provider.text(),
             },
         };
+        let max_concurrent_test_case_executions =
+            provider_command.max_concurrent_test_case_executions();
 
         let api: Box<dyn ProviderApi> = match provider_command {
             #[cfg(feature = "ollama")]
-            cli::TextProviderCommand::Ollama(config) => {
+            cli::TextProviderCommand::Ollama { config, .. } => {
                 Box::new(OllamaProvider::new(config.clone())?)
             }
             #[cfg(feature = "openai")]
-            cli::TextProviderCommand::OpenAI(config) => {
+            cli::TextProviderCommand::OpenAI { config, .. } => {
                 Box::new(OpenAIProvider::new(config.clone()))
             }
             #[cfg(feature = "custom")]
-            cli::TextProviderCommand::Custom(config) => Box::new(CustomProvider::new(config)?),
+            cli::TextProviderCommand::Custom { config, .. } => {
+                Box::new(CustomProvider::new(config)?)
+            }
         };
 
         let provider: Arc<dyn ResponseProvider> =
@@ -237,6 +243,7 @@ async fn run_evaluation(
                     websocket,
                     provider,
                     request.into(),
+                    max_concurrent_test_case_executions,
                     cli_args.log_mode,
                     cli_args.output_file,
                 )
@@ -247,6 +254,7 @@ async fn run_evaluation(
                     websocket,
                     provider,
                     request.into(),
+                    max_concurrent_test_case_executions,
                     cli_args.log_mode,
                     cli_args.output_file,
                 )
@@ -257,6 +265,7 @@ async fn run_evaluation(
                     websocket,
                     provider,
                     request.into(),
+                    max_concurrent_test_case_executions,
                     cli_args.log_mode,
                     cli_args.output_file,
                 )
@@ -268,6 +277,7 @@ async fn run_evaluation(
                         websocket,
                         provider,
                         request.into(),
+                        max_concurrent_test_case_executions,
                         cli_args.log_mode,
                         cli_args.output_file,
                     )
@@ -278,6 +288,7 @@ async fn run_evaluation(
                         websocket,
                         provider,
                         request.into(),
+                        max_concurrent_test_case_executions,
                         cli_args.log_mode,
                         cli_args.output_file,
                     )
@@ -288,6 +299,7 @@ async fn run_evaluation(
                         websocket,
                         provider,
                         request.into(),
+                        max_concurrent_test_case_executions,
                         cli_args.log_mode,
                         cli_args.output_file,
                     )
@@ -305,6 +317,7 @@ async fn run_single_turn_evaluation(
     websocket: WebSocketConnection,
     provider: Arc<dyn ResponseProvider>,
     request: SingleTurnEvaluationRequest,
+    max_concurrent_test_case_executions: u8,
     log_mode: bool,
     output_file: Option<PathBuf>,
 ) -> Result<(), RunEvaluationError> {
@@ -312,13 +325,26 @@ async fn run_single_turn_evaluation(
     let rerun_selector = request.rerun_selector();
     let maximum_iteration_layers = request.maximum_iteration_layers();
     let result = if log_mode {
-        evaluations::singleturn::run_evaluation(websocket, provider, request, None).await?
+        evaluations::singleturn::run_evaluation(
+            websocket,
+            provider,
+            request,
+            max_concurrent_test_case_executions,
+            None,
+        )
+        .await?
     } else {
         let (tx, rx) = tokio::sync::mpsc::channel::<SingleTurnProgressIndicatorMessage>(128);
         let render_handle = tokio::spawn(singleturn::render_task(rx, maximum_iteration_layers));
 
-        let result =
-            evaluations::singleturn::run_evaluation(websocket, provider, request, Some(tx)).await?;
+        let result = evaluations::singleturn::run_evaluation(
+            websocket,
+            provider,
+            request,
+            max_concurrent_test_case_executions,
+            Some(tx),
+        )
+        .await?;
 
         let _ = render_handle.await;
         result
@@ -352,19 +378,33 @@ async fn run_multi_turn_evaluation(
     websocket: WebSocketConnection,
     provider: Arc<dyn ResponseProvider>,
     request: MultiTurnEvaluationRequest,
+    max_concurrent_test_case_executions: u8,
     log_mode: bool,
     output_file: Option<PathBuf>,
 ) -> Result<(), RunEvaluationError> {
     let test_case_groups = request.test_case_groups().map(<[_]>::to_vec);
     let rerun_selector = request.rerun_selector();
     let result = if log_mode {
-        evaluations::multiturn::run_evaluation(websocket, provider, request, None).await?
+        evaluations::multiturn::run_evaluation(
+            websocket,
+            provider,
+            request,
+            max_concurrent_test_case_executions,
+            None,
+        )
+        .await?
     } else {
         let (tx, rx) = tokio::sync::mpsc::channel::<MultiTurnProgressIndicatorMessage>(128);
         let render_handle = tokio::spawn(multiturn::render_task(rx));
 
-        let result =
-            evaluations::multiturn::run_evaluation(websocket, provider, request, Some(tx)).await?;
+        let result = evaluations::multiturn::run_evaluation(
+            websocket,
+            provider,
+            request,
+            max_concurrent_test_case_executions,
+            Some(tx),
+        )
+        .await?;
 
         let _ = render_handle.await;
         result
@@ -516,6 +556,7 @@ async fn run_multi_party_evaluation(
     websocket: WebSocketConnection,
     provider: Arc<dyn ResponseProvider>,
     request: protocol_types::multi_party::MultiPartyEvaluationRequest,
+    max_concurrent_test_case_executions: u8,
     log_mode: bool,
     output_file: Option<PathBuf>,
 ) -> Result<(), RunEvaluationError> {
@@ -531,6 +572,7 @@ async fn run_multi_party_evaluation(
         websocket,
         provider,
         request,
+        max_concurrent_test_case_executions,
         if log_mode { None } else { Some(tx) },
     )
     .await;

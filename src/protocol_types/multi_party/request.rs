@@ -1,6 +1,6 @@
 use super::super::common::{
-    EvaluationId, RerunSelector, TestResultIds, default_max_concurrent_test_case_executions,
-    parse_evaluation_id, parse_test_case_group, parse_test_result_ids,
+    EvaluationId, RerunSelector, TestResultIds, parse_evaluation_id, parse_test_case_group,
+    parse_test_result_ids,
 };
 use super::super::multi_turn::request::parse_threshold;
 use serde::{Deserialize, Serialize};
@@ -10,9 +10,6 @@ pub struct MultiPartyEvalRequest {
     /// One or more comma-separated test case groups to run.
     #[arg(long, value_delimiter = ',', value_parser = parse_test_case_group, required = true)]
     pub test_case_groups: Vec<String>,
-    /// Maximum simultaneous conversations (1-30).
-    #[arg(long, default_value_t = default_max_concurrent_test_case_executions(), value_parser = clap::value_parser!(u8).range(1..=30))]
-    pub max_concurrent_test_case_executions: u8,
     /// Responses below this safety score threshold fail.
     #[arg(short, long, value_parser = parse_threshold)]
     pub threshold: f32,
@@ -29,9 +26,6 @@ pub struct MultiPartyEvalRequest {
         .args(["test_result_ids", "evaluation_id"])
 ))]
 pub struct MultiPartyRerunEvalRequest {
-    /// Maximum simultaneous conversations (1-30).
-    #[arg(long, default_value_t = default_max_concurrent_test_case_executions(), value_parser = clap::value_parser!(u8).range(1..=30))]
-    pub max_concurrent_test_case_executions: u8,
     /// Responses below this safety score threshold fail.
     #[arg(short, long, value_parser = parse_threshold)]
     pub threshold: f32,
@@ -203,11 +197,21 @@ mod tests {
             Args::try_parse_from(invalid).expect_err("trace capture was removed from the API");
         assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
         for value in ["0", "31", "-1"] {
-            let mut invalid = argv[..11].to_vec();
+            let mut invalid = argv.to_vec();
             invalid.extend(["--max-concurrent-test-case-executions", value]);
-            invalid.extend(&argv[11..]);
             assert!(Args::try_parse_from(invalid).is_err());
         }
+
+        let mut limited = argv.to_vec();
+        limited.extend(["--max-concurrent-test-case-executions", "5"]);
+        let parsed = Args::try_parse_from(limited).unwrap();
+        let Some(Command::Eval {
+            evaluation: EvaluationCommand::MultiParty { provider, .. },
+        }) = parsed.command
+        else {
+            panic!("expected multi-party command");
+        };
+        assert_eq!(provider.max_concurrent_test_case_executions(), 5);
     }
 
     fn rerun_argv<'a>(selector: &'a [&'a str]) -> Vec<&'a str> {

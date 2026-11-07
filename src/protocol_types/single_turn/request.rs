@@ -1,9 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::super::common::{
-    EvaluationId, RerunSelector, TestCaseGroup, TestResultIds,
-    default_max_concurrent_test_case_executions, parse_evaluation_id, parse_test_case_group,
-    parse_test_result_ids,
+    EvaluationId, RerunSelector, TestCaseGroup, TestResultIds, parse_evaluation_id,
+    parse_test_case_group, parse_test_result_ids,
 };
 
 pub(crate) fn parse_threshold(value: &str) -> Result<f32, String> {
@@ -47,9 +46,6 @@ pub(crate) fn parse_maximum_iteration_layers(value: &str) -> Result<i32, String>
 
 #[derive(Debug, Clone, clap::Args)]
 pub struct SingleTurnEvalRequest {
-    /// Maximum concurrent test case executions (1-30)
-    #[arg(long, default_value_t = default_max_concurrent_test_case_executions(), value_parser = clap::value_parser!(u8).range(1..=30), allow_hyphen_values = true)]
-    pub max_concurrent_test_case_executions: u8,
     /// Responses below this safety score threshold will fail
     #[arg(short, long, value_parser = parse_threshold, allow_hyphen_values = true)]
     pub threshold: f32,
@@ -77,9 +73,6 @@ pub struct SingleTurnEvalRequest {
         .args(["test_result_ids", "evaluation_id"])
 ))]
 pub struct SingleTurnRerunEvalRequest {
-    /// Maximum concurrent test case executions (1-30)
-    #[arg(long, default_value_t = default_max_concurrent_test_case_executions(), value_parser = clap::value_parser!(u8).range(1..=30), allow_hyphen_values = true)]
-    pub max_concurrent_test_case_executions: u8,
     /// Responses below this safety score threshold will fail
     #[arg(short, long, value_parser = parse_threshold, allow_hyphen_values = true)]
     pub threshold: f32,

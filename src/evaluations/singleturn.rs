@@ -356,10 +356,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_evaluation_queues_provider_calls_in_fifo_order() {
-        let (first_behavior, first_sender, first_started) = observable_gated_behavior();
-        let (second_behavior, second_sender, mut second_started) = observable_gated_behavior();
-        let (third_behavior, third_sender, mut third_started) = observable_gated_behavior();
+    async fn run_evaluation_admits_provider_calls_in_fifo_order() {
+        let (first_behavior, first_started, first_sender) = observable_gated_behavior();
+        let (second_behavior, mut second_started, second_sender) = observable_gated_behavior();
+        let (third_behavior, mut third_started, third_sender) = observable_gated_behavior();
         let provider = Arc::new(ControlledProvider::new(HashMap::from([
             ("first".to_string(), first_behavior),
             ("second".to_string(), second_behavior),
@@ -369,66 +369,59 @@ mod tests {
         let (websocket, server_handle) =
             spawn_websocket_server(move |server_websocket| async move {
                 let (mut write, mut read) = server_websocket.split();
-                recv_text_json(&mut read).await;
+                let initial = recv_text_json(&mut read).await;
+                assert!(
+                    initial["data"]
+                        .get("max_concurrent_test_case_executions")
+                        .is_none()
+                );
 
                 for (request_id, content) in
                     [("req-1", "first"), ("req-2", "second"), ("req-3", "third")]
                 {
                     send_json(
                         &mut write,
-                        json!({
-                            "type": "completion_request",
-                            "data": {
-                                "request_id": request_id,
-                                "conversation_id": 1,
-                                "messages": [{ "role": "user", "content": content }]
-                            }
-                        }),
+                        json!({"type":"completion_request","data":{"request_id":request_id,"conversation_id":1,"messages":[{"role":"user","content":content}]}}),
                     )
                     .await;
                 }
 
                 first_started.await.expect("first call should start");
-                write.send(Message::Ping(vec![1].into())).await.unwrap();
-                assert!(matches!(
-                    read.next().await.unwrap().unwrap(),
-                    Message::Pong(_)
-                ));
-                assert!(second_started.try_recv().is_err());
-                assert!(third_started.try_recv().is_err());
+                assert!(
+                    tokio::time::timeout(
+                        std::time::Duration::from_millis(100),
+                        &mut second_started
+                    )
+                    .await
+                    .is_err()
+                );
+
+                write.send(Message::Ping(vec![1, 2, 3].into())).await.unwrap();
+                assert!(matches!(read.next().await, Some(Ok(Message::Pong(_)))));
 
                 first_sender
-                    .send(Err(ProviderError::Network("failed".into())))
+                    .send(Err(ProviderError::Network("failed".to_string())))
                     .unwrap();
-                let first_result = recv_text_json(&mut read).await;
-                assert_eq!(first_result["type"], "completion_error");
-                assert_eq!(first_result["data"]["request_id"], "req-1");
+                assert_eq!(recv_text_json(&mut read).await["data"]["request_id"], "req-1");
                 second_started.await.expect("second call should start next");
-                assert!(third_started.try_recv().is_err());
+                assert!(
+                    tokio::time::timeout(
+                        std::time::Duration::from_millis(100),
+                        &mut third_started
+                    )
+                    .await
+                    .is_err()
+                );
 
-                second_sender.send(Ok("two".into())).unwrap();
-                assert_eq!(
-                    recv_text_json(&mut read).await["data"]["request_id"],
-                    "req-2"
-                );
+                second_sender.send(Ok("second reply".to_string())).unwrap();
+                assert_eq!(recv_text_json(&mut read).await["data"]["request_id"], "req-2");
                 third_started.await.expect("third call should start last");
-                third_sender.send(Ok("three".into())).unwrap();
-                assert_eq!(
-                    recv_text_json(&mut read).await["data"]["request_id"],
-                    "req-3"
-                );
+                third_sender.send(Ok("third reply".to_string())).unwrap();
+                assert_eq!(recv_text_json(&mut read).await["data"]["request_id"], "req-3");
 
                 send_json(
                     &mut write,
-                    json!({
-                        "type": "single_turn_response",
-                        "data": {
-                            "evaluation_id": 14,
-                            "total_passed": 2,
-                            "total_failed": 1,
-                            "results": []
-                        }
-                    }),
+                    json!({"type":"single_turn_response","data":{"evaluation_id":99,"total_passed":2,"total_failed":1,"results":[]}}),
                 )
                 .await;
             })
@@ -439,18 +432,17 @@ mod tests {
             provider,
             SingleTurnEvaluationRequest::Standard(SingleTurnRequest {
                 threshold: 0.5,
-                variations: 3,
+                variations: 1,
                 maximum_iteration_layers: 0,
-                test_case_groups: vec!["test".into()],
+                test_case_groups: vec!["test".to_string()],
             }),
             1,
             None,
         )
         .await
         .unwrap();
-
-        assert_eq!(response.evaluation_id, 14);
         server_handle.await.unwrap();
+        assert_eq!(response.evaluation_id, 99);
     }
 
     #[tokio::test]

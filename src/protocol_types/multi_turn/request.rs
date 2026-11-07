@@ -1,7 +1,6 @@
 use super::super::common::{
-    EvaluationId, RerunSelector, TestCaseGroup, TestResultIds,
-    default_max_concurrent_test_case_executions, parse_evaluation_id, parse_test_case_group,
-    parse_test_result_ids,
+    EvaluationId, RerunSelector, TestCaseGroup, TestResultIds, parse_evaluation_id,
+    parse_test_case_group, parse_test_result_ids,
 };
 use serde::{Deserialize, Serialize};
 
@@ -33,9 +32,6 @@ pub(crate) fn parse_even_turn_count(value: &str) -> Result<usize, String> {
 
 #[derive(Debug, Clone, clap::Args)]
 pub struct MultiTurnEvalRequest {
-    /// Maximum concurrent test case executions (1-30)
-    #[arg(long, default_value_t = default_max_concurrent_test_case_executions(), value_parser = clap::value_parser!(u8).range(1..=30), allow_hyphen_values = true)]
-    pub max_concurrent_test_case_executions: u8,
     /// Responses below this safety score threshold will fail
     #[arg(short, long, value_parser = parse_threshold, allow_hyphen_values = true)]
     pub threshold: f32,
@@ -60,9 +56,6 @@ pub struct MultiTurnEvalRequest {
         .args(["test_result_ids", "evaluation_id"])
 ))]
 pub struct MultiTurnRerunEvalRequest {
-    /// Maximum concurrent test case executions (1-30)
-    #[arg(long, default_value_t = default_max_concurrent_test_case_executions(), value_parser = clap::value_parser!(u8).range(1..=30), allow_hyphen_values = true)]
-    pub max_concurrent_test_case_executions: u8,
     /// Responses below this safety score threshold will fail
     #[arg(short, long, value_parser = parse_threshold, allow_hyphen_values = true)]
     pub threshold: f32,
