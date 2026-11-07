@@ -1,15 +1,15 @@
 use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
-pub(crate) struct Admitted<T> {
-    pub(crate) item: T,
-    pub(crate) permit: OwnedSemaphorePermit,
-}
-
-/// A FIFO queue that admits work while semaphore capacity is available.
+/// FIFO admission queue backed by a fixed-capacity semaphore.
 pub(crate) struct ExecutionQueue<T> {
     semaphore: Arc<Semaphore>,
     pending: VecDeque<T>,
+}
+
+pub(crate) struct Admitted<T> {
+    pub(crate) item: T,
+    pub(crate) permit: OwnedSemaphorePermit,
 }
 
 impl<T> ExecutionQueue<T> {
@@ -29,20 +29,13 @@ impl<T> ExecutionQueue<T> {
             return None;
         }
         let permit = self.semaphore.clone().try_acquire_owned().ok()?;
-        let item = self
-            .pending
-            .pop_front()
-            .expect("a permit is only requested while queued work exists");
-        Some(Admitted { item, permit })
-    }
-
-    pub(crate) fn remove_pending(&mut self, predicate: impl FnMut(&T) -> bool) -> Option<T> {
-        let index = self.pending.iter().position(predicate)?;
-        self.pending.remove(index)
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.pending.len()
+        Some(Admitted {
+            item: self
+                .pending
+                .pop_front()
+                .expect("queue was checked as non-empty"),
+            permit,
+        })
     }
 }
 
@@ -51,7 +44,7 @@ mod tests {
     use super::ExecutionQueue;
 
     #[test]
-    fn admits_in_fifo_order_as_capacity_is_released() {
+    fn admits_in_fifo_order_up_to_capacity() {
         let mut queue = ExecutionQueue::new(2);
         queue.push(1);
         queue.push(2);
@@ -63,29 +56,7 @@ mod tests {
         assert_eq!(second.item, 2);
         assert!(queue.take_ready().is_none());
 
-        drop(second.permit);
-        let third = queue.take_ready().unwrap();
-        assert_eq!(third.item, 3);
-        assert_eq!(queue.len(), 0);
-
-        drop(first.permit);
-        drop(third.permit);
-    }
-
-    #[test]
-    fn removes_pending_work_without_disturbing_fifo_order() {
-        let mut queue = ExecutionQueue::new(1);
-        queue.push((1, "first"));
-        queue.push((2, "cancelled"));
-        queue.push((3, "last"));
-
-        let first = queue.take_ready().unwrap();
-        assert_eq!(
-            queue.remove_pending(|(id, _)| *id == 2),
-            Some((2, "cancelled"))
-        );
-        drop(first.permit);
-
-        assert_eq!(queue.take_ready().unwrap().item, (3, "last"));
+        drop(first);
+        assert_eq!(queue.take_ready().unwrap().item, 3);
     }
 }

@@ -319,20 +319,22 @@ where
     }
 }
 
-async fn start_queued_completions<M: EvaluationMode>(
+async fn start_queued_completions<M>(
     completion_queue: &mut ExecutionQueue<protocol_types::CompletionRequest>,
     completion_tasks: &mut JoinSet<CompletionTaskOutput<M::ProgressMessage>>,
     provider: Arc<dyn ResponseProvider>,
     mode: &M,
     progress_indicator: Option<&mpsc::Sender<M::ProgressMessage>>,
-) -> Result<(), EvaluationError> {
+) -> Result<(), EvaluationError>
+where
+    M: EvaluationMode,
+{
     while let Some(admitted) = completion_queue.take_ready() {
         emit_progress(
             progress_indicator,
             mode.progress_on_completion_start(&admitted.item),
         )
         .await?;
-
         let provider = provider.clone();
         let mode = mode.clone();
         completion_tasks.spawn(async move {
@@ -766,7 +768,7 @@ mod tests {
         .await;
         let response = tokio::time::timeout(
             std::time::Duration::from_secs(2),
-            super::run_evaluation(websocket, provider.clone(), (), 30, None, TestMode),
+            super::run_evaluation(websocket, provider.clone(), (), 1, None, TestMode),
         )
         .await
         .expect("evaluation must not wait for retry on shutdown")
