@@ -85,6 +85,11 @@ async fn exercise(mode: u8, disconnect: bool) {
                 "voice_request"
             }
         );
+        assert!(
+            request["data"]
+                .get("max_concurrent_test_case_executions")
+                .is_none()
+        );
         if mode >= 3 {
             assert_eq!(request["data"]["variations"], 1);
             assert_eq!(request["data"]["maximum_iteration_layers"], 1);

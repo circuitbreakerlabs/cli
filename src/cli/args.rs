@@ -297,14 +297,51 @@ impl ProviderCommand {
 pub enum TextProviderCommand {
     /// Use Ollama provider
     #[cfg(feature = "ollama")]
-    Ollama(OllamaProviderConfig),
+    Ollama {
+        #[command(flatten)]
+        config: OllamaProviderConfig,
+        #[command(flatten)]
+        execution: TextExecutionArgs,
+    },
     #[allow(clippy::doc_markdown)]
     /// Use OpenAI provider
     #[cfg(feature = "openai")]
-    OpenAI(OpenAIProviderConfig),
+    OpenAI {
+        #[command(flatten)]
+        config: OpenAIProviderConfig,
+        #[command(flatten)]
+        execution: TextExecutionArgs,
+    },
     /// Use Custom Rhai-scripted provider
     #[cfg(feature = "custom")]
-    Custom(CustomProviderConfig),
+    Custom {
+        #[command(flatten)]
+        config: CustomProviderConfig,
+        #[command(flatten)]
+        execution: TextExecutionArgs,
+    },
+}
+
+#[cfg(text_targets)]
+#[derive(clap::Args, Clone, Copy, Debug)]
+pub struct TextExecutionArgs {
+    /// Maximum concurrent target-provider calls handled by this CLI (1-30)
+    #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(u8).range(1..=30))]
+    pub max_concurrent_test_case_executions: u8,
+}
+
+#[cfg(text_targets)]
+impl TextProviderCommand {
+    pub fn max_concurrent_test_case_executions(&self) -> u8 {
+        match self {
+            #[cfg(feature = "ollama")]
+            Self::Ollama { execution, .. } => execution.max_concurrent_test_case_executions,
+            #[cfg(feature = "openai")]
+            Self::OpenAI { execution, .. } => execution.max_concurrent_test_case_executions,
+            #[cfg(feature = "custom")]
+            Self::Custom { execution, .. } => execution.max_concurrent_test_case_executions,
+        }
+    }
 }
 
 #[derive(Clone, Copy, ValueEnum, Debug)]
@@ -373,6 +410,98 @@ mod tests {
             },
             _ => panic!("expected eval command"),
         }
+    }
+
+    #[cfg(feature = "openai")]
+    #[test]
+    fn text_provider_owns_concurrency_limit() {
+        let args = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "eval",
+            "single-turn",
+            "--threshold",
+            "0.5",
+            "--variations",
+            "1",
+            "--maximum-iteration-layers",
+            "0",
+            "--test-case-groups",
+            "test",
+            "openai",
+            "--api-key",
+            "openai-key",
+            "--model",
+            "test-model",
+            "--max-concurrent-test-case-executions",
+            "5",
+        ])
+        .unwrap();
+
+        let Some(super::Command::Eval {
+            evaluation: super::EvaluationCommand::SingleTurn { provider, .. },
+        }) = args.command
+        else {
+            panic!("expected single-turn evaluation");
+        };
+        assert_eq!(provider.text().max_concurrent_test_case_executions(), 5);
+    }
+
+    #[cfg(feature = "openai")]
+    #[test]
+    fn text_concurrency_limit_rejects_values_outside_range() {
+        for value in ["0", "31"] {
+            let error = Args::try_parse_from([
+                "cbl",
+                "--cbl-api-key",
+                "cbl-key",
+                "eval",
+                "single-turn",
+                "--threshold",
+                "0.5",
+                "--variations",
+                "1",
+                "--maximum-iteration-layers",
+                "0",
+                "--test-case-groups",
+                "test",
+                "openai",
+                "--api-key",
+                "openai-key",
+                "--model",
+                "test-model",
+                "--max-concurrent-test-case-executions",
+                value,
+            ])
+            .unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::ValueValidation);
+        }
+    }
+
+    #[cfg(feature = "livekit")]
+    #[test]
+    fn livekit_rejects_text_concurrency_limit() {
+        let error = Args::try_parse_from([
+            "cbl",
+            "--cbl-api-key",
+            "cbl-key",
+            "eval",
+            "multi-turn",
+            "--threshold",
+            "0.5",
+            "--max-turns",
+            "4",
+            "--test-case-groups",
+            "test",
+            "livekit",
+            "--config",
+            "voice.toml",
+            "--max-concurrent-test-case-executions",
+            "1",
+        ])
+        .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::UnknownArgument);
     }
 
     #[test]

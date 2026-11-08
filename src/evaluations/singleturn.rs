@@ -132,12 +132,14 @@ pub async fn run_evaluation(
     websocket_connection: WebSocketConnection,
     provider: Arc<dyn ResponseProvider>,
     request: SingleTurnEvaluationRequest,
+    max_concurrent_test_case_executions: u8,
     progress_indicator: Option<mpsc::Sender<SingleTurnProgressIndicatorMessage>>,
 ) -> Result<SingleTurnResponse, EvaluationError> {
     engine::run_evaluation(
         websocket_connection,
         provider,
         request,
+        max_concurrent_test_case_executions,
         progress_indicator,
         SingleTurnMode,
     )
@@ -149,8 +151,8 @@ mod tests {
     use super::{EvaluationMode, OptionalSingleTurnMessage, SingleTurnMode, run_evaluation};
     use crate::evaluations::EvaluationError;
     use crate::evaluations::test_support::{
-        ControlledProvider, ProviderBehavior, gated_behavior, recv_text_json, send_json,
-        spawn_websocket_server,
+        ControlledProvider, ProviderBehavior, gated_behavior, observable_gated_behavior,
+        recv_text_json, send_json, spawn_websocket_server,
     };
     use crate::protocol_types::common::{ConversationComplete, ConversationError, ServerErrorCode};
     use crate::protocol_types::single_turn::{
@@ -332,12 +334,12 @@ mod tests {
             websocket,
             provider,
             SingleTurnEvaluationRequest::Standard(SingleTurnRequest {
-                max_concurrent_test_case_executions: 7,
                 threshold: 0.5,
                 variations: 2,
                 maximum_iteration_layers: 1,
                 test_case_groups: vec!["suicidal_ideation".to_string()],
             }),
+            7,
             None,
         )
         .await
@@ -351,6 +353,96 @@ mod tests {
         assert_eq!(response.total_failed, 0);
         assert_eq!(response.evaluation_id, 11);
         assert!(response.results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn run_evaluation_admits_provider_calls_in_fifo_order() {
+        let (first_behavior, first_started, first_sender) = observable_gated_behavior();
+        let (second_behavior, mut second_started, second_sender) = observable_gated_behavior();
+        let (third_behavior, mut third_started, third_sender) = observable_gated_behavior();
+        let provider = Arc::new(ControlledProvider::new(HashMap::from([
+            ("first".to_string(), first_behavior),
+            ("second".to_string(), second_behavior),
+            ("third".to_string(), third_behavior),
+        ])));
+
+        let (websocket, server_handle) =
+            spawn_websocket_server(move |server_websocket| async move {
+                let (mut write, mut read) = server_websocket.split();
+                let initial = recv_text_json(&mut read).await;
+                assert!(
+                    initial["data"]
+                        .get("max_concurrent_test_case_executions")
+                        .is_none()
+                );
+
+                for (request_id, content) in
+                    [("req-1", "first"), ("req-2", "second"), ("req-3", "third")]
+                {
+                    send_json(
+                        &mut write,
+                        json!({"type":"completion_request","data":{"request_id":request_id,"conversation_id":1,"messages":[{"role":"user","content":content}]}}),
+                    )
+                    .await;
+                }
+
+                first_started.await.expect("first call should start");
+                assert!(
+                    tokio::time::timeout(
+                        std::time::Duration::from_millis(100),
+                        &mut second_started
+                    )
+                    .await
+                    .is_err()
+                );
+
+                write.send(Message::Ping(vec![1, 2, 3].into())).await.unwrap();
+                assert!(matches!(read.next().await, Some(Ok(Message::Pong(_)))));
+
+                first_sender
+                    .send(Err(ProviderError::Network("failed".to_string())))
+                    .unwrap();
+                assert_eq!(recv_text_json(&mut read).await["data"]["request_id"], "req-1");
+                second_started.await.expect("second call should start next");
+                assert!(
+                    tokio::time::timeout(
+                        std::time::Duration::from_millis(100),
+                        &mut third_started
+                    )
+                    .await
+                    .is_err()
+                );
+
+                second_sender.send(Ok("second reply".to_string())).unwrap();
+                assert_eq!(recv_text_json(&mut read).await["data"]["request_id"], "req-2");
+                third_started.await.expect("third call should start last");
+                third_sender.send(Ok("third reply".to_string())).unwrap();
+                assert_eq!(recv_text_json(&mut read).await["data"]["request_id"], "req-3");
+
+                send_json(
+                    &mut write,
+                    json!({"type":"single_turn_response","data":{"evaluation_id":99,"total_passed":2,"total_failed":1,"results":[]}}),
+                )
+                .await;
+            })
+            .await;
+
+        let response = run_evaluation(
+            websocket,
+            provider,
+            SingleTurnEvaluationRequest::Standard(SingleTurnRequest {
+                threshold: 0.5,
+                variations: 1,
+                maximum_iteration_layers: 0,
+                test_case_groups: vec!["test".to_string()],
+            }),
+            1,
+            None,
+        )
+        .await
+        .unwrap();
+        server_handle.await.unwrap();
+        assert_eq!(response.evaluation_id, 99);
     }
 
     #[tokio::test]
@@ -384,7 +476,6 @@ mod tests {
             websocket,
             provider,
             SingleTurnEvaluationRequest::Rerun(SingleTurnRerunRequest {
-                max_concurrent_test_case_executions: 7,
                 selector: crate::protocol_types::common::RerunSelector::TestResultIds {
                     test_result_ids: vec![42, 43],
                 },
@@ -392,6 +483,7 @@ mod tests {
                 variations: 2,
                 maximum_iteration_layers: 1,
             }),
+            7,
             None,
         )
         .await
@@ -438,12 +530,12 @@ mod tests {
             websocket,
             provider,
             SingleTurnEvaluationRequest::Standard(SingleTurnRequest {
-                max_concurrent_test_case_executions: 7,
                 threshold: 0.5,
                 variations: 2,
                 maximum_iteration_layers: 1,
                 test_case_groups: vec!["suicidal_ideation".to_string()],
             }),
+            7,
             None,
         )
         .await
@@ -514,12 +606,12 @@ mod tests {
             websocket,
             provider,
             SingleTurnEvaluationRequest::Standard(SingleTurnRequest {
-                max_concurrent_test_case_executions: 7,
                 threshold: 0.5,
                 variations: 2,
                 maximum_iteration_layers: 1,
                 test_case_groups: vec!["suicidal_ideation".to_string()],
             }),
+            7,
             None,
         )
         .await
@@ -557,12 +649,12 @@ mod tests {
             websocket,
             provider,
             SingleTurnEvaluationRequest::Standard(SingleTurnRequest {
-                max_concurrent_test_case_executions: 7,
                 threshold: 0.5,
                 variations: 2,
                 maximum_iteration_layers: 1,
                 test_case_groups: vec!["suicidal_ideation".to_string()],
             }),
+            7,
             None,
         )
         .await
