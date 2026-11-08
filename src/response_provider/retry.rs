@@ -26,10 +26,14 @@ pub fn parse_retry_after(headers: &HeaderMap, now: SystemTime) -> Option<Duratio
         .max()
 }
 
-pub(super) async fn run<F, Fut>(mut attempt: F) -> Result<ProviderCompletion, ProviderError>
+pub(crate) async fn run<F, Fut, R>(
+    mut attempt: F,
+    mut on_rate_limited: R,
+) -> Result<ProviderCompletion, ProviderError>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<ProviderCompletion, ProviderError>>,
+    R: FnMut(),
 {
     let mut delays = [2, 4, 8].into_iter().enumerate();
     loop {
@@ -43,6 +47,7 @@ where
         ) {
             return Err(error);
         }
+        on_rate_limited();
         let Some((index, seconds)) = delays.next() else {
             return Err(error);
         };
@@ -132,7 +137,9 @@ mod tests {
             let provider = ScriptedProvider::new(outcomes);
             let messages = history();
             let start = Instant::now();
-            let result = run(|| provider.generate_response(&messages)).await.unwrap();
+            let result = run(|| provider.generate_response(&messages), || {})
+                .await
+                .unwrap();
             assert_eq!(result.message.content, "reply");
             assert_eq!(result.model_id.as_deref(), Some("model"));
             assert_eq!(result.tokens_used, Some(42));
@@ -156,7 +163,7 @@ mod tests {
         ]);
         let messages = history();
         let start = Instant::now();
-        let error = run(|| provider.generate_response(&messages))
+        let error = run(|| provider.generate_response(&messages), || {})
             .await
             .unwrap_err();
         assert_eq!(error.retry_after(), Some(Duration::from_mins(15)));
@@ -183,15 +190,28 @@ mod tests {
             outcomes.push(Err(ProviderError::Network("offline".into())));
             let provider = ScriptedProvider::new(outcomes);
             let messages = history();
+            let mut signals = 0;
             assert!(matches!(
-                run(|| provider.generate_response(&messages)).await,
+                run(|| provider.generate_response(&messages), || signals += 1).await,
                 Err(ProviderError::Network(_))
             ));
+            assert_eq!(signals, usize::from(prior_limit));
             assert_eq!(
                 provider.calls.lock().unwrap().len(),
                 if prior_limit { 2 } else { 1 }
             );
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn reports_every_rate_limited_attempt() {
+        let provider = ScriptedProvider::new(vec![limited(None), limited(None), Ok(success())]);
+        let messages = history();
+        let mut signals = 0;
+        run(|| provider.generate_response(&messages), || signals += 1)
+            .await
+            .unwrap();
+        assert_eq!(signals, 2);
     }
 
     #[tokio::test(start_paused = true)]
@@ -203,12 +223,14 @@ mod tests {
         let clone = slow.clone();
         let task = tokio::spawn(async move {
             let messages = history();
-            run(|| clone.generate_response(&messages)).await
+            run(|| clone.generate_response(&messages), || {}).await
         });
         tokio::task::yield_now().await;
         let fast = ScriptedProvider::new(vec![Ok(success())]);
         let messages = history();
-        run(|| fast.generate_response(&messages)).await.unwrap();
+        run(|| fast.generate_response(&messages), || {})
+            .await
+            .unwrap();
         task.abort();
         assert!(task.await.unwrap_err().is_cancelled());
         tokio::time::advance(Duration::from_hours(2)).await;
