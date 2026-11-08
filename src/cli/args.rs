@@ -325,7 +325,7 @@ pub enum TextProviderCommand {
 #[cfg(text_targets)]
 #[derive(clap::Args, Clone, Copy, Debug)]
 pub struct TextExecutionArgs {
-    /// Maximum concurrent target-provider calls handled by this CLI (1-30)
+    /// Ceiling for concurrent target-provider calls; reduced automatically on rate limits (1-30)
     #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(u8).range(1..=30))]
     pub max_concurrent_test_case_executions: u8,
 }
