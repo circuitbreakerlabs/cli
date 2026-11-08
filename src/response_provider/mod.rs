@@ -8,7 +8,7 @@ pub use http::HttpResponseProvider;
 pub mod ollama;
 #[cfg(feature = "openai")]
 pub mod openai;
-mod retry;
+pub(crate) mod retry;
 
 use crate::protocol_types;
 use async_trait::async_trait;
@@ -41,8 +41,8 @@ impl From<protocol_types::Message> for ProviderCompletion {
     }
 }
 
-/// A complete model interaction, including any provider retry policy.
-/// Evaluation code only depends on this interface, not on HTTP details.
+/// One target-model call and its response translation.
+/// Evaluation code composes this interface with retry and admission policies.
 #[async_trait]
 pub trait ResponseProvider: Send + Sync {
     async fn generate_response(
