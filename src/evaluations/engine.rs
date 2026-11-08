@@ -1,8 +1,8 @@
 use super::EvaluationError;
-use crate::execution_queue::ExecutionQueue;
+use crate::execution_queue::{ConcurrencyFeedback, ExecutionQueue};
 use crate::protocol_types::common::{CompletionErrorEnvelope, CompletionResponseEnvelope};
 use crate::protocol_types::{self};
-use crate::response_provider::ResponseProvider;
+use crate::response_provider::{ResponseProvider, retry};
 use crate::websockets::WebSocketConnection;
 
 use futures_util::stream::SplitSink;
@@ -126,27 +126,39 @@ async fn execute_completion_request<M: EvaluationMode>(
     request: protocol_types::CompletionRequest,
     provider: Arc<dyn ResponseProvider>,
     mode: M,
+    concurrency_feedback: Option<ConcurrencyFeedback>,
 ) -> CompletionTaskOutput<M::ProgressMessage> {
     use tracing::Instrument;
     let span = tracing::warn_span!("target_completion", request_id = %request.request_id);
-    match provider
-        .generate_response(&request.messages)
-        .instrument(span)
-        .await
-    {
-        Ok(completion) => CompletionTaskOutput {
-            progress: mode.progress_on_completion_success(&request),
-            outbound: OutboundProtocolMessage::CompletionResponse(
-                protocol_types::CompletionResponse {
-                    request_id: request.request_id,
-                    model_response: completion.message.content,
-                    model_id: completion.model_id,
-                    tokens_used: completion.tokens_used,
-                    finish_reason: completion.finish_reason,
-                    provider_response_id: completion.provider_response_id,
-                },
-            ),
+    let result = retry::run(
+        || provider.generate_response(&request.messages),
+        || {
+            if let Some(feedback) = &concurrency_feedback {
+                feedback.rate_limited();
+            }
         },
+    )
+    .instrument(span)
+    .await;
+    match result {
+        Ok(completion) => {
+            if let Some(feedback) = concurrency_feedback {
+                feedback.succeeded();
+            }
+            CompletionTaskOutput {
+                progress: mode.progress_on_completion_success(&request),
+                outbound: OutboundProtocolMessage::CompletionResponse(
+                    protocol_types::CompletionResponse {
+                        request_id: request.request_id,
+                        model_response: completion.message.content,
+                        model_id: completion.model_id,
+                        tokens_used: completion.tokens_used,
+                        finish_reason: completion.finish_reason,
+                        provider_response_id: completion.provider_response_id,
+                    },
+                ),
+            }
+        }
         Err(err) => {
             tracing::error!("Error generating response: {err}");
             CompletionTaskOutput {
@@ -339,7 +351,7 @@ where
         let mode = mode.clone();
         completion_tasks.spawn(async move {
             let _permit = admitted.permit;
-            execute_completion_request(admitted.item, provider, mode).await
+            execute_completion_request(admitted.item, provider, mode, Some(admitted.feedback)).await
         });
     }
     Ok(())
@@ -601,6 +613,7 @@ mod tests {
             },
             Arc::new(SuccessProvider),
             TestMode,
+            None,
         )
         .await;
 
@@ -637,6 +650,7 @@ mod tests {
             },
             Arc::new(FailingProvider),
             TestMode,
+            None,
         )
         .await;
 
@@ -672,6 +686,7 @@ mod tests {
             },
             Arc::new(ReportedFailure),
             TestMode,
+            None,
         )
         .await;
         assert_eq!(output.progress, [] as [String; 0]);
@@ -686,6 +701,7 @@ mod tests {
     }
     #[tokio::test]
     async fn retry_success_emits_one_response_and_one_progress_update() {
+        use crate::execution_queue::ExecutionQueue;
         use crate::response_provider::{
             HttpResponseProvider,
             test_support::{StubApi, serve_responses},
@@ -706,6 +722,9 @@ mod tests {
         let provider = Arc::new(
             HttpResponseProvider::new(Box::new(api), &reqwest::header::HeaderMap::new()).unwrap(),
         );
+        let mut queue = ExecutionQueue::new(2);
+        queue.push(());
+        let admitted = queue.take_ready().unwrap();
         let output = execute_completion_request(
             protocol_types::CompletionRequest {
                 request_id: "retry-id".into(),
@@ -714,11 +733,13 @@ mod tests {
             },
             provider.clone(),
             TestMode,
+            Some(admitted.feedback.clone()),
         )
         .await;
         assert_eq!(builds.lock().unwrap().len(), 2);
         assert_eq!(server.await.unwrap().len(), 2);
         assert_eq!(output.progress, vec!["api"]);
+        assert_eq!(queue.current_limit(), 1);
         assert!(
             matches!(output.outbound, OutboundProtocolMessage::CompletionResponse(response)
             if response.request_id == "retry-id" && response.tokens_used == Some(42))

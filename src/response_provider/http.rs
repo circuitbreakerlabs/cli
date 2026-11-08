@@ -61,7 +61,7 @@ impl ResponseProvider for HttpResponseProvider {
         &self,
         messages: &[Message],
     ) -> Result<ProviderCompletion, ProviderError> {
-        retry::run(|| self.execute_once(messages)).await
+        self.execute_once(messages).await
     }
 }
 
@@ -86,7 +86,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn retries_rebuild_identical_requests_and_preserve_explicit_delay() {
+    async fn retry_runner_rebuilds_identical_requests_and_preserves_explicit_delay() {
         let (url, server) = serve_responses(vec![
             (429, Some("3600".into()), "not JSON".into()),
             (200, None, "{}".into()),
@@ -111,7 +111,7 @@ mod tests {
         }];
         let response = tokio::time::timeout(
             Duration::from_secs(5),
-            provider.generate_response(&messages),
+            retry::run(|| provider.generate_response(&messages), || {}),
         )
         .await
         .expect("script delay must override long header delay")
@@ -204,7 +204,7 @@ mod tests {
         let builds = api.builds.clone();
         let provider = HttpResponseProvider::new(Box::new(api), &HeaderMap::new()).unwrap();
         assert!(matches!(
-            provider.generate_response(&[]).await,
+            retry::run(|| provider.generate_response(&[]), || {}).await,
             Err(ProviderError::Reported { .. })
         ));
         assert_eq!(builds.lock().unwrap().len(), 1);
@@ -231,7 +231,7 @@ mod tests {
         let builds = api.builds.clone();
         let provider = HttpResponseProvider::new(Box::new(api), &HeaderMap::new()).unwrap();
         assert!(matches!(
-            provider.generate_response(&[]).await,
+            retry::run(|| provider.generate_response(&[]), || {}).await,
             Err(ProviderError::Network(_))
         ));
         assert_eq!(builds.lock().unwrap().len(), 1);
