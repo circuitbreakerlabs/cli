@@ -90,7 +90,7 @@ fn command_surface_matches_enabled_targets() {
 
 #[cfg(eval_targets)]
 #[test]
-fn multiparty_commands_require_text_targets() {
+fn multiparty_commands_require_text_or_livekit_targets() {
     for path in [vec!["eval"], vec!["eval", "re-run"]] {
         let mut args = path.clone();
         args.push("--help");
@@ -99,15 +99,18 @@ fn multiparty_commands_require_text_targets() {
             output
                 .lines()
                 .any(|line| line.split_whitespace().next() == Some("multi-party")),
-            cfg!(text_targets),
+            cfg!(text_targets) || cfg!(feature = "livekit"),
             "{path:?}"
         );
 
         let mut args = path;
         args.extend(["multi-party", "--help"]);
         let output = cli(&args);
-        assert_eq!(output.status.success(), cfg!(text_targets));
-        if !cfg!(text_targets) {
+        assert_eq!(
+            output.status.success(),
+            cfg!(text_targets) || cfg!(feature = "livekit")
+        );
+        if !cfg!(text_targets) && !cfg!(feature = "livekit") {
             assert_eq!(output.status.code(), Some(2));
             assert!(
                 String::from_utf8_lossy(&output.stderr)
@@ -115,6 +118,26 @@ fn multiparty_commands_require_text_targets() {
             );
         }
     }
+}
+
+#[cfg(feature = "livekit")]
+#[test]
+fn multiparty_livekit_preparation_precedes_api_connection() {
+    let output = cli(&[
+        "eval",
+        "multi-party",
+        "--threshold",
+        "0.75",
+        "--max-turns",
+        "4",
+        "--test-case-groups",
+        "test",
+        "livekit",
+        "--config",
+        "/missing/voice.toml",
+    ]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("cannot read target file"));
 }
 
 #[cfg(eval_targets)]

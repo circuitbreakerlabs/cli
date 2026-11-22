@@ -1,9 +1,10 @@
 //! Exercise the shared runner without a native transport or external service.
 use super::{
     Result,
-    protocol::{Audio, AudioHeader, Input},
+    common_protocol::VoiceTransport,
+    protocol::{Audio, AudioHeader, Capabilities, Input, Output as WireOutput, SessionEvent},
     runner,
-    session::{Output, VoiceSession, VoiceSessionProvider, emit},
+    session::{Output, VoiceSession, VoiceSessionProvider},
     target::{PreparedTarget, TargetMetadata},
 };
 use async_trait::async_trait;
@@ -36,18 +37,28 @@ impl VoiceSession for FakeSession {
         output: Output,
         mut stop: watch::Receiver<bool>,
     ) -> Result<()> {
-        emit(&output, json!({"type":"session_ready","session_id":7})).await?;
+        output
+            .send(WireOutput::Event(SessionEvent::SessionReady {
+                session_id: 7,
+                capabilities: Capabilities::REQUIRED,
+                external_session_id: None,
+            }))
+            .await
+            .unwrap();
         loop {
             tokio::select! {
                 _ = stop.changed() => break,
                 item = input.recv() => match item {
                     Some(Input::Control(command)) => {
                         assert_eq!(command.session_id(), 7);
-                        emit(&output, json!({"type":"utterance_ready","session_id":7,"stream_id":1})).await?;
+                        output.send(WireOutput::Event(SessionEvent::UtteranceReady {
+                            session_id: 7,
+                            stream_id: 1,
+                        })).await.unwrap();
                     }
                     Some(Input::Audio(audio)) => {
                         assert_eq!(audio.pcm, [1, 0, 2, 0]);
-                        output.send(Message::Binary(audio.encode()?.into())).await.unwrap();
+                        output.send(WireOutput::Audio(audio)).await.unwrap();
                     }
                     None => break,
                 }
@@ -75,7 +86,7 @@ async fn exercise(mode: u8, disconnect: bool) {
         let request = receive_json(&mut socket).await;
         assert_eq!(
             request["target"],
-            json!({"label":"fake target","transport":"fake","cli_version":env!("CARGO_PKG_VERSION")})
+            json!({"label":"fake target","transport":"livekit","cli_version":env!("CARGO_PKG_VERSION")})
         );
         assert_eq!(
             request["type"],
@@ -123,7 +134,11 @@ async fn exercise(mode: u8, disconnect: bool) {
         if disconnect {
             socket.close(None).await.unwrap();
         } else {
-            socket.send(Message::Text(json!({"type":"voice_result","data":{"evaluation_id":1,"total_passed":0,"total_failed":0,"results":[]}}).to_string().into())).await.unwrap();
+            socket.send(Message::Text(json!({"type":"voice_result","data":{
+                "evaluation_id":1,"total_passed":0,"total_failed":0,"results":[],
+                "target":{"label":"fake target","transport":"livekit","cli_version":env!("CARGO_PKG_VERSION")},
+                "voice_metadata":{}
+            }}).to_string().into())).await.unwrap();
             // Keep the connection alive until the runner finishes cleanup.
             while let Some(Ok(message)) = socket.next().await {
                 if message.is_close() {
@@ -140,7 +155,7 @@ async fn exercise(mode: u8, disconnect: bool) {
         provider: Arc::new(FakeProvider(stopped.clone())),
         metadata: TargetMetadata {
             label: "fake target".into(),
-            transport: "fake",
+            transport: VoiceTransport::Livekit,
         },
     };
     let result = if mode == 0 || mode >= 3 {
@@ -162,7 +177,9 @@ async fn exercise(mode: u8, disconnect: bool) {
                 serde_json::from_value(data).unwrap(),
             )
         };
-        runner::run_single(socket, target, request, None).await
+        runner::run_single(socket, target, request, None)
+            .await
+            .map(|response| response.result.evaluation_id)
     } else {
         let request = if mode == 1 {
             crate::protocol_types::MultiTurnEvaluationRequest::Standard(
@@ -177,11 +194,13 @@ async fn exercise(mode: u8, disconnect: bool) {
                     .unwrap(),
             )
         };
-        runner::run(socket, target, request, None).await
+        runner::run(socket, target, request, None)
+            .await
+            .map(|response| response.result.evaluation_id)
     };
     assert_eq!(result.is_err(), disconnect);
-    if let Ok(result) = result {
-        assert_eq!(result["evaluation_id"], 1);
+    if let Ok(evaluation_id) = result {
+        assert_eq!(evaluation_id, 1);
     }
     assert!(stopped.load(Ordering::SeqCst));
     server.await.unwrap();
