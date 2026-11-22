@@ -187,6 +187,22 @@ pub enum V2Action {
     Error,
 }
 
+impl V2Action {
+    pub fn diagnostic_name(&self) -> &'static str {
+        match self {
+            Self::Send { .. } => "send",
+            Self::SessionReady => "session_ready",
+            Self::CloseReady => "close_ready",
+            Self::ExchangeReady => "exchange_ready",
+            Self::CaptureStart => "capture_start",
+            Self::CaptureStop => "capture_stop",
+            Self::ResponseEnd => "response_end",
+            Self::Transcript { .. } => "transcript",
+            Self::Error => "error",
+        }
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct HookOutput<A> {

@@ -212,6 +212,12 @@ impl Session {
         metadata: &SessionMetadata,
     ) -> Result<()> {
         for action in actions {
+            tracing::info!(
+                session_id = self.spec.session_id,
+                exchange_id = state.exchange,
+                action = action.diagnostic_name(),
+                "voice_diag: multiparty hook action"
+            );
             match action {
                 Action::Send { message, topic } => {
                     self.room
@@ -298,6 +304,12 @@ impl Session {
             participant_identity: self.room.local_participant().identity().to_string(),
             track_id: publication.sid().to_string(),
         };
+        tracing::info!(
+            session_id = self.spec.session_id,
+            participant_identity = %metadata.participant_identity,
+            track_id = %metadata.track_id,
+            "voice_diag: multiparty caller track published"
+        );
         let (media_tx, mut media_rx) = mpsc::channel(QUEUE_FRAMES);
         let (publish_tx, mut publish_rx) = mpsc::channel(QUEUE_FRAMES);
         let publisher_source = source.clone();
@@ -385,6 +397,12 @@ impl Session {
                     if changed.is_err() { return Err(Error::Transport); }
                     state.caller_started = true;
                     state.caller_generation = *caller_gate_rx.borrow();
+                    tracing::info!(
+                        session_id = self.spec.session_id,
+                        exchange_id = state.exchange,
+                        elapsed_ms = started.elapsed().as_millis(),
+                        "voice_diag: multiparty first caller frame published"
+                    );
                 }
                 () = tokio::time::sleep_until(end_at), if state.end_at.is_some() => {
                     if !state.response_started || state.offset == 0 { return Err(Error::Protocol); }
@@ -465,7 +483,22 @@ impl Session {
                         if let Some(expected) = &self.config.participant
                             && participant.as_ref().is_none_or(|participant| participant.identity().to_string() != *expected) { continue; }
                         let Ok(message) = serde_json::from_slice::<Value>(&payload) else { continue; };
-                        if matches!(provider_event(&message), ProviderEvent::Audio) { continue; }
+                        let event_type = provider_event(&message);
+                        let top_level_keys = message
+                            .as_object()
+                            .map(|object| object.keys().map(String::as_str).collect::<Vec<_>>())
+                            .unwrap_or_default();
+                        tracing::info!(
+                            session_id = self.spec.session_id,
+                            exchange_id = state.exchange,
+                            event_type = ?event_type,
+                            ?top_level_keys,
+                            topic = ?topic,
+                            caller_started = state.caller_started,
+                            elapsed_ms = started.elapsed().as_millis(),
+                            "voice_diag: multiparty provider event"
+                        );
+                        if matches!(event_type, ProviderEvent::Audio) { continue; }
                         let actions = self.hooks.multiparty_event(true, TargetEvent {
                             message,
                             topic,
@@ -478,6 +511,14 @@ impl Session {
                         if self.config.participant.as_ref().is_some_and(|expected| *expected != participant.identity().to_string())
                             || self.config.track.as_ref().is_some_and(|expected| *expected != publication.name()) { continue; }
                         if selected.is_some() { return Err(Error::Configuration("multiple eligible remote audio tracks; select participant/track")); }
+                        tracing::info!(
+                            session_id = self.spec.session_id,
+                            exchange_id = state.exchange,
+                            participant_identity = %participant.identity(),
+                            track_name = %publication.name(),
+                            track_id = %track.sid(),
+                            "voice_diag: multiparty remote audio track subscribed"
+                        );
                         selected = Some(track.sid());
                         let tx = media_tx.clone();
                         let mut reset_rx = reset_tx.subscribe();
@@ -527,6 +568,12 @@ impl Session {
                         if !state.input_ended { return Err(Error::Protocol); }
                         state.caller_playing = false;
                         state.playback_complete = true;
+                        tracing::info!(
+                            session_id = self.spec.session_id,
+                            exchange_id = state.exchange,
+                            elapsed_ms = started.elapsed().as_millis(),
+                            "voice_diag: multiparty playback complete"
+                        );
                         emit(output, SessionEvent::PlaybackComplete {
                             session_id: self.spec.session_id,
                             exchange_id: state.exchange,
@@ -548,6 +595,12 @@ impl Session {
                         ) { continue; }
                         if !state.response_started {
                             state.response_started = true;
+                            tracing::info!(
+                                session_id = self.spec.session_id,
+                                exchange_id = state.exchange,
+                                elapsed_ms = started.elapsed().as_millis(),
+                                "voice_diag: multiparty first response frame received"
+                            );
                             emit(output, SessionEvent::ResponseStart {
                                 session_id: self.spec.session_id,
                                 exchange_id: state.exchange,
