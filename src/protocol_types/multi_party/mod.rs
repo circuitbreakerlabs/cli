@@ -1,7 +1,7 @@
 mod request;
 mod response;
 
-#[cfg(text_targets)]
+#[cfg(eval_targets)]
 pub use request::{MultiPartyEvalRequest, MultiPartyRerunEvalRequest};
 pub use request::{
     MultiPartyEvaluationRequest, MultiPartyRequestEnvelope, MultiPartyRerunRequestEnvelope,
@@ -10,4 +10,4 @@ pub use request::{
 pub use request::{MultiPartyRequest, MultiPartyRerunRequest};
 #[cfg(test)]
 pub use response::MultiPartyErrorCode;
-pub use response::MultiPartyResponse;
+pub use response::{MultiPartyResponse, MultiPartyVoiceResponse};

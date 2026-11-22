@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 use crate::protocol_types::{ConversationId, Message};
 
@@ -53,4 +54,55 @@ pub struct MultiPartyResponse {
     pub total_failed: usize,
     pub total_errors: usize,
     pub results: Vec<MultiPartyEvaluationResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VoiceTarget {
+    pub label: String,
+    pub transport: String,
+    pub cli_version: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MultipartyVoiceInputMetadata {
+    pub utterance_id: u64,
+    pub speaker_id: String,
+    pub display_name: String,
+    pub voice: String,
+    pub source_text: String,
+    pub tagged_text: String,
+    pub duration_seconds: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MultipartyVoiceCustomerResponseMetadata {
+    pub transcription: String,
+    pub comparison_transcript: Option<String>,
+    pub duration_seconds: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MultipartyVoiceSessionMetadata {
+    pub external_session_id: Option<String>,
+    pub livekit_participant_identity: Option<String>,
+    pub livekit_track_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MultipartyVoiceExchangeMetadata {
+    pub exchange_id: u64,
+    pub inputs: Vec<MultipartyVoiceInputMetadata>,
+    pub customer_response: MultipartyVoiceCustomerResponseMetadata,
+    pub transport_metadata: MultipartyVoiceSessionMetadata,
+    #[serde(default)]
+    pub stage_timings: BTreeMap<String, f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiPartyVoiceResponse {
+    #[serde(flatten)]
+    pub result: MultiPartyResponse,
+    pub target: VoiceTarget,
+    pub voice_test_case_ids: BTreeMap<String, i64>,
+    pub voice_metadata: BTreeMap<String, Vec<MultipartyVoiceExchangeMetadata>>,
 }
