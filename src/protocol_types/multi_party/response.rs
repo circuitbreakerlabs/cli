@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use crate::protocol_types::{ConversationId, Message};
+use crate::voice::{common_protocol::VoiceTarget, multiparty_protocol::GeminiVoice};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -57,18 +58,11 @@ pub struct MultiPartyResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct VoiceTarget {
-    pub label: String,
-    pub transport: String,
-    pub cli_version: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MultipartyVoiceInputMetadata {
     pub utterance_id: u64,
     pub speaker_id: String,
     pub display_name: String,
-    pub voice: String,
+    pub voice: GeminiVoice,
     pub source_text: String,
     pub tagged_text: String,
     pub duration_seconds: f64,
