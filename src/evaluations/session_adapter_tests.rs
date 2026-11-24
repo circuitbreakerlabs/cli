@@ -173,6 +173,7 @@ async fn drive_dual_evaluation(provider: Arc<HttpResponseProvider>, rerun: bool)
             ("multiparty_request", "dual-first")
         };
         assert_eq!(initial["type"], request_type);
+        assert_eq!(initial["version"], crate::consts::version::PROTOCOL_VERSION);
         assert_eq!(initial["stateful_customer"], true);
         let first_round = dual_round("  First A. ", "First B.\nAnother line.");
         send_json(
