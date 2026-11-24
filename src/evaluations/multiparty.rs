@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     protocol_types::{
-        CompletionRequest,
+        CompletionRequest, ConversationId,
         multi_party::{
             MultiPartyEvaluationRequest, MultiPartyRequestEnvelope, MultiPartyRerunRequestEnvelope,
             MultiPartyResponse,
@@ -22,7 +22,9 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 #[derive(Clone, Copy)]
-struct Mode;
+struct Mode {
+    stateful_customer: bool,
+}
 #[derive(Deserialize)]
 struct Envelope {
     #[serde(rename = "type")]
@@ -38,10 +40,14 @@ impl EvaluationMode for Mode {
     fn serialize_request(&self, request: &Self::Request) -> Result<String, serde_json::Error> {
         match request {
             MultiPartyEvaluationRequest::Standard(request) => {
-                serde_json::to_string(&MultiPartyRequestEnvelope::from(request.clone()))
+                let mut envelope = MultiPartyRequestEnvelope::from(request.clone());
+                envelope.stateful_customer = self.stateful_customer;
+                serde_json::to_string(&envelope)
             }
             MultiPartyEvaluationRequest::Rerun(request) => {
-                serde_json::to_string(&MultiPartyRerunRequestEnvelope::from(request.clone()))
+                let mut envelope = MultiPartyRerunRequestEnvelope::from(request.clone());
+                envelope.stateful_customer = self.stateful_customer;
+                serde_json::to_string(&envelope)
             }
         }
     }
@@ -99,6 +105,19 @@ impl EvaluationMode for Mode {
     fn expected_response_name(&self) -> &'static str {
         "MultiPartyResponse"
     }
+
+    fn supports_conversation_context(&self) -> bool {
+        true
+    }
+
+    fn ended_conversation(&self, message: &Self::OptionalMessage) -> Option<ConversationId> {
+        match message {
+            MultiPartyProgressIndicatorMessage::ConversationComplete {
+                conversation_id, ..
+            } => Some(*conversation_id),
+            _ => None,
+        }
+    }
 }
 
 pub async fn run_evaluation(
@@ -108,13 +127,16 @@ pub async fn run_evaluation(
     max_concurrent_test_case_executions: u8,
     progress: Option<mpsc::Sender<MultiPartyProgressIndicatorMessage>>,
 ) -> Result<MultiPartyResponse, EvaluationError> {
+    let mode = Mode {
+        stateful_customer: provider.uses_conversation_context(),
+    };
     engine::run_evaluation(
         websocket,
         provider,
         request,
         max_concurrent_test_case_executions,
         progress,
-        Mode,
+        mode,
     )
     .await
 }
@@ -134,6 +156,7 @@ mod tests {
         let (websocket, server) = spawn_websocket_server(|socket| async move {
             let (mut write, mut read) = socket.split();
             let initial = recv_text_json(&mut read).await;
+            assert!(initial.get("stateful_customer").is_none());
             assert_eq!(initial["data"]["test_case_groups"], json!(["pack"]));
             assert!(
                 initial["data"]
@@ -291,15 +314,18 @@ mod tests {
 
     #[test]
     fn ignores_future_progress_events_and_rejects_malformed_known_events() {
-        let ParsedIncoming::OptionalMessage(message) = Mode
+        let mode = Mode {
+            stateful_customer: false,
+        };
+        let ParsedIncoming::OptionalMessage(message) = mode
             .parse_text(r#"{"type":"future_multiparty_event","data":{"detail":"new"}}"#)
             .unwrap()
         else {
             panic!("expected optional event");
         };
-        assert!(Mode.progress_from_optional(message).is_empty());
+        assert!(mode.progress_from_optional(message).is_empty());
         assert!(
-            Mode.parse_text(r#"{"type":"multiparty_turn","data":{"conversation_id":1}}"#)
+            mode.parse_text(r#"{"type":"multiparty_turn","data":{"conversation_id":1}}"#)
                 .is_err()
         );
     }

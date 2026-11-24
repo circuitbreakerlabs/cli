@@ -12,6 +12,9 @@ use tokio::net::TcpListener;
 use super::multiturn::run_evaluation;
 use super::test_support::{recv_text_json, send_json, spawn_websocket_server};
 use crate::protocol_types::common::RerunSelector;
+use crate::protocol_types::multi_party::{
+    MultiPartyEvaluationRequest, MultiPartyRequest, MultiPartyRerunRequest,
+};
 use crate::protocol_types::multi_turn::{
     MultiTurnEvaluationRequest, MultiTurnRequest, MultiTurnRerunRequest,
 };
@@ -137,14 +140,177 @@ async fn mock_session_endpoint() -> (String, tokio::task::JoinHandle<Vec<(String
 }
 
 fn session_provider(base_url: &str) -> Arc<HttpResponseProvider> {
+    scripted_provider(base_url, "cogo_solo.rhai")
+}
+
+fn scripted_provider(base_url: &str, script: &str) -> Arc<HttpResponseProvider> {
     let api = CustomProvider::new(&CustomProviderConfig {
         url: format!("{base_url}/v1/chat/completions"),
-        script: Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/providers/cogo_solo.rhai"),
+        script: Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/providers")
+            .join(script),
     })
     .unwrap();
     let headers =
         HeaderMap::from_iter([(AUTHORIZATION, HeaderValue::from_static("Bearer test-key"))]);
     Arc::new(HttpResponseProvider::new(Box::new(api), &headers).unwrap())
+}
+
+fn dual_round(alex: &str, jordan: &str) -> [Value; 2] {
+    [
+        json!({"role": "user", "name": "Alex", "content": alex}),
+        json!({"role": "user", "name": "Jordan", "content": jordan}),
+    ]
+}
+
+async fn drive_dual_evaluation(provider: Arc<HttpResponseProvider>, rerun: bool) {
+    let (socket, server) = spawn_websocket_server(move |socket| async move {
+        let (mut write, mut read) = socket.split();
+        let initial = recv_text_json(&mut read).await;
+        let (request_type, first_request_id) = if rerun {
+            ("multiparty_rerun_request", "dual-rerun")
+        } else {
+            ("multiparty_request", "dual-first")
+        };
+        assert_eq!(initial["type"], request_type);
+        assert_eq!(initial["stateful_customer"], true);
+        let first_round = dual_round("  First A. ", "First B.\nAnother line.");
+        send_json(
+            &mut write,
+            completion(1, first_request_id, &json!(first_round)),
+        )
+        .await;
+        let first_reply = recv_text_json(&mut read).await;
+        assert_eq!(first_reply["data"]["model_response"], RAW_REPLY);
+        if !rerun {
+            let [alex, jordan] = &first_round;
+            let [alex_next, jordan_next] = dual_round("Second A.", "Second B.");
+            let history = json!([
+                {"role": "system", "content": "Ignored"},
+                alex, jordan,
+                {"role": "assistant", "content": "Text must come from the raw reply cache."},
+                alex_next, jordan_next,
+            ]);
+            send_json(&mut write, completion(1, "dual-second", &history)).await;
+            let reply = recv_text_json(&mut read).await;
+            assert_eq!(reply["data"]["request_id"], "dual-second");
+            assert_eq!(reply["data"]["model_response"], FINAL_REPLY);
+            assert_eq!(reply["data"]["finish_reason"], "session_ended");
+        }
+        send_json(
+            &mut write,
+            json!({
+                "type": "multiparty_conversation_complete",
+                "data": {"conversation_id": 1, "status": "passed"},
+            }),
+        )
+        .await;
+        if rerun {
+            // A completion for an already finished episode must never reach the provider.
+            send_json(
+                &mut write,
+                completion(1, "after-complete", &json!(first_round)),
+            )
+            .await;
+            let late = recv_text_json(&mut read).await;
+            assert_eq!(late["type"], "completion_error");
+            assert_eq!(late["data"]["request_id"], "after-complete");
+        }
+        send_json(
+            &mut write,
+            json!({
+                "type": "multiparty_response",
+                "data": {"evaluation_id": 1, "total_passed": 1, "total_failed": 0, "total_errors": 0, "results": []},
+            }),
+        )
+        .await;
+    })
+    .await;
+    let request = if rerun {
+        MultiPartyEvaluationRequest::Rerun(MultiPartyRerunRequest {
+            selector: RerunSelector::TestResultIds {
+                test_result_ids: vec![1],
+            },
+            threshold: 0.5,
+            max_turns: 6,
+        })
+    } else {
+        MultiPartyEvaluationRequest::Standard(MultiPartyRequest {
+            threshold: 0.5,
+            max_turns: 6,
+            test_case_groups: vec!["couples".into()],
+        })
+    };
+    let result = super::multiparty::run_evaluation(socket, provider, request, 2, None)
+        .await
+        .unwrap();
+    assert_eq!(result.total_passed, 1);
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn multiparty_coalesces_each_round_and_replays_the_acknowledged_history() {
+    let mut first_attempt = None;
+    let first_turn =
+        json!({"role": "user", "content": "Alex:   First A. \nJordan: First B.\nAnother line."});
+    let (base_url, endpoint) = serve_requests(5, move |headers, body| {
+        assert!(
+            headers
+                .lines()
+                .any(|line| line == "authorization: Bearer test-key")
+        );
+        if headers.starts_with("DELETE ") {
+            assert!(headers.starts_with("DELETE /v1/conversations/cbl-dual-rerun "));
+            return (204, None, String::new());
+        }
+        assert!(headers.starts_with("POST /v1/chat/completions "));
+        assert_eq!(body["model"], "cogo-dual");
+        assert_eq!(body["stream"], false);
+        let id = body["metadata"]["conversation_id"].as_str().unwrap();
+        let messages = body["messages"].as_array().unwrap();
+        if messages.len() == 1 {
+            assert_eq!(messages[0], first_turn);
+            assert_eq!(
+                body["metadata"],
+                json!({
+                    "conversation_id": id, "person1_name": "Alex", "person2_name": "Jordan",
+                })
+            );
+            if id == "cbl-dual-first" {
+                if let Some(previous) = &first_attempt {
+                    assert_eq!(body, previous);
+                } else {
+                    first_attempt = Some(body.clone());
+                    return (429, Some("2".into()), "{}".into());
+                }
+            } else {
+                assert_eq!(id, "cbl-dual-rerun");
+            }
+            return mock_reply(RAW_REPLY);
+        }
+        assert_eq!(
+            body["metadata"],
+            json!({"conversation_id": "cbl-dual-first"})
+        );
+        let expected = json!([
+            first_turn,
+            {"role": "assistant", "content": RAW_REPLY},
+            {"role": "user", "content": "Alex: Second A.\nJordan: Second B."},
+        ]);
+        if body["messages"] != expected {
+            return (409, None, "{}".into());
+        }
+        mock_reply(FINAL_REPLY)
+    })
+    .await;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let provider = scripted_provider(&base_url, "cogo_dual.rhai");
+        drive_dual_evaluation(provider.clone(), false).await;
+        drive_dual_evaluation(provider, true).await;
+        endpoint.await.unwrap();
+    })
+    .await
+    .unwrap();
 }
 
 fn standard_request() -> MultiTurnEvaluationRequest {
