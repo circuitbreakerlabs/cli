@@ -1,14 +1,17 @@
 use super::EvaluationError;
+use super::sessions::Sessions;
 use crate::execution_queue::{ConcurrencyFeedback, ExecutionQueue};
-use crate::protocol_types::common::{CompletionErrorEnvelope, CompletionResponseEnvelope};
+use crate::protocol_types::common::{
+    CompletionErrorEnvelope, CompletionErrorReason, CompletionResponseEnvelope,
+};
 use crate::protocol_types::{self};
-use crate::response_provider::{ResponseProvider, retry};
+use crate::response_provider::{ConversationContext, ProviderError, ResponseProvider, retry};
 use crate::websockets::WebSocketConnection;
 
 use futures_util::stream::SplitSink;
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinSet;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
@@ -49,8 +52,43 @@ enum OutboundEvent {
 }
 
 struct CompletionTaskOutput<ProgressMessage> {
+    conversation_id: protocol_types::ConversationId,
     progress: Vec<ProgressMessage>,
     outbound: OutboundProtocolMessage,
+}
+
+struct CompletionWork<ProgressMessage: 'static> {
+    tasks: JoinSet<CompletionTaskOutput<ProgressMessage>>,
+    queue: ExecutionQueue<protocol_types::CompletionRequest>,
+    sessions: Option<Sessions>,
+}
+
+impl<ProgressMessage: 'static> CompletionWork<ProgressMessage> {
+    fn new(
+        capacity: u8,
+        uses_context: bool,
+        supports_context: bool,
+    ) -> Result<Self, ProviderError> {
+        if uses_context && !supports_context {
+            return Err(ProviderError::Config(
+                "This provider script requires a multiturn evaluation".into(),
+            ));
+        }
+        Ok(Self {
+            tasks: JoinSet::new(),
+            queue: ExecutionQueue::new(capacity),
+            sessions: uses_context.then(Sessions::default),
+        })
+    }
+
+    async fn finish(mut self, provider: &Arc<dyn ResponseProvider>) -> Result<(), EvaluationError> {
+        if let Some(sessions) = self.sessions {
+            sessions.finish(provider).await;
+        } else {
+            self.tasks.abort_all();
+        }
+        drain_completion_tasks(&mut self.tasks).await
+    }
 }
 
 pub(super) trait EvaluationMode: Clone + Send + Sync + 'static {
@@ -81,6 +119,17 @@ pub(super) trait EvaluationMode: Clone + Send + Sync + 'static {
     fn evaluation_complete_progress(&self) -> Option<Self::ProgressMessage>;
 
     fn expected_response_name(&self) -> &'static str;
+
+    fn supports_conversation_context(&self) -> bool {
+        false
+    }
+
+    fn ended_conversation(
+        &self,
+        _message: &Self::OptionalMessage,
+    ) -> Option<protocol_types::ConversationId> {
+        None
+    }
 }
 
 fn classify_transport_message(result: Result<Message, tungstenite::Error>) -> TransportEvent {
@@ -127,16 +176,27 @@ async fn execute_completion_request<M: EvaluationMode>(
     provider: Arc<dyn ResponseProvider>,
     mode: M,
     concurrency_feedback: Option<ConcurrencyFeedback>,
+    context: Option<ConversationContext>,
+    stop: Option<oneshot::Receiver<()>>,
 ) -> CompletionTaskOutput<M::ProgressMessage> {
     use tracing::Instrument;
     let span = tracing::warn_span!("target_completion", request_id = %request.request_id);
     let result = retry::run(
-        || provider.generate_response(&request.messages),
+        || async {
+            if let Some(context) = &context {
+                provider
+                    .generate_response_with_context(&request.messages, context)
+                    .await
+            } else {
+                provider.generate_response(&request.messages).await
+            }
+        },
         || {
             if let Some(feedback) = &concurrency_feedback {
                 feedback.rate_limited();
             }
         },
+        stop,
     )
     .instrument(span)
     .await;
@@ -146,6 +206,7 @@ async fn execute_completion_request<M: EvaluationMode>(
                 feedback.succeeded();
             }
             CompletionTaskOutput {
+                conversation_id: request.conversation_id,
                 progress: mode.progress_on_completion_success(&request),
                 outbound: OutboundProtocolMessage::CompletionResponse(
                     protocol_types::CompletionResponse {
@@ -160,8 +221,11 @@ async fn execute_completion_request<M: EvaluationMode>(
             }
         }
         Err(err) => {
-            tracing::error!("Error generating response: {err}");
+            if !matches!(err, ProviderError::Cancelled) {
+                tracing::error!("Error generating response: {err}");
+            }
             CompletionTaskOutput {
+                conversation_id: request.conversation_id,
                 progress: Vec::new(),
                 outbound: OutboundProtocolMessage::CompletionError(
                     protocol_types::CompletionError {
@@ -185,31 +249,33 @@ pub(super) async fn run_evaluation<M>(
 where
     M: EvaluationMode,
 {
+    let mut work = CompletionWork::new(
+        max_concurrent_test_case_executions,
+        provider.uses_conversation_context(),
+        mode.supports_conversation_context(),
+    )?;
     let (mut write, mut read) = websocket_connection.split();
     write
         .send(Message::Text(mode.serialize_request(&request)?.into()))
         .await?;
 
-    let mut completion_tasks = JoinSet::<CompletionTaskOutput<M::ProgressMessage>>::new();
-    let mut completion_queue = ExecutionQueue::new(max_concurrent_test_case_executions);
     let progress_indicator_ref = progress_indicator.as_ref();
 
     let session_result = async {
         loop {
             tokio::select! {
-                join_result = completion_tasks.join_next(), if !completion_tasks.is_empty() => {
-                    if let Some(join_result) = join_result {
-                        let output = join_result?;
-                        emit_progress(progress_indicator_ref, output.progress).await?;
-                        send_outbound(&mut write, OutboundEvent::Protocol(output.outbound)).await?;
-                        start_queued_completions(
-                            &mut completion_queue,
-                            &mut completion_tasks,
-                            provider.clone(),
-                            &mode,
-                            progress_indicator_ref,
-                        ).await?;
+                join_result = work.tasks.join_next(), if !work.tasks.is_empty() => {
+                    match join_result {
+                        Some(Ok(output)) => {
+                            if accept_completion(work.sessions.as_mut(), &output) {
+                                emit_progress(progress_indicator_ref, output.progress).await?;
+                                send_outbound(&mut write, OutboundEvent::Protocol(output.outbound)).await?;
+                            }
+                        }
+                        Some(Err(error)) if !error.is_cancelled() => return Err(error.into()),
+                        _ => {}
                     }
+                    start_queued_completions(&mut work, &provider, &mode, progress_indicator_ref).await?;
                 }
                 message = read.next() => {
                     let Some(message) = message else {
@@ -225,10 +291,9 @@ where
                                 &mut write,
                                 &mode,
                                 text,
-                                provider.clone(),
+                                &provider,
                                 progress_indicator_ref,
-                                &mut completion_tasks,
-                                &mut completion_queue,
+                                &mut work,
                             )
                             .await?
                             {
@@ -275,7 +340,7 @@ where
     }
     .await;
 
-    drain_completion_tasks(&mut completion_tasks).await?;
+    work.finish(&provider).await?;
     session_result
 }
 
@@ -283,25 +348,38 @@ async fn handle_text_message<M>(
     write: &mut SplitSink<WebSocketConnection, Message>,
     mode: &M,
     text: String,
-    provider: Arc<dyn ResponseProvider>,
+    provider: &Arc<dyn ResponseProvider>,
     progress_indicator: Option<&mpsc::Sender<M::ProgressMessage>>,
-    completion_tasks: &mut JoinSet<CompletionTaskOutput<M::ProgressMessage>>,
-    completion_queue: &mut ExecutionQueue<protocol_types::CompletionRequest>,
+    work: &mut CompletionWork<M::ProgressMessage>,
 ) -> Result<Option<M::FinalResponse>, EvaluationError>
 where
     M: EvaluationMode,
 {
     match mode.parse_text(&text) {
         Ok(ParsedIncoming::CompletionRequest(request)) => {
-            completion_queue.push(request);
-            start_queued_completions(
-                completion_queue,
-                completion_tasks,
-                provider,
-                mode,
-                progress_indicator,
-            )
-            .await?;
+            if let Some(sessions) = &mut work.sessions
+                && let Err(error) = sessions.queue_turn(&request)
+            {
+                tracing::warn!(
+                    conversation_id = request.conversation_id,
+                    request_id = %request.request_id,
+                    %error,
+                    "Rejected completion request"
+                );
+                send_outbound(
+                    write,
+                    OutboundEvent::Protocol(OutboundProtocolMessage::CompletionError(
+                        protocol_types::CompletionError {
+                            request_id: request.request_id,
+                            error_reason: CompletionErrorReason::Unknown,
+                        },
+                    )),
+                )
+                .await?;
+                return Ok(None);
+            }
+            work.queue.push(request);
+            start_queued_completions(work, provider, mode, progress_indicator).await?;
             Ok(None)
         }
         Ok(ParsedIncoming::FinalResponse(response)) => {
@@ -312,6 +390,11 @@ where
             Ok(Some(response))
         }
         Ok(ParsedIncoming::OptionalMessage(optional)) => {
+            if let Some(sessions) = &mut work.sessions
+                && let Some(id) = mode.ended_conversation(&optional)
+            {
+                sessions.end(id, provider);
+            }
             emit_progress(progress_indicator, mode.progress_from_optional(optional)).await?;
             Ok(None)
         }
@@ -332,16 +415,25 @@ where
 }
 
 async fn start_queued_completions<M>(
-    completion_queue: &mut ExecutionQueue<protocol_types::CompletionRequest>,
-    completion_tasks: &mut JoinSet<CompletionTaskOutput<M::ProgressMessage>>,
-    provider: Arc<dyn ResponseProvider>,
+    work: &mut CompletionWork<M::ProgressMessage>,
+    provider: &Arc<dyn ResponseProvider>,
     mode: &M,
     progress_indicator: Option<&mpsc::Sender<M::ProgressMessage>>,
 ) -> Result<(), EvaluationError>
 where
     M: EvaluationMode,
 {
-    while let Some(admitted) = completion_queue.take_ready() {
+    while let Some(admitted) = work.queue.take_ready() {
+        let id = admitted.item.conversation_id;
+        let context = if let Some(sessions) = &work.sessions {
+            let Some(context) = sessions.context(id) else {
+                // The API ended this conversation while the turn was queued.
+                continue;
+            };
+            Some(context.clone())
+        } else {
+            None
+        };
         emit_progress(
             progress_indicator,
             mode.progress_on_completion_start(&admitted.item),
@@ -349,12 +441,41 @@ where
         .await?;
         let provider = provider.clone();
         let mode = mode.clone();
-        completion_tasks.spawn(async move {
+        let (finished, wait_for_finish) = oneshot::channel();
+        let stop_signal = work.sessions.as_mut().map(|sessions| {
+            let (stop, stop_signal) = oneshot::channel();
+            sessions.started(id, stop, wait_for_finish);
+            stop_signal
+        });
+        work.tasks.spawn(async move {
             let _permit = admitted.permit;
-            execute_completion_request(admitted.item, provider, mode, Some(admitted.feedback)).await
+            let _finished = finished;
+            execute_completion_request(
+                admitted.item,
+                provider,
+                mode,
+                Some(admitted.feedback),
+                context,
+                stop_signal,
+            )
+            .await
         });
     }
     Ok(())
+}
+
+fn accept_completion<P>(sessions: Option<&mut Sessions>, output: &CompletionTaskOutput<P>) -> bool {
+    let Some(sessions) = sessions else {
+        return true;
+    };
+    let reply = match &output.outbound {
+        OutboundProtocolMessage::CompletionResponse(response) => Some((
+            response.model_response.as_str(),
+            response.finish_reason.as_deref(),
+        )),
+        OutboundProtocolMessage::CompletionError(_) => None,
+    };
+    sessions.completed(output.conversation_id, reply)
 }
 
 async fn emit_progress<ProgressMessage>(
@@ -384,8 +505,6 @@ async fn send_outbound(
 async fn drain_completion_tasks<ProgressMessage: 'static>(
     completion_tasks: &mut JoinSet<CompletionTaskOutput<ProgressMessage>>,
 ) -> Result<(), EvaluationError> {
-    completion_tasks.abort_all();
-
     while let Some(join_result) = completion_tasks.join_next().await {
         match join_result {
             Ok(_) => {}
@@ -614,6 +733,8 @@ mod tests {
             Arc::new(SuccessProvider),
             TestMode,
             None,
+            None,
+            None,
         )
         .await;
 
@@ -651,6 +772,8 @@ mod tests {
             Arc::new(FailingProvider),
             TestMode,
             None,
+            None,
+            None,
         )
         .await;
 
@@ -686,6 +809,8 @@ mod tests {
             },
             Arc::new(ReportedFailure),
             TestMode,
+            None,
+            None,
             None,
         )
         .await;
@@ -734,6 +859,8 @@ mod tests {
             provider.clone(),
             TestMode,
             Some(admitted.feedback.clone()),
+            None,
+            None,
         )
         .await;
         assert_eq!(builds.lock().unwrap().len(), 2);

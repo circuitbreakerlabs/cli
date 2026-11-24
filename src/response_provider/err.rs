@@ -4,6 +4,9 @@ use thiserror::Error;
 #[allow(dead_code)]
 #[derive(Error, Debug)]
 pub enum ProviderError {
+    #[error("Completion cancelled")]
+    Cancelled,
+
     #[error("Configuration error: {0}")]
     Config(String),
 

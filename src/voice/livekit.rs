@@ -401,8 +401,10 @@ impl Session {
                             .unwrap_or("<missing>");
                         let top_level_keys = message
                             .as_object()
-                            .map(|object| object.keys().map(String::as_str).collect::<Vec<_>>())
-                            .unwrap_or_default();
+                            .into_iter()
+                            .flat_map(serde_json::Map::keys)
+                            .map(String::as_str)
+                            .collect::<Vec<_>>();
                         let event_id = ["/agent_response_complete_event/event_id", "/interruption_event/event_id", "/agent_response_event/event_id", "/event_id"]
                             .iter().find_map(|path| message.pointer(path).and_then(Value::as_u64));
                         tracing::info!(session_id = self.id, stream_id = state.stream, event_type, ?top_level_keys, event_id, caller_started = state.caller_started, elapsed_ms = started.elapsed().as_millis(), "voice_diag: provider event");
