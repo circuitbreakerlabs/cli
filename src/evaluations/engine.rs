@@ -82,11 +82,12 @@ impl<ProgressMessage: 'static> CompletionWork<ProgressMessage> {
     }
 
     async fn finish(mut self, provider: &Arc<dyn ResponseProvider>) -> Result<(), EvaluationError> {
-        let drained = drain_completion_tasks(&mut self.tasks).await;
         if let Some(sessions) = self.sessions {
             sessions.finish(provider).await;
+        } else {
+            self.tasks.abort_all();
         }
-        drained
+        drain_completion_tasks(&mut self.tasks).await
     }
 }
 
@@ -176,6 +177,7 @@ async fn execute_completion_request<M: EvaluationMode>(
     mode: M,
     concurrency_feedback: Option<ConcurrencyFeedback>,
     context: Option<ConversationContext>,
+    stop: Option<oneshot::Receiver<()>>,
 ) -> CompletionTaskOutput<M::ProgressMessage> {
     use tracing::Instrument;
     let span = tracing::warn_span!("target_completion", request_id = %request.request_id);
@@ -194,6 +196,7 @@ async fn execute_completion_request<M: EvaluationMode>(
                 feedback.rate_limited();
             }
         },
+        stop,
     )
     .instrument(span)
     .await;
@@ -218,7 +221,9 @@ async fn execute_completion_request<M: EvaluationMode>(
             }
         }
         Err(err) => {
-            tracing::error!("Error generating response: {err}");
+            if !matches!(err, ProviderError::Cancelled) {
+                tracing::error!("Error generating response: {err}");
+            }
             CompletionTaskOutput {
                 conversation_id: request.conversation_id,
                 progress: Vec::new(),
@@ -437,7 +442,12 @@ where
         let provider = provider.clone();
         let mode = mode.clone();
         let (finished, wait_for_finish) = oneshot::channel();
-        let abort = work.tasks.spawn(async move {
+        let stop_signal = work.sessions.as_mut().map(|sessions| {
+            let (stop, stop_signal) = oneshot::channel();
+            sessions.started(id, stop, wait_for_finish);
+            stop_signal
+        });
+        work.tasks.spawn(async move {
             let _permit = admitted.permit;
             let _finished = finished;
             execute_completion_request(
@@ -446,12 +456,10 @@ where
                 mode,
                 Some(admitted.feedback),
                 context,
+                stop_signal,
             )
             .await
         });
-        if let Some(sessions) = &mut work.sessions {
-            sessions.started(id, abort, wait_for_finish);
-        }
     }
     Ok(())
 }
@@ -497,8 +505,6 @@ async fn send_outbound(
 async fn drain_completion_tasks<ProgressMessage: 'static>(
     completion_tasks: &mut JoinSet<CompletionTaskOutput<ProgressMessage>>,
 ) -> Result<(), EvaluationError> {
-    completion_tasks.abort_all();
-
     while let Some(join_result) = completion_tasks.join_next().await {
         match join_result {
             Ok(_) => {}
@@ -728,6 +734,7 @@ mod tests {
             TestMode,
             None,
             None,
+            None,
         )
         .await;
 
@@ -766,6 +773,7 @@ mod tests {
             TestMode,
             None,
             None,
+            None,
         )
         .await;
 
@@ -801,6 +809,7 @@ mod tests {
             },
             Arc::new(ReportedFailure),
             TestMode,
+            None,
             None,
             None,
         )
@@ -850,6 +859,7 @@ mod tests {
             provider.clone(),
             TestMode,
             Some(admitted.feedback.clone()),
+            None,
             None,
         )
         .await;

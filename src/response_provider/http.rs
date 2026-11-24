@@ -18,10 +18,14 @@ pub struct HttpResponseProvider {
 
 impl HttpResponseProvider {
     pub fn new(api: Box<dyn ProviderApi>, headers: &HeaderMap) -> Result<Self, ProviderError> {
-        let client = reqwest::Client::builder()
-            .default_headers(headers.clone())
-            .build()?;
-        let cleanup_client = if api.uses_conversation_context() {
+        let stateful = api.uses_conversation_context();
+        let mut client = reqwest::Client::builder().default_headers(headers.clone());
+        if stateful {
+            // Allow for session startup and generation while bounding the cleanup wait.
+            client = client.timeout(Duration::from_mins(2));
+        }
+        let client = client.build()?;
+        let cleanup_client = if stateful {
             Some(
                 reqwest::Client::builder()
                     .default_headers(headers.clone())
@@ -215,7 +219,7 @@ mod tests {
         }];
         let response = tokio::time::timeout(
             Duration::from_secs(5),
-            retry::run(|| provider.generate_response(&messages), || {}),
+            retry::run(|| provider.generate_response(&messages), || {}, None),
         )
         .await
         .expect("script delay must override long header delay")
@@ -308,7 +312,7 @@ mod tests {
         let builds = api.builds.clone();
         let provider = HttpResponseProvider::new(Box::new(api), &HeaderMap::new()).unwrap();
         assert!(matches!(
-            retry::run(|| provider.generate_response(&[]), || {}).await,
+            retry::run(|| provider.generate_response(&[]), || {}, None).await,
             Err(ProviderError::Reported { .. })
         ));
         assert_eq!(builds.lock().unwrap().len(), 1);
@@ -335,7 +339,7 @@ mod tests {
         let builds = api.builds.clone();
         let provider = HttpResponseProvider::new(Box::new(api), &HeaderMap::new()).unwrap();
         assert!(matches!(
-            retry::run(|| provider.generate_response(&[]), || {}).await,
+            retry::run(|| provider.generate_response(&[]), || {}, None).await,
             Err(ProviderError::Network(_))
         ));
         assert_eq!(builds.lock().unwrap().len(), 1);

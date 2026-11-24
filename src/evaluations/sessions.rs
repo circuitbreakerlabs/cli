@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use tokio::sync::oneshot;
-use tokio::task::{AbortHandle, JoinSet};
+use tokio::task::JoinSet;
 
 use crate::protocol_types::{CompletionRequest, ConversationId};
 use crate::response_provider::{ConversationContext, ResponseProvider, SESSION_ENDED};
@@ -24,7 +24,7 @@ struct Session {
 enum Turn {
     Queued,
     Running {
-        abort: AbortHandle,
+        stop: oneshot::Sender<()>,
         finished: oneshot::Receiver<()>,
     },
 }
@@ -74,12 +74,12 @@ impl Sessions {
     pub(super) fn started(
         &mut self,
         id: ConversationId,
-        abort: AbortHandle,
+        stop: oneshot::Sender<()>,
         finished: oneshot::Receiver<()>,
     ) {
         if let Some(session) = self.active.get_mut(&id) {
             session.attempted = true;
-            session.turn = Some(Turn::Running { abort, finished });
+            session.turn = Some(Turn::Running { stop, finished });
         }
     }
 
@@ -105,15 +105,19 @@ impl Sessions {
         let Some(session) = self.active.remove(&id) else {
             return;
         };
-        if let Some(Turn::Running { abort, .. }) = &session.turn {
-            abort.abort();
-        }
+        let pending_attempt = match session.turn {
+            Some(Turn::Running { stop, finished }) => {
+                let _ = stop.send(());
+                Some(finished)
+            }
+            _ => None,
+        };
         if session.attempted && !session.ended_by_provider {
             while self.cleanup_tasks.try_join_next().is_some() {}
             let provider = provider.clone();
             self.cleanup_tasks.spawn(async move {
-                if let Some(Turn::Running { finished, .. }) = session.turn {
-                    // The worker drops the sender when its POST is complete or cancelled.
+                if let Some(finished) = pending_attempt {
+                    // An attempt already in progress settles before the worker exits.
                     let _ = finished.await;
                 }
                 if let Err(error) = provider.close_conversation(&session.context).await {

@@ -6,6 +6,8 @@ use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use serde_json::{Value, json};
+use tokio::io::AsyncWriteExt;
+use tokio::net::TcpListener;
 
 use super::multiturn::run_evaluation;
 use super::test_support::{recv_text_json, send_json, spawn_websocket_server};
@@ -13,7 +15,7 @@ use crate::protocol_types::common::RerunSelector;
 use crate::protocol_types::multi_turn::{
     MultiTurnEvaluationRequest, MultiTurnRequest, MultiTurnRerunRequest,
 };
-use crate::response_provider::test_support::serve_requests;
+use crate::response_provider::test_support::{read_request, serve_requests};
 use crate::response_provider::{CustomProvider, CustomProviderConfig, HttpResponseProvider};
 
 const RAW_REPLY: &str = "“I hear you.”\n[EXERCISE]\nLet’s talk.";
@@ -335,6 +337,110 @@ async fn conversation_error_cancels_the_retry_before_cleanup() {
     .unwrap()
     .unwrap();
     assert_eq!(result.total_failed, 1);
+    server.await.unwrap();
+    endpoint.await.unwrap();
+}
+
+#[tokio::test]
+async fn conversation_error_waits_for_the_in_flight_post_before_cleanup() {
+    tokio::time::timeout(Duration::from_secs(10), verify_post_cleanup_order(false))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn disconnect_waits_for_the_in_flight_post_before_cleanup() {
+    tokio::time::timeout(Duration::from_secs(10), verify_post_cleanup_order(true))
+        .await
+        .unwrap();
+}
+
+async fn verify_post_cleanup_order(disconnect: bool) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base_url = format!("http://{}", listener.local_addr().unwrap());
+    let (post_received, wait_for_post) = tokio::sync::oneshot::channel();
+    let (case_ended, wait_for_end) = tokio::sync::oneshot::channel();
+    let (session_deleted, wait_for_delete) = tokio::sync::oneshot::channel();
+    let endpoint = tokio::spawn(async move {
+        let (mut post, _) = listener.accept().await.unwrap();
+        let (headers, request) = read_request(&mut post).await;
+        assert!(headers.starts_with("POST /v1/chat/completions "));
+        assert_eq!(request["metadata"]["conversation_id"], "cbl-first-post");
+        post_received.send(()).unwrap();
+        wait_for_end.await.unwrap();
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(250), listener.accept())
+                .await
+                .is_err(),
+            "cleanup arrived before the first POST could open the session"
+        );
+        let (_, _, body) = mock_reply("Late reply");
+        let reply = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        post.write_all(reply.as_bytes()).await.unwrap();
+
+        let (mut delete, _) = listener.accept().await.unwrap();
+        let (headers, _) = read_request(&mut delete).await;
+        assert!(headers.starts_with("DELETE /v1/conversations/cbl-first-post "));
+        delete
+            .write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
+            .await
+            .unwrap();
+        let _ = session_deleted.send(());
+    });
+
+    let (socket, server) = spawn_websocket_server(move |socket| async move {
+        let (mut write, mut read) = socket.split();
+        let _ = recv_text_json(&mut read).await;
+        send_json(&mut write, initial(0, "first-post", "initial")).await;
+        wait_for_post.await.unwrap();
+        if disconnect {
+            write.close().await.unwrap();
+            case_ended.send(()).unwrap();
+            return;
+        }
+
+        send_json(&mut write, error(0)).await;
+        send_json(&mut write, initial(0, "closed", "unexpected")).await;
+        let reply = recv_text_json(&mut read).await;
+        assert_eq!(reply["type"], "completion_error");
+        assert_eq!(reply["data"]["request_id"], "closed");
+        case_ended.send(()).unwrap();
+        wait_for_delete.await.unwrap();
+        send_json(&mut write, initial(0, "still-closed", "unexpected")).await;
+        assert_eq!(
+            recv_text_json(&mut read).await["data"]["request_id"],
+            "still-closed"
+        );
+        send_json(
+            &mut write,
+            json!({
+                "type": "multi_turn_response",
+                "data": {"evaluation_id": 3, "total_passed": 0, "total_failed": 1},
+            }),
+        )
+        .await;
+    })
+    .await;
+    let result = run_evaluation(
+        socket,
+        session_provider(&base_url),
+        standard_request(),
+        1,
+        None,
+    )
+    .await;
+    if disconnect {
+        assert!(matches!(
+            result,
+            Err(super::EvaluationError::WebSocketClosed(_))
+        ));
+    } else {
+        assert_eq!(result.unwrap().total_failed, 1);
+    }
     server.await.unwrap();
     endpoint.await.unwrap();
 }
