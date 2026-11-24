@@ -2,6 +2,9 @@ mod engine;
 pub mod err;
 pub mod multiparty;
 pub mod multiturn;
+#[cfg(all(test, feature = "custom"))]
+mod session_adapter_tests;
+mod sessions;
 pub mod singleturn;
 #[cfg(test)]
 mod test_support;

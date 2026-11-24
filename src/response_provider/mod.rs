@@ -41,6 +41,14 @@ impl From<protocol_types::Message> for ProviderCompletion {
     }
 }
 
+pub const SESSION_ENDED: &str = "session_ended";
+
+#[derive(Clone, serde::Serialize)]
+pub struct ConversationContext {
+    pub first_request_id: String,
+    pub assistant_replies: Vec<String>,
+}
+
 /// One target-model call and its response translation.
 /// Evaluation code composes this interface with retry and admission policies.
 #[async_trait]
@@ -49,6 +57,25 @@ pub trait ResponseProvider: Send + Sync {
         &self,
         conversation_history: &[protocol_types::Message],
     ) -> Result<ProviderCompletion, err::ProviderError>;
+
+    fn uses_conversation_context(&self) -> bool {
+        false
+    }
+
+    async fn generate_response_with_context(
+        &self,
+        messages: &[protocol_types::Message],
+        _context: &ConversationContext,
+    ) -> Result<ProviderCompletion, ProviderError> {
+        self.generate_response(messages).await
+    }
+
+    async fn close_conversation(
+        &self,
+        _context: &ConversationContext,
+    ) -> Result<(), ProviderError> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -62,6 +89,35 @@ pub trait ProviderApi: Send + Sync {
         &self,
         messages: &[protocol_types::Message],
     ) -> Result<ProviderRequest, ProviderError>;
+
+    fn uses_conversation_context(&self) -> bool {
+        false
+    }
+
+    async fn build_request_with_context(
+        &self,
+        messages: &[protocol_types::Message],
+        _context: &ConversationContext,
+    ) -> Result<ProviderRequest, ProviderError> {
+        self.build_request(messages).await
+    }
+
+    async fn build_close_request(
+        &self,
+        _context: &ConversationContext,
+    ) -> Result<Option<ProviderRequest>, ProviderError> {
+        Ok(None)
+    }
+
+    fn parse_close_status(&self, status: reqwest::StatusCode) -> Result<(), ProviderError> {
+        if status.is_success() {
+            Ok(())
+        } else {
+            Err(ProviderError::Api(format!(
+                "Conversation cleanup returned HTTP {status}"
+            )))
+        }
+    }
 
     /// Interpret both successful and unsuccessful responses, including retry hints.
     async fn parse_response(

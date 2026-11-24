@@ -1,3 +1,4 @@
+use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 pub async fn serve_responses(
@@ -6,11 +7,22 @@ pub async fn serve_responses(
     String,
     tokio::task::JoinHandle<Vec<(String, serde_json::Value)>>,
 ) {
+    let count = responses.len();
+    let mut responses = responses.into_iter();
+    serve_requests(count, move |_, _| responses.next().unwrap()).await
+}
+
+type RecordedRequests = tokio::task::JoinHandle<Vec<(String, Value)>>;
+
+pub async fn serve_requests(
+    count: usize,
+    mut respond: impl FnMut(&str, &Value) -> (u16, Option<String>, String) + Send + 'static,
+) -> (String, RecordedRequests) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let server = tokio::spawn(async move {
         let mut requests = Vec::new();
-        for (status, retry_after, body) in responses {
+        for _ in 0..count {
             let (mut socket, _) = listener.accept().await.unwrap();
             let mut buffer = Vec::new();
             let mut chunk = [0; 4096];
@@ -30,13 +42,18 @@ pub async fn serve_responses(
                     name.eq_ignore_ascii_case("content-length")
                         .then(|| value.trim().parse().unwrap())
                 })
-                .unwrap();
+                .unwrap_or(0);
             while buffer.len() < header_end + length {
                 let count = socket.read(&mut chunk).await.unwrap();
                 assert!(count > 0);
                 buffer.extend_from_slice(&chunk[..count]);
             }
-            let request = serde_json::from_slice(&buffer[header_end..header_end + length]).unwrap();
+            let request = if length == 0 {
+                Value::Null
+            } else {
+                serde_json::from_slice(&buffer[header_end..header_end + length]).unwrap()
+            };
+            let (status, retry_after, body) = respond(&headers, &request);
             let retry_header =
                 retry_after.map_or_else(String::new, |value| format!("Retry-After: {value}\r\n"));
             socket.write_all(format!("HTTP/1.1 {status} Test\r\nContent-Length: {}\r\n{retry_header}Connection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();

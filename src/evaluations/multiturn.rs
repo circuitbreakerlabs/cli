@@ -128,6 +128,23 @@ impl EvaluationMode for MultiTurnMode {
     fn expected_response_name(&self) -> &'static str {
         "MultiTurnResponse"
     }
+
+    fn supports_conversation_context(&self) -> bool {
+        true
+    }
+
+    fn ended_conversation(
+        &self,
+        message: &Self::OptionalMessage,
+    ) -> Option<protocol_types::ConversationId> {
+        match message {
+            OptionalMultiTurnMessage::ConversationComplete(message) => {
+                Some(message.conversation_id)
+            }
+            OptionalMultiTurnMessage::ConversationError(message) => Some(message.conversation_id),
+            OptionalMultiTurnMessage::MultiTurnEvaluationStart(_) => None,
+        }
+    }
 }
 
 pub async fn run_evaluation(

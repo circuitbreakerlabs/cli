@@ -1,16 +1,18 @@
-use std::time::{Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use async_trait::async_trait;
 use reqwest::header::HeaderMap;
 
 use super::{
-    ProviderApi, ProviderCompletion, ProviderError, ProviderResponse, ResponseProvider, retry,
+    ConversationContext, ProviderApi, ProviderCompletion, ProviderError, ProviderRequest,
+    ProviderResponse, ResponseProvider, retry,
 };
 use crate::protocol_types::Message;
 
 /// Executes buffered HTTP completions with one shared retry policy.
 pub struct HttpResponseProvider {
     client: reqwest::Client,
+    cleanup_client: Option<reqwest::Client>,
     api: Box<dyn ProviderApi>,
 }
 
@@ -19,22 +21,30 @@ impl HttpResponseProvider {
         let client = reqwest::Client::builder()
             .default_headers(headers.clone())
             .build()?;
-        Ok(Self { client, api })
+        let cleanup_client = if api.uses_conversation_context() {
+            Some(
+                reqwest::Client::builder()
+                    .default_headers(headers.clone())
+                    .redirect(reqwest::redirect::Policy::none())
+                    .timeout(Duration::from_secs(5))
+                    .build()?,
+            )
+        } else {
+            None
+        };
+        Ok(Self {
+            client,
+            cleanup_client,
+            api,
+        })
     }
 
-    pub(super) async fn execute_once(
+    async fn execute_once(
         &self,
-        messages: &[Message],
+        request: ProviderRequest,
     ) -> Result<ProviderCompletion, ProviderError> {
-        let request = self.api.build_request(messages).await?;
         let started = Instant::now();
-        let response = self
-            .client
-            .request(request.method, request.url)
-            .headers(request.headers)
-            .body(request.body)
-            .send()
-            .await?;
+        let response = Self::send_request(&self.client, request).await?;
         // Capture dates at receipt, before buffering or adapter processing.
         let retry_after = retry::parse_retry_after(response.headers(), SystemTime::now());
         let status = response.status();
@@ -53,6 +63,18 @@ impl HttpResponseProvider {
             .await
             .map_err(|error| error.with_retry_after(retry_after))
     }
+
+    async fn send_request(
+        client: &reqwest::Client,
+        request: ProviderRequest,
+    ) -> Result<reqwest::Response, reqwest::Error> {
+        client
+            .request(request.method, request.url)
+            .headers(request.headers)
+            .body(request.body)
+            .send()
+            .await
+    }
 }
 
 #[async_trait]
@@ -61,7 +83,35 @@ impl ResponseProvider for HttpResponseProvider {
         &self,
         messages: &[Message],
     ) -> Result<ProviderCompletion, ProviderError> {
-        self.execute_once(messages).await
+        self.execute_once(self.api.build_request(messages).await?)
+            .await
+    }
+
+    fn uses_conversation_context(&self) -> bool {
+        self.api.uses_conversation_context()
+    }
+
+    async fn generate_response_with_context(
+        &self,
+        messages: &[Message],
+        context: &ConversationContext,
+    ) -> Result<ProviderCompletion, ProviderError> {
+        self.execute_once(
+            self.api
+                .build_request_with_context(messages, context)
+                .await?,
+        )
+        .await
+    }
+
+    async fn close_conversation(&self, context: &ConversationContext) -> Result<(), ProviderError> {
+        if let Some(client) = &self.cleanup_client
+            && let Some(request) = self.api.build_close_request(context).await?
+        {
+            let response = Self::send_request(client, request).await?;
+            self.api.parse_close_status(response.status())?;
+        }
+        Ok(())
     }
 }
 
@@ -69,10 +119,7 @@ impl ResponseProvider for HttpResponseProvider {
 mod tests {
     use super::*;
     use crate::protocol_types::Role;
-    use crate::response_provider::{
-        ProviderRequest,
-        test_support::{StubApi, serve_responses},
-    };
+    use crate::response_provider::test_support::{StubApi, serve_responses};
     use serde_json::json;
     use std::time::Duration;
 
@@ -83,6 +130,63 @@ mod tests {
             content: "reply".into(),
         }
         .into()
+    }
+
+    #[tokio::test]
+    async fn cleanup_uses_the_adapters_request_and_status_policy() {
+        struct CleanupApi {
+            url: String,
+        }
+
+        #[async_trait]
+        impl ProviderApi for CleanupApi {
+            fn uses_conversation_context(&self) -> bool {
+                true
+            }
+
+            async fn build_request(&self, _: &[Message]) -> Result<ProviderRequest, ProviderError> {
+                unreachable!("this test only sends a cleanup request")
+            }
+
+            async fn build_close_request(
+                &self,
+                context: &ConversationContext,
+            ) -> Result<Option<ProviderRequest>, ProviderError> {
+                let mut request = ProviderRequest::json(
+                    self.url.clone(),
+                    &json!({"session": context.first_request_id}),
+                )?;
+                request.method = reqwest::Method::PUT;
+                Ok(Some(request))
+            }
+
+            fn parse_close_status(&self, status: reqwest::StatusCode) -> Result<(), ProviderError> {
+                assert_eq!(status, reqwest::StatusCode::ACCEPTED);
+                Ok(())
+            }
+
+            async fn parse_response(
+                &self,
+                _: ProviderResponse,
+            ) -> Result<ProviderCompletion, ProviderError> {
+                unreachable!("cleanup has its own status policy")
+            }
+        }
+
+        let (url, server) = serve_responses(vec![(202, None, "{}".into())]).await;
+        let provider =
+            HttpResponseProvider::new(Box::new(CleanupApi { url }), &HeaderMap::new()).unwrap();
+        provider
+            .close_conversation(&ConversationContext {
+                first_request_id: "first-turn".into(),
+                assistant_replies: vec![],
+            })
+            .await
+            .unwrap();
+
+        let requests = server.await.unwrap();
+        assert!(requests[0].0.starts_with("put / "));
+        assert_eq!(requests[0].1, json!({"session": "first-turn"}));
     }
 
     #[tokio::test]
