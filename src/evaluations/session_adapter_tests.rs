@@ -21,8 +21,8 @@ use crate::protocol_types::multi_turn::{
 use crate::response_provider::test_support::{read_request, serve_requests};
 use crate::response_provider::{CustomProvider, CustomProviderConfig, HttpResponseProvider};
 
-const RAW_REPLY: &str = "“I hear you.”\n[EXERCISE]\nLet’s talk.";
-const FINAL_REPLY: &str = "Take care. [SESSION ENDED]\n";
+const RAW_REPLY: &str = "“Exact punctuation.”\nUnmodified second line.";
+const FINAL_REPLY: &str = "Final reply.\n";
 
 fn completion(id: i32, request_id: &str, messages: &Value) -> Value {
     json!({
@@ -51,15 +51,11 @@ fn error(id: i32) -> Value {
 }
 
 fn mock_reply(content: &str) -> (u16, Option<String>, String) {
+    let finish_reason = (content == FINAL_REPLY).then_some("session_ended");
     (
         200,
         None,
-        json!({
-            "choices": [{"message": {"content": content}, "finish_reason": "stop"}],
-            "usage": {"total_tokens": 0},
-            "cogo_greeting": "Welcome!",
-        })
-        .to_string(),
+        json!({"reply": content, "finish_reason": finish_reason}).to_string(),
     )
 }
 
@@ -77,7 +73,7 @@ async fn mock_session_endpoint() -> (String, tokio::task::JoinHandle<Vec<(String
                 .split_whitespace()
                 .nth(1)
                 .unwrap()
-                .strip_prefix("/v1/conversations/")
+                .strip_prefix("/test/sessions/")
                 .unwrap();
             let status = if history.remove(id).is_some() {
                 204
@@ -87,28 +83,22 @@ async fn mock_session_endpoint() -> (String, tokio::task::JoinHandle<Vec<(String
             return (status, None, String::new());
         }
 
-        assert!(headers.starts_with("POST /v1/chat/completions "));
-        assert_eq!(body["model"], "cogo-solo");
-        assert_eq!(body["stream"], false);
-        let id = body["metadata"]["conversation_id"].as_str().unwrap();
-        assert_eq!(body["metadata"], json!({"conversation_id": id}));
+        assert!(headers.starts_with("POST /test/completions "));
+        let id = body["session_id"].as_str().unwrap();
         let messages = body["messages"].as_array().unwrap();
         let input = messages.last().unwrap()["content"].as_str().unwrap();
         if input == "expired" {
-            assert_eq!(id, "cbl-expired");
+            assert_eq!(id, "expired");
             return (410, None, "{}".into());
         }
 
         let previous = history.entry(id.to_owned()).or_insert_with(Vec::new);
-        if &messages[..messages.len() - 1] != previous.as_slice() {
+        if body["previous_replies"] != json!(previous) {
             return (409, None, "{}".into());
         }
-        assert_eq!(
-            messages.last().unwrap(),
-            &json!({"role": "user", "content": input})
-        );
+        assert_eq!(messages.last().unwrap()["role"], "user");
         if input == "first A" {
-            assert_eq!(id, "cbl-first-a");
+            assert_eq!(id, "first-a");
             if let Some(first_body) = &rate_limited_body {
                 assert_eq!(body, first_body);
             } else {
@@ -119,36 +109,29 @@ async fn mock_session_endpoint() -> (String, tokio::task::JoinHandle<Vec<(String
         let reply = match input {
             "first A" => RAW_REPLY,
             "first B" => {
-                assert_eq!(id, "cbl-first-b");
+                assert_eq!(id, "first-b");
                 "Reply B"
             }
             "continue" => {
-                assert_eq!(id, "cbl-first-a");
+                assert_eq!(id, "first-a");
                 FINAL_REPLY
             }
             "rerun A" => {
-                assert_eq!(id, "cbl-rerun-a");
+                assert_eq!(id, "rerun-a");
                 "Rerun reply"
             }
             other => panic!("Unexpected user input {other}"),
         };
-        previous.push(messages.last().unwrap().clone());
-        previous.push(json!({"role": "assistant", "content": reply}));
+        previous.push(reply);
         mock_reply(reply)
     })
     .await
 }
 
 fn session_provider(base_url: &str) -> Arc<HttpResponseProvider> {
-    scripted_provider(base_url, "cogo_solo.rhai")
-}
-
-fn scripted_provider(base_url: &str, script: &str) -> Arc<HttpResponseProvider> {
     let api = CustomProvider::new(&CustomProviderConfig {
-        url: format!("{base_url}/v1/chat/completions"),
-        script: Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("examples/providers")
-            .join(script),
+        url: format!("{base_url}/test/completions"),
+        script: Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/stateful_provider.rhai"),
     })
     .unwrap();
     let headers =
@@ -250,10 +233,9 @@ async fn drive_dual_evaluation(provider: Arc<HttpResponseProvider>, rerun: bool)
 }
 
 #[tokio::test]
-async fn multiparty_coalesces_each_round_and_replays_the_acknowledged_history() {
+async fn multiparty_passes_session_context_and_closes_completed_sessions() {
     let mut first_attempt = None;
-    let first_turn =
-        json!({"role": "user", "content": "Alex:   First A. \nJordan: First B.\nAnother line."});
+    let first_round = dual_round("  First A. ", "First B.\nAnother line.");
     let (base_url, endpoint) = serve_requests(5, move |headers, body| {
         assert!(
             headers
@@ -261,23 +243,16 @@ async fn multiparty_coalesces_each_round_and_replays_the_acknowledged_history() 
                 .any(|line| line == "authorization: Bearer test-key")
         );
         if headers.starts_with("DELETE ") {
-            assert!(headers.starts_with("DELETE /v1/conversations/cbl-dual-rerun "));
+            assert!(headers.starts_with("DELETE /test/sessions/dual-rerun "));
             return (204, None, String::new());
         }
-        assert!(headers.starts_with("POST /v1/chat/completions "));
-        assert_eq!(body["model"], "cogo-dual");
-        assert_eq!(body["stream"], false);
-        let id = body["metadata"]["conversation_id"].as_str().unwrap();
+        assert!(headers.starts_with("POST /test/completions "));
+        let id = body["session_id"].as_str().unwrap();
         let messages = body["messages"].as_array().unwrap();
-        if messages.len() == 1 {
-            assert_eq!(messages[0], first_turn);
-            assert_eq!(
-                body["metadata"],
-                json!({
-                    "conversation_id": id, "person1_name": "Alex", "person2_name": "Jordan",
-                })
-            );
-            if id == "cbl-dual-first" {
+        if messages.len() == 2 {
+            assert_eq!(messages.as_slice(), &first_round);
+            assert_eq!(body["previous_replies"], json!([]));
+            if id == "dual-first" {
                 if let Some(previous) = &first_attempt {
                     assert_eq!(body, previous);
                 } else {
@@ -285,27 +260,19 @@ async fn multiparty_coalesces_each_round_and_replays_the_acknowledged_history() 
                     return (429, Some("2".into()), "{}".into());
                 }
             } else {
-                assert_eq!(id, "cbl-dual-rerun");
+                assert_eq!(id, "dual-rerun");
             }
             return mock_reply(RAW_REPLY);
         }
-        assert_eq!(
-            body["metadata"],
-            json!({"conversation_id": "cbl-dual-first"})
-        );
-        let expected = json!([
-            first_turn,
-            {"role": "assistant", "content": RAW_REPLY},
-            {"role": "user", "content": "Alex: Second A.\nJordan: Second B."},
-        ]);
-        if body["messages"] != expected {
-            return (409, None, "{}".into());
-        }
+        assert_eq!(id, "dual-first");
+        assert_eq!(body["previous_replies"], json!([RAW_REPLY]));
+        assert_eq!(&messages[1..3], &first_round);
+        assert_eq!(&messages[4..], &dual_round("Second A.", "Second B."));
         mock_reply(FINAL_REPLY)
     })
     .await;
     tokio::time::timeout(Duration::from_secs(10), async {
-        let provider = scripted_provider(&base_url, "cogo_dual.rhai");
+        let provider = session_provider(&base_url);
         drive_dual_evaluation(provider.clone(), false).await;
         drive_dual_evaluation(provider, true).await;
         endpoint.await.unwrap();
@@ -340,9 +307,9 @@ async fn multiturn_replays_exact_history_and_closes_sessions() {
         assert_eq!(
             deletes,
             [
-                "/v1/conversations/cbl-expired",
-                "/v1/conversations/cbl-first-b",
-                "/v1/conversations/cbl-rerun-a",
+                "/test/sessions/expired",
+                "/test/sessions/first-b",
+                "/test/sessions/rerun-a",
             ]
         );
     })
@@ -375,7 +342,7 @@ async fn run_standard(provider: Arc<HttpResponseProvider>) {
         let history = json!([
             {"role": "system", "content": "Test prompt"},
             {"role": "user", "content": "first A"},
-            {"role": "assistant", "content": "\"I hear you.\" [EXERCISE] Let's talk."},
+            {"role": "assistant", "content": "Sanitized reply."},
             {"role": "user", "content": "continue"},
         ]);
         send_json(&mut write, completion(0, "second-a", &history)).await;
@@ -457,7 +424,7 @@ async fn conversation_error_cancels_the_retry_before_cleanup() {
             post_received.take().unwrap().send(()).unwrap();
             (429, Some("60".into()), "{}".into())
         } else {
-            assert!(headers.starts_with("DELETE /v1/conversations/cbl-limited "));
+            assert!(headers.starts_with("DELETE /test/sessions/limited "));
             delete_received.take().unwrap().send(()).unwrap();
             (404, None, String::new())
         }
@@ -531,8 +498,8 @@ async fn verify_post_cleanup_order(disconnect: bool) {
     let endpoint = tokio::spawn(async move {
         let (mut post, _) = listener.accept().await.unwrap();
         let (headers, request) = read_request(&mut post).await;
-        assert!(headers.starts_with("POST /v1/chat/completions "));
-        assert_eq!(request["metadata"]["conversation_id"], "cbl-first-post");
+        assert!(headers.starts_with("POST /test/completions "));
+        assert_eq!(request["session_id"], "first-post");
         post_received.send(()).unwrap();
         wait_for_end.await.unwrap();
 
@@ -551,7 +518,7 @@ async fn verify_post_cleanup_order(disconnect: bool) {
 
         let (mut delete, _) = listener.accept().await.unwrap();
         let (headers, _) = read_request(&mut delete).await;
-        assert!(headers.starts_with("DELETE /v1/conversations/cbl-first-post "));
+        assert!(headers.starts_with("DELETE /test/sessions/first-post "));
         delete
             .write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
             .await
