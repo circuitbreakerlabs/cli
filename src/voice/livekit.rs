@@ -452,9 +452,13 @@ impl Session {
                         let event_type = provider_event(&message);
                         let top_level_keys = message
                             .as_object()
-                            .map(|object| object.keys().map(String::as_str).collect::<Vec<_>>())
-                            .unwrap_or_default();
-                        let event_id = event_type.event_id();
+                            .into_iter()
+                            .flat_map(serde_json::Map::keys)
+                            .map(String::as_str)
+                            .collect::<Vec<_>>();
+                        let event_id = event_type.event_id().or_else(|| {
+                            message.pointer("/event_id").and_then(Value::as_u64)
+                        });
                         tracing::info!(session_id = self.id, stream_id = state.stream, event_type = ?event_type, ?top_level_keys, event_id, caller_started = state.caller_started, elapsed_ms = started.elapsed().as_millis(), "voice_diag: provider event");
                         // Customer audio is delivered through the subscribed LiveKit
                         // track. ElevenLabs also emits base64 `audio` data events;

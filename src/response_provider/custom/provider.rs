@@ -2,7 +2,8 @@ use super::config::CustomProviderConfig;
 use crate::protocol_types;
 use crate::protocol_types::common::CompletionErrorReason;
 use crate::response_provider::{
-    ProviderApi, ProviderCompletion, ProviderError, ProviderRequest, ProviderResponse,
+    ConversationContext, ProviderApi, ProviderCompletion, ProviderError, ProviderRequest,
+    ProviderResponse,
 };
 use async_trait::async_trait;
 use rhai::serde::to_dynamic;
@@ -60,6 +61,7 @@ impl From<ProviderResponse> for HttpResponse {
 enum ParsedResponse {
     Success {
         content: String,
+        finish_reason: Option<String>,
     },
     Error {
         reason: CompletionErrorReason,
@@ -76,17 +78,25 @@ impl TryFrom<&rhai::Dynamic> for ProviderCompletion {
             ProviderError::Parsing(format!("parse_response must return #{{type: \"success\", content: String}} or #{{type: \"error\", reason: valid error reason, message: String, retry_after_seconds: optional nonnegative integer}}: {e}"))
         })?;
         match result {
-            ParsedResponse::Success { content } if content.is_empty() => {
+            ParsedResponse::Success { ref content, .. } if content.is_empty() => {
                 Err(ProviderError::Parsing(
                     "parse_response returned an empty string for content".to_string(),
                 ))
             }
-            ParsedResponse::Success { content } => Ok(protocol_types::Message {
-                name: None,
-                role: protocol_types::Role::Assistant,
+            ParsedResponse::Success {
                 content,
-            }
-            .into()),
+                finish_reason,
+            } => Ok(Self {
+                message: protocol_types::Message {
+                    name: None,
+                    role: protocol_types::Role::Assistant,
+                    content,
+                },
+                model_id: None,
+                tokens_used: None,
+                finish_reason,
+                provider_response_id: None,
+            }),
             ParsedResponse::Error {
                 reason,
                 message,
@@ -117,6 +127,8 @@ pub struct CustomProvider {
     ast: Arc<rhai::AST>,
     engine: Arc<rhai::Engine>,
     url: String,
+    uses_context: bool,
+    has_close_hook: bool,
 }
 
 impl CustomProvider {
@@ -132,29 +144,47 @@ impl CustomProvider {
             tracing::debug!("[rhai] {s} @ {src:?}:{pos}");
         });
 
+        let uses_context = ast
+            .iter_functions()
+            .any(|function| function.name == "build_request" && function.params.len() == 2);
+        let has_close_hook = ast
+            .iter_functions()
+            .any(|function| function.name == "build_close_path" && function.params.len() == 1);
         Ok(Self {
+            uses_context,
+            has_close_hook,
             engine: Arc::new(engine),
             ast,
             url: config.url.clone(),
         })
     }
-}
 
-#[async_trait]
-impl ProviderApi for CustomProvider {
-    async fn build_request(
+    async fn translate_request(
         &self,
         conversation_history: &[protocol_types::Message],
+        context: Option<&ConversationContext>,
     ) -> Result<ProviderRequest, ProviderError> {
         let messages_dynamic =
             to_dynamic(conversation_history).map_err(|e| ProviderError::Parsing(e.to_string()))?;
+        let context = context
+            .map(to_dynamic)
+            .transpose()
+            .map_err(|e| ProviderError::Parsing(e.to_string()))?;
         let engine = self.engine.clone();
         let ast = self.ast.clone();
         let request_body = tokio::task::spawn_blocking(move || {
             let mut scope = rhai::Scope::new();
-            engine
-                .call_fn::<rhai::Map>(&mut scope, &ast, "build_request", (messages_dynamic,))
-                .map_err(|e| ProviderError::Script(format!("build_request: {e}")))
+            let result = if let Some(context) = context {
+                engine.call_fn::<rhai::Map>(
+                    &mut scope,
+                    &ast,
+                    "build_request",
+                    (messages_dynamic, context),
+                )
+            } else {
+                engine.call_fn::<rhai::Map>(&mut scope, &ast, "build_request", (messages_dynamic,))
+            };
+            result.map_err(|e| ProviderError::Script(format!("build_request: {e}")))
         })
         .await
         .map_err(|e| ProviderError::Script(format!("Spawn error: {e}")))??;
@@ -162,6 +192,81 @@ impl ProviderApi for CustomProvider {
         let json_body = rhai::serde::from_dynamic::<serde_json::Value>(&request_body.into())
             .map_err(|e| ProviderError::Parsing(e.to_string()))?;
         ProviderRequest::json(self.url.clone(), &json_body)
+    }
+}
+
+#[async_trait]
+impl ProviderApi for CustomProvider {
+    async fn build_request(
+        &self,
+        messages: &[protocol_types::Message],
+    ) -> Result<ProviderRequest, ProviderError> {
+        self.translate_request(messages, None).await
+    }
+
+    fn uses_conversation_context(&self) -> bool {
+        self.uses_context
+    }
+
+    async fn build_request_with_context(
+        &self,
+        messages: &[protocol_types::Message],
+        context: &ConversationContext,
+    ) -> Result<ProviderRequest, ProviderError> {
+        self.translate_request(messages, self.uses_context.then_some(context))
+            .await
+    }
+
+    async fn build_close_request(
+        &self,
+        context: &ConversationContext,
+    ) -> Result<Option<ProviderRequest>, ProviderError> {
+        if !self.has_close_hook {
+            return Ok(None);
+        }
+        let context = to_dynamic(context).map_err(|e| ProviderError::Parsing(e.to_string()))?;
+        let engine = self.engine.clone();
+        let ast = self.ast.clone();
+        let path = tokio::task::spawn_blocking(move || {
+            engine
+                .call_fn::<String>(
+                    &mut rhai::Scope::new(),
+                    &ast,
+                    "build_close_path",
+                    (context,),
+                )
+                .map_err(|e| ProviderError::Script(format!("build_close_path: {e}")))
+        })
+        .await
+        .map_err(|e| ProviderError::Script(format!("Spawn error: {e}")))??;
+
+        let base = reqwest::Url::parse(&self.url)
+            .map_err(|_| ProviderError::Config("Invalid provider endpoint URL".into()))?;
+        let url = base.join(&path).map_err(|_| {
+            ProviderError::Script("build_close_path returned an invalid path".into())
+        })?;
+        if !path.starts_with('/') || path.starts_with("//") || url.origin() != base.origin() {
+            return Err(ProviderError::Script(
+                "build_close_path must return a root-relative path on the provider origin".into(),
+            ));
+        }
+        Ok(Some(ProviderRequest {
+            method: reqwest::Method::DELETE,
+            url: url.into(),
+            headers: reqwest::header::HeaderMap::new(),
+            body: Vec::new(),
+        }))
+    }
+
+    fn parse_close_status(&self, status: reqwest::StatusCode) -> Result<(), ProviderError> {
+        match status {
+            reqwest::StatusCode::NO_CONTENT
+            | reqwest::StatusCode::NOT_FOUND
+            | reqwest::StatusCode::GONE => Ok(()),
+            _ => Err(ProviderError::Api(format!(
+                "Conversation cleanup returned HTTP {status}"
+            ))),
+        }
     }
 
     async fn parse_response(
@@ -191,7 +296,7 @@ mod tests {
     use super::CustomProvider;
     use crate::protocol_types::{Message, Role};
     use crate::response_provider::{
-        CustomProviderConfig, HttpResponseProvider, ProviderApi, ProviderError,
+        CustomProviderConfig, HttpResponseProvider, ProviderApi, ProviderError, ResponseProvider,
     };
     use reqwest::header::HeaderMap;
     use serde_json::json;
@@ -403,7 +508,7 @@ mod tests {
         ];
 
         let response = provider
-            .execute_once(&messages)
+            .generate_response(&messages)
             .await
             .expect("response should be generated");
         let request_json = server_handle.await.expect("server task should complete");
@@ -445,7 +550,7 @@ mod tests {
         .unwrap();
 
         let err = provider
-            .execute_once(&[Message {
+            .generate_response(&[Message {
                 name: None,
                 role: Role::User,
                 content: "hello".to_string(),
@@ -484,7 +589,7 @@ mod tests {
         .unwrap();
 
         let err = provider
-            .execute_once(&[Message {
+            .generate_response(&[Message {
                 name: None,
                 role: Role::User,
                 content: "hello".to_string(),
@@ -523,7 +628,7 @@ mod tests {
         .unwrap();
 
         let err = provider
-            .execute_once(&[Message {
+            .generate_response(&[Message {
                 name: None,
                 role: Role::User,
                 content: "hello".to_string(),
@@ -547,7 +652,7 @@ mod tests {
         })
         .unwrap();
         let provider = HttpResponseProvider::new(Box::new(api), &HeaderMap::new()).unwrap();
-        let result = provider.execute_once(&[]).await;
+        let result = provider.generate_response(&[]).await;
         std::fs::remove_file(path).unwrap();
         result
     }

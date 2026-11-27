@@ -1,6 +1,7 @@
 use std::time::{Duration, SystemTime};
 
 use reqwest::header::{HeaderMap, RETRY_AFTER};
+use tokio::sync::oneshot;
 
 use super::{ProviderCompletion, ProviderError};
 use crate::protocol_types::common::CompletionErrorReason;
@@ -29,6 +30,7 @@ pub fn parse_retry_after(headers: &HeaderMap, now: SystemTime) -> Option<Duratio
 pub(crate) async fn run<F, Fut, R>(
     mut attempt: F,
     mut on_rate_limited: R,
+    mut stop: Option<oneshot::Receiver<()>>,
 ) -> Result<ProviderCompletion, ProviderError>
 where
     F: FnMut() -> Fut,
@@ -37,6 +39,12 @@ where
 {
     let mut delays = [2, 4, 8].into_iter().enumerate();
     loop {
+        if let Some(stop) = &mut stop
+            && !matches!(stop.try_recv(), Err(oneshot::error::TryRecvError::Empty))
+        {
+            return Err(ProviderError::Cancelled);
+        }
+        // Cancellation interrupts the backoff, never an attempt already in flight.
         let error = match attempt().await {
             Ok(completion) => return Ok(completion),
             Err(error) => error,
@@ -57,7 +65,14 @@ where
             delay_seconds = delay.as_secs_f64(),
             "Target rate limited; scheduling retry"
         );
-        tokio::time::sleep(delay).await;
+        if let Some(stop) = &mut stop {
+            tokio::select! {
+                _ = stop => return Err(ProviderError::Cancelled),
+                () = tokio::time::sleep(delay) => {}
+            }
+        } else {
+            tokio::time::sleep(delay).await;
+        }
     }
 }
 
@@ -137,7 +152,7 @@ mod tests {
             let provider = ScriptedProvider::new(outcomes);
             let messages = history();
             let start = Instant::now();
-            let result = run(|| provider.generate_response(&messages), || {})
+            let result = run(|| provider.generate_response(&messages), || {}, None)
                 .await
                 .unwrap();
             assert_eq!(result.message.content, "reply");
@@ -163,7 +178,7 @@ mod tests {
         ]);
         let messages = history();
         let start = Instant::now();
-        let error = run(|| provider.generate_response(&messages), || {})
+        let error = run(|| provider.generate_response(&messages), || {}, None)
             .await
             .unwrap_err();
         assert_eq!(error.retry_after(), Some(Duration::from_mins(15)));
@@ -192,7 +207,12 @@ mod tests {
             let messages = history();
             let mut signals = 0;
             assert!(matches!(
-                run(|| provider.generate_response(&messages), || signals += 1).await,
+                run(
+                    || provider.generate_response(&messages),
+                    || signals += 1,
+                    None
+                )
+                .await,
                 Err(ProviderError::Network(_))
             ));
             assert_eq!(signals, usize::from(prior_limit));
@@ -208,9 +228,13 @@ mod tests {
         let provider = ScriptedProvider::new(vec![limited(None), limited(None), Ok(success())]);
         let messages = history();
         let mut signals = 0;
-        run(|| provider.generate_response(&messages), || signals += 1)
-            .await
-            .unwrap();
+        run(
+            || provider.generate_response(&messages),
+            || signals += 1,
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(signals, 2);
     }
 
@@ -223,12 +247,12 @@ mod tests {
         let clone = slow.clone();
         let task = tokio::spawn(async move {
             let messages = history();
-            run(|| clone.generate_response(&messages), || {}).await
+            run(|| clone.generate_response(&messages), || {}, None).await
         });
         tokio::task::yield_now().await;
         let fast = ScriptedProvider::new(vec![Ok(success())]);
         let messages = history();
-        run(|| fast.generate_response(&messages), || {})
+        run(|| fast.generate_response(&messages), || {}, None)
             .await
             .unwrap();
         task.abort();

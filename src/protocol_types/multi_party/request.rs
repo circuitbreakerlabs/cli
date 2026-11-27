@@ -121,6 +121,8 @@ pub struct MultiPartyRequestEnvelope {
     pub version: String,
     #[serde(rename = "type")]
     pub message_type: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stateful_customer: bool,
     pub data: MultiPartyRequest,
 }
 
@@ -129,6 +131,8 @@ pub struct MultiPartyRerunRequestEnvelope {
     pub version: String,
     #[serde(rename = "type")]
     pub message_type: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stateful_customer: bool,
     pub data: MultiPartyRerunRequest,
 }
 
@@ -137,6 +141,7 @@ impl From<MultiPartyRequest> for MultiPartyRequestEnvelope {
         Self {
             version: crate::consts::version::PROTOCOL_VERSION.to_string(),
             message_type: "multiparty_request".to_string(),
+            stateful_customer: false,
             data,
         }
     }
@@ -147,6 +152,7 @@ impl From<MultiPartyRerunRequest> for MultiPartyRerunRequestEnvelope {
         Self {
             version: crate::consts::version::PROTOCOL_VERSION.to_string(),
             message_type: "multiparty_rerun_request".to_string(),
+            stateful_customer: false,
             data,
         }
     }
