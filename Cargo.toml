@@ -5,7 +5,6 @@ edition = "2024"
 build = "build.rs"
 description = "Circuit Breaker Labs command-line interface"
 repository = "https://github.com/circuitbreakerlabs/cli"
-homepage = "https://github.com/circuitbreakerlabs/cli"
 documentation = "https://api.circuitbreakerlabs.ai/v1/docs"
 
 [[bin]]
