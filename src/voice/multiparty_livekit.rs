@@ -14,7 +14,6 @@ use super::{
 };
 use async_trait::async_trait;
 use futures_util::StreamExt;
-use itertools::Itertools;
 use livekit::{
     options::TrackPublishOptions,
     prelude::*,
@@ -490,7 +489,7 @@ impl Session {
                             .into_iter()
                             .flat_map(serde_json::Map::keys)
                             .map(String::as_str)
-                            .collect_vec();
+                            .collect::<Vec<_>>();
                         tracing::info!(
                             session_id = self.spec.session_id,
                             exchange_id = state.exchange,
