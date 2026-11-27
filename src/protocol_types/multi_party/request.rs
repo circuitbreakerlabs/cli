@@ -78,6 +78,13 @@ pub enum MultiPartyEvaluationRequest {
 }
 
 impl MultiPartyEvaluationRequest {
+    pub fn max_turns(&self) -> usize {
+        match self {
+            Self::Standard(request) => usize::from(request.max_turns),
+            Self::Rerun(request) => usize::from(request.max_turns),
+        }
+    }
+
     pub fn test_case_groups(&self) -> Option<&[String]> {
         match self {
             MultiPartyEvaluationRequest::Standard(request) => Some(&request.test_case_groups),
@@ -217,7 +224,7 @@ mod tests {
         else {
             panic!("expected multi-party command");
         };
-        assert_eq!(provider.max_concurrent_test_case_executions(), 5);
+        assert_eq!(provider.text().max_concurrent_test_case_executions(), 5);
     }
 
     fn rerun_argv<'a>(selector: &'a [&'a str]) -> Vec<&'a str> {

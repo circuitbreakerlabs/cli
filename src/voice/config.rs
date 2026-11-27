@@ -1,7 +1,7 @@
 //! `LiveKit` connection configuration; parsing has no native SDK dependency.
 use super::{Error, Result};
-use serde::Deserialize;
-use serde_json::{Value, json};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
@@ -56,14 +56,26 @@ impl Config {
         Ok(config)
     }
 
-    pub fn context(&self, session_id: i32, max_turns: u32) -> Result<Value> {
+    pub fn context(&self, session_id: i32, max_turns: u32) -> Result<BootstrapContext> {
         let mut credentials = BTreeMap::new();
         for (key, name) in &self.credentials {
             credentials.insert(key.clone(), read_secret(name)?);
         }
-        Ok(json!({"session_id": session_id, "max_turns": max_turns,
-            "parameters": self.parameters, "credentials": credentials}))
+        Ok(BootstrapContext {
+            session_id,
+            max_turns,
+            parameters: self.parameters.clone(),
+            credentials,
+        })
     }
+}
+
+#[derive(Clone, Serialize)]
+pub struct BootstrapContext {
+    pub session_id: i32,
+    pub max_turns: u32,
+    pub parameters: BTreeMap<String, Value>,
+    pub credentials: BTreeMap<String, String>,
 }
 
 pub fn read_secret(name: &str) -> Result<String> {

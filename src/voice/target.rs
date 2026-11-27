@@ -1,5 +1,5 @@
 //! Adapter selection and local preparation before contacting the evaluation API.
-use super::session::VoiceSessionProvider;
+use super::{common_protocol::VoiceTransport, session::VoiceSessionProvider};
 use std::sync::Arc;
 #[cfg(feature = "livekit")]
 use {
@@ -9,7 +9,7 @@ use {
 
 pub struct TargetMetadata {
     pub label: String,
-    pub transport: &'static str,
+    pub transport: VoiceTransport,
 }
 
 pub struct PreparedTarget {
@@ -40,7 +40,7 @@ pub fn prepare_livekit(path: &Path, max_turns: usize) -> Result<PreparedTarget> 
     Ok(PreparedTarget {
         metadata: TargetMetadata {
             label: config.label.clone(),
-            transport: "livekit",
+            transport: VoiceTransport::Livekit,
         },
         provider: Arc::new(Provider(config)),
     })

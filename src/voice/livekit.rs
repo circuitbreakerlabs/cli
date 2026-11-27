@@ -2,9 +2,15 @@
 use super::{
     Error, Result,
     config::Config,
-    hooks::{self, Action, Hooks},
-    protocol::{Audio, AudioHeader, Command, FRAME_BYTES, Input, QUEUE_FRAMES},
-    session::{Output, VoiceSession, VoiceSessionProvider, emit},
+    hooks::{
+        self, Action, Hooks, ProviderEvent, TargetEvent, V1BootstrapContext, V1SessionEvent,
+        provider_event,
+    },
+    protocol::{
+        Audio, AudioHeader, Capabilities, Command, FRAME_BYTES, Input, Output as WireOutput,
+        QUEUE_FRAMES, SessionEvent,
+    },
+    session::{Output, VoiceSession, VoiceSessionProvider},
 };
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -17,7 +23,7 @@ use livekit::{
         audio_stream::native::{NativeAudioStream, NativeAudioStreamOptions},
     },
 };
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::{
     borrow::Cow,
     sync::{
@@ -32,9 +38,7 @@ use tokio::{
     time::Instant,
 };
 
-use tokio_tungstenite::tungstenite::Message;
-
-pub struct Provider(pub Config);
+pub(super) struct Provider(pub(super) Config);
 #[async_trait]
 impl VoiceSessionProvider for Provider {
     async fn connect(&self, session_id: i32, max_turns: u32) -> Result<Box<dyn VoiceSession>> {
@@ -47,8 +51,10 @@ impl VoiceSessionProvider for Provider {
                 .map_err(|_| Error::Transport)?
                 .as_nanos()
         );
-        let mut context = self.0.context(session_id, max_turns)?;
-        context["session_nonce"] = json!(nonce);
+        let context = V1BootstrapContext {
+            base: self.0.context(session_id, max_turns)?,
+            session_nonce: nonce.clone(),
+        };
         let connection = hooks::connect(&self.0, context).await?;
         let hooks = Hooks::new(&self.0)?;
         let (room, events) =
@@ -65,6 +71,13 @@ impl VoiceSessionProvider for Provider {
             nonce,
             external_session_id: connection.external_session_id,
         }))
+    }
+
+    async fn connect_multiparty(
+        &self,
+        spec: super::session::MultipartySessionSpec,
+    ) -> Result<Box<dyn super::session::MultipartyVoiceSession>> {
+        super::multiparty_livekit::connect(&self.0, spec).await
     }
 }
 
@@ -137,7 +150,9 @@ impl VoiceSession for Session {
         if result.is_ok() {
             let _ = emit(
                 &output,
-                json!({"type":"session_closed", "session_id":self.id}),
+                SessionEvent::SessionClosed {
+                    session_id: self.id,
+                },
             )
             .await;
         }
@@ -147,7 +162,7 @@ impl VoiceSession for Session {
 
 impl Session {
     async fn close_controls(&mut self) -> Result<()> {
-        let mut actions = self.hooks.event(false, json!({"type":"closing"}))?;
+        let mut actions = self.hooks.event(false, V1SessionEvent::Closing)?;
         if actions.is_empty() {
             return Ok(());
         }
@@ -178,8 +193,15 @@ impl Session {
                     let Ok(message) = serde_json::from_slice::<Value>(&payload) else {
                         continue;
                     };
-                    self.hooks
-                        .event(true, json!({"message":message,"topic":topic}))?
+                    self.hooks.event(
+                        true,
+                        TargetEvent {
+                            message,
+                            topic,
+                            caller_started: None,
+                            exchange_id: None,
+                        },
+                    )?
                 }
                 None | Some(RoomEvent::Disconnected { .. }) => return Ok(()),
                 _ => Vec::new(),
@@ -218,16 +240,29 @@ impl Session {
                         return Err(Error::Hook);
                     }
                     state.ready = true;
-                    emit(output, json!({"type":"session_ready", "session_id":self.id,
-                        "capabilities":{"caller_audio":true,"customer_audio":true,"response_end":true,"remote_interrupt":false},
-                        "external_session_id":self.external_session_id})).await?;
+                    emit(
+                        output,
+                        SessionEvent::SessionReady {
+                            session_id: self.id,
+                            capabilities: Capabilities::REQUIRED,
+                            external_session_id: self.external_session_id.clone(),
+                        },
+                    )
+                    .await?;
                 }
                 Action::UtteranceReady => {
                     if state.stream == 0 || state.utterance_ready {
                         return Err(Error::Hook);
                     }
                     state.utterance_ready = true;
-                    emit(output, json!({"type":"utterance_ready", "session_id":self.id,"stream_id":state.stream})).await?;
+                    emit(
+                        output,
+                        SessionEvent::UtteranceReady {
+                            session_id: self.id,
+                            stream_id: state.stream,
+                        },
+                    )
+                    .await?;
                 }
                 Action::CaptureStart => state.capturing = true,
                 Action::CaptureStop => state.capturing = false,
@@ -241,7 +276,9 @@ impl Session {
                     state.completion_deadline = None;
                 }
                 Action::Transcript { text } => state.transcript = Some(text),
-                Action::Error | Action::CloseReady => return Err(Error::Hook),
+                Action::Error | Action::CloseReady => {
+                    return Err(Error::Hook);
+                }
             }
         }
         Ok(())
@@ -320,7 +357,16 @@ impl Session {
         let started = Instant::now();
         let mut playback_tick = tokio::time::interval(Duration::from_millis(500));
         playback_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        let initial = self.hooks.event(false, json!({"type":"connected","session_id":self.id,"max_turns":self.max_turns,"parameters":self.config.parameters,"session_nonce":self.nonce,"playback_ticks":self.config.playback_ticks}))?;
+        let initial = self.hooks.event(
+            false,
+            V1SessionEvent::Connected {
+                session_id: self.id,
+                max_turns: self.max_turns,
+                parameters: self.config.parameters.clone(),
+                session_nonce: self.nonce.clone(),
+                playback_ticks: self.config.playback_ticks,
+            },
+        )?;
         self.actions(initial, &mut state, output).await?;
         loop {
             let end_at = state
@@ -331,7 +377,7 @@ impl Session {
                 .unwrap_or_else(|| Instant::now() + Duration::from_hours(1));
             tokio::select! {
                 _ = playback_tick.tick(), if self.config.playback_ticks && state.caller_playing => {
-                    let actions = self.hooks.event(false, json!({"type":"playback_tick","stream_id":state.stream}))?;
+                    let actions = self.hooks.event(false, V1SessionEvent::PlaybackTick { stream_id: state.stream })?;
                     self.actions(actions, &mut state, output).await?;
                 }
                 changed = caller_gate_rx.changed() => {
@@ -342,8 +388,13 @@ impl Session {
                 }
                 () = tokio::time::sleep_until(end_at), if state.end_at.is_some() => {
                     tracing::info!(session_id = self.id, stream_id = state.stream, samples = state.offset, elapsed_ms = started.elapsed().as_millis(), "voice_diag: emitting response_end after 200 ms drain");
-                    emit(output, json!({"type":"response_end","session_id":self.id,"stream_id":state.stream,
-                        "transcript":state.transcript,"samples":state.offset,"elapsed_ms":started.elapsed().as_millis()})).await?;
+                    emit(output, SessionEvent::ResponseEnd {
+                        session_id: self.id,
+                        stream_id: state.stream,
+                        transcript: state.transcript.clone(),
+                        samples: state.offset,
+                        elapsed_ms: started.elapsed().as_millis(),
+                    }).await?;
                     state.end_at = None;
                     state.capturing = false;
                 }
@@ -367,7 +418,10 @@ impl Session {
                             ..State::default()
                         };
                         text = original;
-                        let actions = self.hooks.event(false, json!({"type":"utterance_start","stream_id":stream_id,"text":text}))?;
+                        let actions = self.hooks.event(false, V1SessionEvent::UtteranceStart {
+                            stream_id,
+                            text: text.clone(),
+                        })?;
                         self.actions(actions, &mut state, output).await?;
                         playback_tick.reset();
                     }
@@ -395,32 +449,35 @@ impl Session {
                             && participant.as_ref().is_none_or(|p| p.identity().to_string() != *expected) { continue; }
                         let Ok(message) = serde_json::from_slice::<Value>(&payload) else { continue; };
                         // Only known event names and numeric IDs are safe to log.
-                        let event_type = message
-                            .get("type")
-                            .and_then(Value::as_str)
-                            .unwrap_or("<missing>");
+                        let event_type = provider_event(&message);
                         let top_level_keys = message
                             .as_object()
                             .into_iter()
                             .flat_map(serde_json::Map::keys)
                             .map(String::as_str)
                             .collect::<Vec<_>>();
-                        let event_id = ["/agent_response_complete_event/event_id", "/interruption_event/event_id", "/agent_response_event/event_id", "/event_id"]
-                            .iter().find_map(|path| message.pointer(path).and_then(Value::as_u64));
-                        tracing::info!(session_id = self.id, stream_id = state.stream, event_type, ?top_level_keys, event_id, caller_started = state.caller_started, elapsed_ms = started.elapsed().as_millis(), "voice_diag: provider event");
+                        let event_id = event_type.event_id().or_else(|| {
+                            message.pointer("/event_id").and_then(Value::as_u64)
+                        });
+                        tracing::info!(session_id = self.id, stream_id = state.stream, event_type = ?event_type, ?top_level_keys, event_id, caller_started = state.caller_started, elapsed_ms = started.elapsed().as_millis(), "voice_diag: provider event");
                         // Customer audio is delivered through the subscribed LiveKit
                         // track. ElevenLabs also emits base64 `audio` data events;
                         // they are redundant here and can exceed the Rhai hook input
                         // limits, so keep them out of the control script.
-                        if event_type == "audio" {
+                        if matches!(event_type, ProviderEvent::Audio) {
                             continue;
                         }
                         if !state.caller_started
-                            && matches!(message.get("type").and_then(Value::as_str), Some("agent_response" | "agent_response_complete"))
+                            && matches!(event_type, ProviderEvent::AgentResponse { .. } | ProviderEvent::AgentResponseComplete { .. })
                         {
                             continue;
                         }
-                        let actions = self.hooks.event(true, json!({"message":message,"topic":topic,"caller_started":state.caller_started}))?;
+                        let actions = self.hooks.event(true, TargetEvent {
+                            message,
+                            topic,
+                            caller_started: Some(state.caller_started),
+                            exchange_id: None,
+                        })?;
                         self.actions(actions, &mut state, output).await?;
                     }
                     RoomEvent::TrackSubscribed { track:RemoteTrack::Audio(track), participant, publication } => {
@@ -461,12 +518,22 @@ impl Session {
                 },
                 media = media_rx.recv() => match media.ok_or(Error::Transport)? {
                     Media::Failed => return Err(Error::TransportStage("media stream")),
-                    Media::Consumed => emit(output, json!({"type":"audio_consumed","session_id":self.id,"stream_id":state.stream})).await?,
+                    Media::Consumed => emit(output, SessionEvent::AudioConsumed {
+                        session_id: self.id,
+                        stream_id: state.stream,
+                    }).await?,
                     Media::Published => {
                         state.caller_playing = false;
                         tracing::info!(session_id = self.id, stream_id = state.stream, elapsed_ms = started.elapsed().as_millis(), "voice_diag: playback_complete");
-                        emit(output, json!({"type":"playback_complete","session_id":self.id,"stream_id":state.stream,"elapsed_ms":started.elapsed().as_millis()})).await?;
-                        let actions = self.hooks.event(false, json!({"type":"playback_complete","stream_id":state.stream,"text":text}))?;
+                        emit(output, SessionEvent::PlaybackComplete {
+                            session_id: self.id,
+                            stream_id: state.stream,
+                            elapsed_ms: started.elapsed().as_millis(),
+                        }).await?;
+                        let actions = self.hooks.event(false, V1SessionEvent::PlaybackComplete {
+                            stream_id: state.stream,
+                            text: text.clone(),
+                        })?;
                         self.actions(actions, &mut state, output).await?;
                     }
                     Media::Audio { pcm, generation } => {
@@ -478,7 +545,11 @@ impl Session {
                         ) { continue; }
                         if !state.started {
                             state.started = true;
-                            emit(output, json!({"type":"response_start","session_id":self.id,"stream_id":state.stream,"elapsed_ms":started.elapsed().as_millis()})).await?;
+                            emit(output, SessionEvent::ResponseStart {
+                                session_id: self.id,
+                                stream_id: state.stream,
+                                elapsed_ms: started.elapsed().as_millis(),
+                            }).await?;
                         }
                         if state.end_at.is_none() {
                             state.completion_deadline = Some(Instant::now() + state.completion_timeout);
@@ -486,12 +557,19 @@ impl Session {
                         let audio = Audio { header:AudioHeader { session_id:self.id, stream_id:state.stream, sequence:state.sequence, sample_offset:state.offset }, pcm };
                         state.sequence += 1;
                         state.offset += (audio.pcm.len()/2) as u64;
-                        output.send(Message::Binary(audio.encode()?.into())).await.map_err(|_| Error::Transport)?;
+                        output.send(WireOutput::Audio(audio)).await.map_err(|_| Error::Transport)?;
                     }
                 }
             }
         }
     }
+}
+
+async fn emit(output: &Output, event: SessionEvent) -> Result<()> {
+    output
+        .send(WireOutput::Event(event))
+        .await
+        .map_err(|_| Error::Transport)
 }
 
 fn native_frames(pcm: &[u8]) -> Vec<Vec<i16>> {

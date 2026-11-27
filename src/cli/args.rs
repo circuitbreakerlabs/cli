@@ -1,5 +1,5 @@
 use super::headers::Headers;
-#[cfg(text_targets)]
+#[cfg(eval_targets)]
 use crate::protocol_types::MultiPartyRerunEvalRequest;
 #[cfg(eval_targets)]
 use crate::protocol_types::SingleTurnRerunEvalRequest;
@@ -202,10 +202,9 @@ pub enum EvaluationCommand {
     },
 
     /// Run a multi-party pack evaluation with isolated conversations.
-    #[cfg(text_targets)]
     MultiParty {
         #[command(subcommand)]
-        provider: TextProviderCommand,
+        provider: ProviderCommand,
         #[command(flatten)]
         request: crate::protocol_types::multi_party::MultiPartyEvalRequest,
     },
@@ -229,10 +228,9 @@ pub enum EvaluationCommand {
 #[derive(Subcommand, Debug)]
 pub enum ReRunEvaluationCommand {
     /// Re-run historic multi-party conversations
-    #[cfg(text_targets)]
     MultiParty {
         #[command(subcommand)]
-        provider: TextProviderCommand,
+        provider: ProviderCommand,
         #[command(flatten)]
         request: MultiPartyRerunEvalRequest,
     },

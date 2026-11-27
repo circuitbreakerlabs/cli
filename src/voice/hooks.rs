@@ -1,9 +1,11 @@
 use super::{
     Error, Result,
-    config::{Config, read_secret, validate_url},
+    common_protocol::BootstrapMethod,
+    config::{BootstrapContext, Config, read_secret, validate_url},
+    multiparty_protocol::{DeliveryMode, ExchangeInput, LogicalParticipant},
 };
 use rhai::{AST, Dynamic, Engine, Scope};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, path::Path};
 
@@ -59,25 +61,25 @@ pub struct Connection {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct HttpRequest {
-    method: String,
+    method: BootstrapMethod,
     url: String,
     #[serde(default)]
     headers: BTreeMap<String, String>,
     body: Option<Value>,
 }
 
-pub async fn connect(config: &Config, context: Value) -> Result<Connection> {
+pub async fn connect<C>(config: &Config, context: C) -> Result<Connection>
+where
+    C: Serialize,
+{
+    let context = serde_json::to_value(context).map_err(|_| Error::Hook)?;
     let connection = if let Some(path) = &config.bootstrap_script {
         let script = Script::load(path)?;
         let request: HttpRequest =
             serde_json::from_value(script.call("build_connect_request", vec![context.clone()])?)
                 .map_err(|_| Error::Hook)?;
         validate_url(&request.url, &["https", "http"])?;
-        let method = match request.method.as_str() {
-            "GET" => reqwest::Method::GET,
-            "POST" => reqwest::Method::POST,
-            _ => return Err(Error::Configuration("bootstrap method must be GET or POST")),
-        };
+        let method = request.method.into();
         let client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .timeout(std::time::Duration::from_secs(30))
@@ -131,7 +133,7 @@ pub async fn connect(config: &Config, context: Value) -> Result<Connection> {
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-pub enum Action {
+pub enum V1Action {
     Send {
         message: Value,
         topic: Option<String>,
@@ -148,7 +150,7 @@ pub enum Action {
     Error,
 }
 
-impl Action {
+impl V1Action {
     pub fn diagnostic_name(&self) -> &'static str {
         match self {
             Self::Send { .. } => "send",
@@ -164,11 +166,48 @@ impl Action {
     }
 }
 
+pub use V1Action as Action;
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum V2Action {
+    Send {
+        message: Value,
+        topic: Option<String>,
+    },
+    SessionReady,
+    CloseReady,
+    ExchangeReady,
+    CaptureStart,
+    CaptureStop,
+    ResponseEnd,
+    Transcript {
+        text: String,
+    },
+    Error,
+}
+
+impl V2Action {
+    pub fn diagnostic_name(&self) -> &'static str {
+        match self {
+            Self::Send { .. } => "send",
+            Self::SessionReady => "session_ready",
+            Self::CloseReady => "close_ready",
+            Self::ExchangeReady => "exchange_ready",
+            Self::CaptureStart => "capture_start",
+            Self::CaptureStop => "capture_stop",
+            Self::ResponseEnd => "response_end",
+            Self::Transcript { .. } => "transcript",
+            Self::Error => "error",
+        }
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct HookOutput {
+struct HookOutput<A> {
     state: Value,
-    actions: Vec<Action>,
+    actions: Vec<A>,
 }
 
 pub struct Hooks {
@@ -182,7 +221,26 @@ impl Hooks {
             state: json!({}),
         })
     }
-    pub fn event(&mut self, target: bool, event: Value) -> Result<Vec<Action>> {
+    pub fn event<E>(&mut self, target: bool, event: E) -> Result<Vec<V1Action>>
+    where
+        E: Serialize,
+    {
+        self.run_event(target, event)
+    }
+
+    pub fn multiparty_event<E>(&mut self, target: bool, event: E) -> Result<Vec<V2Action>>
+    where
+        E: Serialize,
+    {
+        self.run_event(target, event)
+    }
+
+    fn run_event<E, A>(&mut self, target: bool, event: E) -> Result<Vec<A>>
+    where
+        E: Serialize,
+        A: DeserializeOwned,
+    {
+        let event = serde_json::to_value(event).map_err(|_| Error::Hook)?;
         let value = self.script.call(
             if target {
                 "on_target_event"
@@ -194,13 +252,145 @@ impl Hooks {
         if serde_json::to_vec(&value).map_err(|_| Error::Hook)?.len() > 65_536 {
             return Err(Error::Hook);
         }
-        let output: HookOutput = serde_json::from_value(value).map_err(|_| Error::Hook)?;
+        let output: HookOutput<A> = serde_json::from_value(value).map_err(|_| Error::Hook)?;
         if output.actions.len() > 32 {
             return Err(Error::Hook);
         }
         self.state = output.state;
         Ok(output.actions)
     }
+}
+
+#[derive(Clone, Serialize)]
+pub struct V1BootstrapContext {
+    #[serde(flatten)]
+    pub base: BootstrapContext,
+    pub session_nonce: String,
+}
+
+#[derive(Clone, Serialize)]
+pub struct V2BootstrapContext {
+    #[serde(flatten)]
+    pub base: BootstrapContext,
+    pub protocol_version: &'static str,
+    pub conversation_id: i32,
+    pub delivery_mode: DeliveryMode,
+    pub participants: Vec<LogicalParticipant>,
+    pub max_exchanges: u32,
+    pub session_nonce: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum V1SessionEvent {
+    Connected {
+        session_id: i32,
+        max_turns: u32,
+        parameters: BTreeMap<String, Value>,
+        session_nonce: String,
+        playback_ticks: bool,
+    },
+    Closing,
+    PlaybackTick {
+        stream_id: u64,
+    },
+    UtteranceStart {
+        stream_id: u64,
+        text: String,
+    },
+    PlaybackComplete {
+        stream_id: u64,
+        text: String,
+    },
+}
+
+#[derive(Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum V2SessionEvent {
+    Connected {
+        protocol_version: &'static str,
+        session_id: i32,
+        conversation_id: i32,
+        delivery_mode: DeliveryMode,
+        participants: Vec<LogicalParticipant>,
+        max_exchanges: u32,
+        parameters: BTreeMap<String, Value>,
+        session_nonce: String,
+        playback_ticks: bool,
+    },
+    Closing,
+    PlaybackTick {
+        exchange_id: u64,
+    },
+    ExchangeStart {
+        exchange_id: u64,
+        inputs: Vec<ExchangeInput>,
+    },
+    ExchangeEnd {
+        exchange_id: u64,
+        inputs: Vec<ExchangeInput>,
+    },
+    PlaybackComplete {
+        exchange_id: u64,
+        inputs: Vec<ExchangeInput>,
+    },
+}
+
+#[derive(Clone, Serialize)]
+pub struct TargetEvent {
+    pub message: Value,
+    pub topic: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caller_started: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exchange_id: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ProviderEvent {
+    Audio,
+    AgentResponse {
+        agent_response_event: Option<ProviderEventId>,
+    },
+    AgentResponseComplete {
+        agent_response_complete_event: Option<ProviderEventId>,
+    },
+    Interruption {
+        interruption_event: Option<ProviderEventId>,
+    },
+    Ping {
+        ping_event: Option<ProviderEventId>,
+    },
+    #[serde(other)]
+    Other,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+pub struct ProviderEventId {
+    pub event_id: Option<u64>,
+}
+
+impl ProviderEvent {
+    pub fn event_id(&self) -> Option<u64> {
+        match self {
+            Self::AgentResponse {
+                agent_response_event: event,
+            }
+            | Self::AgentResponseComplete {
+                agent_response_complete_event: event,
+            }
+            | Self::Interruption {
+                interruption_event: event,
+            }
+            | Self::Ping { ping_event: event } => event.as_ref().and_then(|event| event.event_id),
+            Self::Audio | Self::Other => None,
+        }
+    }
+}
+
+pub fn provider_event(value: &Value) -> ProviderEvent {
+    serde_json::from_value(value.clone()).unwrap_or(ProviderEvent::Other)
 }
 
 #[cfg(test)]
@@ -363,6 +553,75 @@ mod tests {
                 ));
             }
         }
+    }
+
+    #[test]
+    fn multiparty_example_uses_v2_exchange_actions() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/voice");
+        let config = Config::load(&root.join("elevenlabs-multiparty.toml")).unwrap();
+        let mut hooks = Hooks::new(&config).unwrap();
+        hooks
+            .multiparty_event(
+                false,
+                json!({
+                    "type":"connected",
+                    "playback_ticks":true,
+                    "participants":[
+                        {"id":"alice","display_name":"Alice","voice":"Aoede"},
+                        {"id":"bob","display_name":"Bob","voice":"Charon"}
+                    ]
+                }),
+            )
+            .unwrap();
+        assert!(matches!(
+            hooks
+                .multiparty_event(
+                    true,
+                    json!({"message":{"type":"conversation_initiation_metadata"}}),
+                )
+                .unwrap()
+                .as_slice(),
+            [V2Action::SessionReady]
+        ));
+        let actions = hooks
+            .multiparty_event(
+                false,
+                json!({
+                    "type":"exchange_start",
+                    "exchange_id":1,
+                    "inputs":[{"speaker_id":"alice","text":"hello"}]
+                }),
+            )
+            .unwrap();
+        assert!(matches!(
+            actions.as_slice(),
+            [
+                V2Action::Send { .. },
+                V2Action::CaptureStart,
+                V2Action::ExchangeReady
+            ]
+        ));
+        hooks
+            .multiparty_event(false, json!({"type":"playback_complete","exchange_id":1}))
+            .unwrap();
+        assert!(hooks
+            .multiparty_event(
+                true,
+                json!({"caller_started":true,"message":{"type":"agent_response","agent_response_event":{"agent_response":"reply"}}}),
+            )
+            .unwrap()
+            .iter()
+            .any(|action| matches!(action, V2Action::Transcript { .. })));
+        assert!(matches!(
+            hooks
+                .multiparty_event(
+                    true,
+                    json!({"caller_started":true,"message":{"type":"agent_response_complete"}}),
+                )
+                .unwrap()
+                .as_slice(),
+            [V2Action::ResponseEnd]
+        ));
     }
 
     #[test]

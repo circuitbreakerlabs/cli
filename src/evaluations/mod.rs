@@ -22,6 +22,8 @@ pub enum EvaluationType {
     MultiTurn,
     MultiParty,
     MultiPartyRerun,
+    MultiPartyVoice,
+    MultiPartyVoiceRerun,
     MultiTurnRerun,
 }
 
@@ -29,8 +31,13 @@ pub enum EvaluationType {
 impl From<&crate::cli::EvaluationCommand> for EvaluationType {
     fn from(cmd: &crate::cli::EvaluationCommand) -> Self {
         match cmd {
-            #[cfg(text_targets)]
-            crate::cli::EvaluationCommand::MultiParty { .. } => EvaluationType::MultiParty,
+            crate::cli::EvaluationCommand::MultiParty { provider, .. } => {
+                if provider.is_voice() {
+                    EvaluationType::MultiPartyVoice
+                } else {
+                    EvaluationType::MultiParty
+                }
+            }
             crate::cli::EvaluationCommand::SingleTurn { provider, .. } => {
                 if provider.is_voice() {
                     EvaluationType::SingleTurnVoice
@@ -46,9 +53,12 @@ impl From<&crate::cli::EvaluationCommand> for EvaluationType {
                 }
             }
             crate::cli::EvaluationCommand::ReRun { rerun } => match rerun {
-                #[cfg(text_targets)]
-                crate::cli::ReRunEvaluationCommand::MultiParty { .. } => {
-                    EvaluationType::MultiPartyRerun
+                crate::cli::ReRunEvaluationCommand::MultiParty { provider, .. } => {
+                    if provider.is_voice() {
+                        EvaluationType::MultiPartyVoiceRerun
+                    } else {
+                        EvaluationType::MultiPartyRerun
+                    }
                 }
                 crate::cli::ReRunEvaluationCommand::SingleTurn { provider, .. } => {
                     if provider.is_voice() {
@@ -131,6 +141,37 @@ mod routing_tests {
                 };
                 assert_eq!(endpoint, expected, "{argv:?}");
             }
+        }
+    }
+
+    #[cfg(feature = "livekit")]
+    #[test]
+    fn multiparty_livekit_uses_v2_voice_endpoints() {
+        for rerun in [false, true] {
+            let mut argv = vec!["cbl", "--cbl-api-key", "unused", "eval"];
+            if rerun {
+                argv.push("re-run");
+            }
+            argv.extend(["multi-party", "--threshold", "0.5", "--max-turns", "4"]);
+            if rerun {
+                argv.extend(["--evaluation-id", "123"]);
+            } else {
+                argv.extend(["--test-case-groups", "test"]);
+            }
+            argv.extend(["livekit", "--config", "unused.toml"]);
+            let parsed = Args::try_parse_from(&argv).unwrap();
+            let Some(Command::Eval { evaluation }) = parsed.command else {
+                panic!("expected evaluation");
+            };
+            let kind = EvaluationType::from(&evaluation);
+            assert_eq!(
+                crate::consts::endpoints::endpoint_from_evaluation_type(&kind),
+                if rerun {
+                    "/ws/multiparty_voice_rerun_evaluation"
+                } else {
+                    "/ws/multiparty_voice_evaluation"
+                }
+            );
         }
     }
 }

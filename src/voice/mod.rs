@@ -1,10 +1,15 @@
 //! Customer-configured voice sessions. Credentials stay in the local adapter.
+pub(crate) mod common_protocol;
 #[cfg(feature = "livekit")]
 mod config;
 #[cfg(feature = "livekit")]
 mod hooks;
 #[cfg(feature = "livekit")]
 mod livekit;
+#[cfg(feature = "livekit")]
+mod multiparty_livekit;
+pub mod multiparty_protocol;
+mod multiparty_runner;
 pub mod protocol;
 mod runner;
 mod session;
@@ -28,7 +33,7 @@ pub enum Error {
     #[error("Invalid voice protocol message")]
     Protocol,
     #[error("Voice evaluation failed: {0}")]
-    Remote(String),
+    Remote(common_protocol::VoiceErrorCode),
     #[error("Voice operation timed out")]
     Timeout,
     #[error("Voice evaluation cancelled")]
@@ -37,6 +42,8 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+#[cfg(feature = "livekit")]
+pub use multiparty_runner::run_multiparty;
 #[cfg(feature = "livekit")]
 pub use runner::{run, run_single};
 

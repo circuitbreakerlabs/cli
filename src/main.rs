@@ -123,6 +123,43 @@ async fn run_evaluation(
 ) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "livekit")]
     match evaluation {
+        cli::EvaluationCommand::MultiParty {
+            provider: cli::ProviderCommand::Livekit { config },
+            request,
+        } => {
+            let request: protocol_types::multi_party::MultiPartyEvaluationRequest = request.into();
+            let target = voice::prepare_livekit(&config, request.max_turns())
+                .map_err(|error| error.to_string())?;
+            return run_multi_party_voice_cli(
+                &cli_args.cbl_api_base_url,
+                &cli_args.cbl_api_key,
+                target,
+                request,
+                cli_args.log_mode,
+                cli_args.output_file,
+            )
+            .await;
+        }
+        cli::EvaluationCommand::ReRun {
+            rerun:
+                cli::ReRunEvaluationCommand::MultiParty {
+                    provider: cli::ProviderCommand::Livekit { config },
+                    request,
+                },
+        } => {
+            let request: protocol_types::multi_party::MultiPartyEvaluationRequest = request.into();
+            let target = voice::prepare_livekit(&config, request.max_turns())
+                .map_err(|error| error.to_string())?;
+            return run_multi_party_voice_cli(
+                &cli_args.cbl_api_base_url,
+                &cli_args.cbl_api_key,
+                target,
+                request,
+                cli_args.log_mode,
+                cli_args.output_file,
+            )
+            .await;
+        }
         cli::EvaluationCommand::ReRun {
             rerun:
                 cli::ReRunEvaluationCommand::SingleTurn {
@@ -201,12 +238,12 @@ async fn run_evaluation(
     {
         let headers = cli_args.headers();
         let provider_command = match &evaluation {
-            cli::EvaluationCommand::MultiParty { provider, .. } => provider,
-            cli::EvaluationCommand::SingleTurn { provider, .. }
+            cli::EvaluationCommand::MultiParty { provider, .. }
+            | cli::EvaluationCommand::SingleTurn { provider, .. }
             | cli::EvaluationCommand::MultiTurn { provider, .. } => provider.text(),
             cli::EvaluationCommand::ReRun { rerun } => match rerun {
-                cli::ReRunEvaluationCommand::MultiParty { provider, .. } => provider,
-                cli::ReRunEvaluationCommand::SingleTurn { provider, .. }
+                cli::ReRunEvaluationCommand::MultiParty { provider, .. }
+                | cli::ReRunEvaluationCommand::SingleTurn { provider, .. }
                 | cli::ReRunEvaluationCommand::MultiTurn { provider, .. } => provider.text(),
             },
         };
@@ -548,6 +585,67 @@ async fn run_voice_cli(
     });
     std::fs::write(&filename, json)?;
     print_success_message(log_mode, "multi-turn voice", &filename);
+    Ok(())
+}
+
+#[cfg(feature = "livekit")]
+async fn run_multi_party_voice_cli(
+    base_url: &str,
+    key: &str,
+    target: voice::PreparedTarget,
+    request: protocol_types::multi_party::MultiPartyEvaluationRequest,
+    log_mode: bool,
+    output: Option<PathBuf>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let groups = request.test_case_groups().map(<[_]>::to_vec);
+    let selector = request.rerun_selector();
+    let kind = if selector.is_some() {
+        evaluations::EvaluationType::MultiPartyVoiceRerun
+    } else {
+        evaluations::EvaluationType::MultiPartyVoice
+    };
+    let websocket = websockets::connect(base_url, kind, key).await?;
+    let (progress, render) = if log_mode {
+        (None, None)
+    } else {
+        let (tx, rx) = tokio::sync::mpsc::channel(128);
+        (
+            Some(tx),
+            Some(tokio::spawn(tui::multiparty::render_task(rx))),
+        )
+    };
+    let result = voice::run_multiparty(websocket, target, request, progress).await;
+    if let Some(render) = render {
+        let _ = render.await;
+    }
+    let result = result?;
+    let json = if let Some(selector) = selector {
+        serialize_rerun_evaluation_output(&result, &selector)?
+    } else {
+        serialize_evaluation_output(&result, &groups.unwrap_or_default())?
+    };
+    let filename = output.unwrap_or_else(|| {
+        PathBuf::from(format!(
+            "circuit_breaker_labs_multi_party_voice_evaluation_{}.json",
+            Local::now().format("%Y%m%d_%H%M%S")
+        ))
+    });
+    std::fs::write(&filename, json)?;
+    print_success_message(log_mode, "multi-party voice", &filename);
+    if log_mode {
+        println!(
+            "Passed: {}, failed: {}, errors: {}",
+            result.result.total_passed, result.result.total_failed, result.result.total_errors
+        );
+    }
+    print_update_warning_if_needed(log_mode).await;
+    if result.result.total_errors > 0 {
+        return Err(format!(
+            "{} multi-party voice conversation(s) failed",
+            result.result.total_errors
+        )
+        .into());
+    }
     Ok(())
 }
 

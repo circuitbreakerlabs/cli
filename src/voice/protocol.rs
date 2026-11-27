@@ -1,9 +1,18 @@
 //! Voice protocol v1. Audio is 24 kHz mono signed little-endian PCM16.
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::BTreeMap;
 
-use super::{Error, Result};
+use super::{
+    Error, Result,
+    common_protocol::{ProtocolVersion, SessionErrorCode, VoiceErrorCode, VoiceTarget},
+};
+use crate::protocol_types::{
+    common::{ConversationComplete, ConversationError},
+    multi_turn::{MultiTurnEvaluationStart, MultiTurnResponse},
+    single_turn::{IterationComplete, IterationStart, SingleTurnResponse},
+};
 
-pub const VERSION: &str = "1";
 pub const FRAME_BYTES: usize = 960;
 pub const QUEUE_FRAMES: usize = 100;
 pub const MAX_CONTROL_BYTES: usize = 65_536;
@@ -100,6 +109,206 @@ impl Command {
             | Self::SessionClose { session_id } => *session_id,
         }
     }
+
+    pub fn validate(&self) -> Result<()> {
+        match self {
+            Self::SessionOpen {
+                max_turns,
+                timeout_ms,
+                ..
+            } if *max_turns == 0 || *timeout_ms == 0 => Err(Error::Protocol),
+            Self::UtteranceStart {
+                timeout_ms, text, ..
+            } if *timeout_ms == 0 || text.len() > 65_536 => Err(Error::Protocol),
+            _ => Ok(()),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RequestEnvelope<T> {
+    pub version: ProtocolVersion,
+    #[serde(rename = "type")]
+    pub kind: RequestKind,
+    pub data: T,
+    pub target: VoiceTarget,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RequestKind {
+    VoiceRequest,
+    VoiceRerunRequest,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+#[allow(clippy::enum_variant_names)]
+pub enum EndpointEvent<R> {
+    VoiceReady {
+        version: ProtocolVersion,
+    },
+    VoiceError {
+        code: VoiceErrorCode,
+        #[serde(default)]
+        status: Option<u16>,
+    },
+    VoiceResult {
+        data: R,
+    },
+}
+
+impl<R> EndpointEvent<R> {
+    pub fn validate(&self) -> Result<()> {
+        if let Self::VoiceError {
+            status: Some(status),
+            ..
+        } = self
+            && !(100..600).contains(status)
+        {
+            return Err(Error::Protocol);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
+pub enum SingleTurnProgressEvent {
+    IterationStart(IterationStart),
+    IterationComplete(IterationComplete),
+    ConversationComplete(ConversationComplete),
+    ConversationError(ConversationError),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
+pub enum MultiTurnProgressEvent {
+    MultiTurnEvaluationStart(MultiTurnEvaluationStart),
+    ConversationComplete(ConversationComplete),
+    ConversationError(ConversationError),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum ServerMessage<R, P> {
+    Endpoint(EndpointEvent<R>),
+    Progress(P),
+    Command(Command),
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SessionEvent {
+    SessionReady {
+        session_id: i32,
+        capabilities: Capabilities,
+        external_session_id: Option<String>,
+    },
+    SessionError {
+        session_id: i32,
+        code: SessionErrorCode,
+    },
+    SessionClosed {
+        session_id: i32,
+    },
+    UtteranceReady {
+        session_id: i32,
+        stream_id: u64,
+    },
+    AudioConsumed {
+        session_id: i32,
+        stream_id: u64,
+    },
+    PlaybackComplete {
+        session_id: i32,
+        stream_id: u64,
+        elapsed_ms: u128,
+    },
+    ResponseStart {
+        session_id: i32,
+        stream_id: u64,
+        elapsed_ms: u128,
+    },
+    ResponseEnd {
+        session_id: i32,
+        stream_id: u64,
+        samples: u64,
+        transcript: Option<String>,
+        elapsed_ms: u128,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct Capabilities {
+    caller_audio: bool,
+    customer_audio: bool,
+    response_end: bool,
+    remote_interrupt: bool,
+}
+
+impl Capabilities {
+    pub const REQUIRED: Self = Self {
+        caller_audio: true,
+        customer_audio: true,
+        response_end: true,
+        remote_interrupt: false,
+    };
+}
+
+#[derive(Debug)]
+pub enum Output {
+    Event(SessionEvent),
+    Audio(Audio),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VoiceTurnMetadata {
+    pub turn_index: u64,
+    pub original_text: String,
+    pub tagged_text: String,
+    pub transcription: String,
+    pub tts_model: Option<String>,
+    pub stt_model: Option<String>,
+    pub tts_duration_seconds: f64,
+    pub response_duration_seconds: f64,
+    pub input_sample_rate: u32,
+    pub output_sample_rate: u32,
+    pub comparison_transcript: Option<String>,
+    pub caller_audio_path: Option<String>,
+    pub customer_audio_path: Option<String>,
+    #[serde(default)]
+    pub stage_timings: BTreeMap<String, f64>,
+    #[serde(default)]
+    pub transport_metadata: BTreeMap<String, Value>,
+    pub artifact_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SingleTurnVoiceMetadata {
+    #[serde(flatten)]
+    pub turn: VoiceTurnMetadata,
+    pub attempt_index: u64,
+    pub session_id: i32,
+    pub selected: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SingleTurnVoiceResponse {
+    #[serde(flatten)]
+    pub result: SingleTurnResponse,
+    pub target: VoiceTarget,
+    pub voice_metadata: BTreeMap<String, Vec<SingleTurnVoiceMetadata>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiTurnVoiceResponse {
+    #[serde(flatten)]
+    pub result: MultiTurnResponse,
+    pub target: VoiceTarget,
+    pub voice_metadata: BTreeMap<String, Vec<VoiceTurnMetadata>>,
 }
 
 #[derive(Debug)]
@@ -172,5 +381,34 @@ mod tests {
                 timeout_ms: 1000
             }
         ));
+    }
+
+    #[test]
+    fn v1_session_events_keep_the_legacy_wire_contract() {
+        let event = SessionEvent::SessionReady {
+            session_id: 17,
+            capabilities: Capabilities::REQUIRED,
+            external_session_id: Some("provider-session".into()),
+        };
+        assert_eq!(
+            serde_json::to_value(event).unwrap(),
+            serde_json::json!({
+                "type": "session_ready",
+                "session_id": 17,
+                "capabilities": {
+                    "caller_audio": true,
+                    "customer_audio": true,
+                    "response_end": true,
+                    "remote_interrupt": false
+                },
+                "external_session_id": "provider-session"
+            })
+        );
+        let playback_cancel: Command = serde_json::from_value(serde_json::json!({
+            "type": "playback_cancel",
+            "session_id": 17
+        }))
+        .unwrap();
+        assert!(matches!(playback_cancel, Command::PlaybackCancel { .. }));
     }
 }
